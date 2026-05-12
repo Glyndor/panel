@@ -3,9 +3,28 @@
   "editor.insertSpaces": false,
   "editor.detectIndentation": false,
   "editor.formatOnSave": true,
+  "editor.rulers": [120],
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": true,
+  "editor.codeActionsOnSave": {
+    "quickfix.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
   "files.eol": "\n",
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/target": true,
+    "**/.git": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/target": true,
+    "**/bun.lock": true
+  },
   "[typescript][typescriptreact][javascript][javascriptreact][css]": {
     "editor.defaultFormatter": "biomejs.biome"
   },
@@ -18,5 +37,7 @@
   },
   "[markdown]": {
     "files.trimTrailingWhitespace": false
-  }
+  },
+  "typescript.tsdk": "lynx/dashboard/ui/node_modules/typescript/lib",
+  "rust-analyzer.check.command": "clippy"
 }
