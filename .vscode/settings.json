@@ -39,5 +39,7 @@
     "files.trimTrailingWhitespace": false
   },
   "typescript.tsdk": "lynx/dashboard/ui/node_modules/typescript/lib",
+  "typescript.preferences.quoteStyle": "double",
+  "javascript.preferences.quoteStyle": "double",
   "rust-analyzer.check.command": "clippy"
 }
