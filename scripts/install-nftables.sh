@@ -50,23 +50,32 @@ install_nftables() {
     echo -e "${YELLOW}This port will be allowed through the firewall.${RESET}"
 
     # -----------------------------------------------------------------------------
-    # Base ruleset — allow SSH, drop everything else
+    # Base ruleset — applied atomically to avoid firewall gap
     # -----------------------------------------------------------------------------
     echo -e "${CYAN}Applying base nftables ruleset...${RESET}"
-    nft flush ruleset
-    nft add table inet filter
-    nft add chain inet filter input  '{ type filter hook input priority 0; policy drop; }'
-    nft add chain inet filter forward '{ type filter hook forward priority 0; policy drop; }'
-    nft add chain inet filter output '{ type filter hook output priority 0; policy accept; }'
 
-    # Allow established and related connections
-    nft add rule inet filter input ct state established,related accept
+    cat > /tmp/lynx-nftables.conf << EOF
+flush ruleset
 
-    # Allow loopback
-    nft add rule inet filter input iif lo accept
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        ct state established,related accept
+        iif lo accept
+        tcp dport $SSH_PORT accept
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+EOF
 
-    # Allow SSH on detected port
-    nft add rule inet filter input tcp dport "$SSH_PORT" accept
+    # Apply atomically — kernel loads all rules at once, no gap
+    nft -f /tmp/lynx-nftables.conf
+    rm -f /tmp/lynx-nftables.conf
 
     # Save ruleset
     nft list ruleset > /etc/nftables.conf
