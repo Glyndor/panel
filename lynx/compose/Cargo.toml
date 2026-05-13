@@ -5,11 +5,11 @@ edition = "2021"
 
 [[bin]]
 name = "lynx-compose"
-path = "src/main.rs"
+path = "internal/main.rs"
 
 [lib]
 name = "lynx_compose"
-path = "src/lib.rs"
+path = "internal/lib.rs"
 
 [dependencies]
 tokio = { workspace = true }
