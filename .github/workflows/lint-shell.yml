@@ -2,12 +2,13 @@ name: Lint shell scripts
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - "**.sh"
   pull_request:
     branches:
       - main
-      - develop
     paths:
       - "**.sh"
 
