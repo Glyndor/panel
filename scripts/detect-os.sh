@@ -13,7 +13,7 @@
 #   PKG_INSTALL   — install command
 #   PKG_REMOVE    — remove command
 #   PKG_PURGE     — purge command
-#   PKG_AUTOREMOVE— autoremove command
+#   PKG_AUTOREMOVE — autoremove command
 #   PKG_UPDATE    — update package index command
 #
 # Supported OS: Ubuntu, Debian, Raspbian, Fedora, CentOS, RHEL,

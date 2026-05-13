@@ -3,6 +3,7 @@
 # install-podman.sh
 # =============================================================================
 # Description: Installs Podman as the container runtime for Lynx.
+#              Configures registries, storage, logging (journald) and image policy.
 #              Enables the Podman socket for API compatibility.
 #
 # Dependencies:
@@ -94,7 +95,6 @@ EOF
     # Logging
     # -----------------------------------------------------------------------------
     echo -e "${CYAN}Configuring Podman logging...${RESET}"
-    mkdir -p /etc/containers
     cat > /etc/containers/containers.conf <<'EOF'
 # Lynx — Podman containers configuration
 # Logs go to journald so the Lynx dashboard can read them via systemd.
