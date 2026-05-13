@@ -44,7 +44,7 @@ install_nftables() {
     # -----------------------------------------------------------------------------
     # Detect SSH port
     # -----------------------------------------------------------------------------
-    SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+    SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
     SSH_PORT="${SSH_PORT:-22}"
     echo -e "${CYAN}Detected SSH port: ${BOLD}${SSH_PORT}${RESET}"
     echo -e "${YELLOW}This port will be allowed through the firewall.${RESET}"
@@ -81,7 +81,12 @@ EOF
     nft list ruleset > /etc/nftables.conf
 
     # Enable and start nftables
-    systemctl enable --now nftables
+    if [[ "$(cat /proc/1/comm 2>/dev/null)" == "systemd" ]]; then
+        systemctl enable --now nftables
+    else
+        echo -e "${YELLOW}Warning: systemd not running as PID 1. Skipping service activation.${RESET}"
+        echo -e "${YELLOW}Run after boot: systemctl enable --now nftables${RESET}"
+    fi
 
     # Verify installation
     if ! command -v nft &>/dev/null; then

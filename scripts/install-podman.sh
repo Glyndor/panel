@@ -42,7 +42,12 @@ install_podman() {
     fi
 
     # Enable and start Podman socket
-    systemctl enable --now podman.socket
+    if [[ "$(cat /proc/1/comm 2>/dev/null)" == "systemd" ]]; then
+        systemctl enable --now podman.socket
+    else
+        echo -e "${YELLOW}Warning: systemd not running as PID 1. Skipping socket activation.${RESET}"
+        echo -e "${YELLOW}Run after boot: systemctl enable --now podman.socket${RESET}"
+    fi
 
     # -----------------------------------------------------------------------------
     # Registries
