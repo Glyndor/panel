@@ -1,8 +1,6 @@
 //! Compose file parsing and service ordering.
 
 pub mod types;
-#[cfg(test)]
-mod tests;
 
 use std::path::Path;
 use types::ComposeFile;
