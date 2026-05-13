@@ -59,11 +59,61 @@ read -rp "Option [1/2] (default: 1): " OPTION
 OPTION="${OPTION:-1}"
 
 case "$OPTION" in
-    1)
-        echo -e "\n${GREEN}Starting Dashboard installation...${RESET}"
-        ;;
-    2)
-        echo -e "\n${GREEN}Starting Agent installation...${RESET}"
+    1|2)
+        if [[ "$OPTION" == "1" ]]; then
+            echo -e "\n${GREEN}Starting Dashboard installation...${RESET}"
+        else
+            echo -e "\n${GREEN}Starting Agent installation...${RESET}"
+        fi
+
+        echo
+        echo -e "${RED}${BOLD}IMPORTANT:${RESET} Before proceeding, make sure you have backed up:"
+        echo -e "  ${YELLOW}•${RESET} Docker volumes and container data"
+        echo -e "  ${YELLOW}•${RESET} Current firewall rules (ufw/iptables)"
+        echo -e "  ${YELLOW}•${RESET} Any other data you want to keep"
+        echo -e "${RED}Everything will be permanently deleted. We are not responsible for data loss.${RESET}"
+        echo
+        read -rp "I have made a backup and want to continue [y/N]: " BACKUP_CONFIRM
+        BACKUP_CONFIRM="${BACKUP_CONFIRM:-N}"
+
+        if [[ ! "$BACKUP_CONFIRM" =~ ^[yY]$ ]]; then
+            echo -e "${RED}Installation cancelled. Please make a backup first.${RESET}"
+            exit 0
+        fi
+
+        echo
+        echo -e "${YELLOW}${BOLD}WARNING:${RESET} This installer will make the following changes to your system:"
+        echo -e "  ${RED}✖${RESET} Remove Docker and all its components completely (including configs from all user home directories)"
+        echo -e "  ${RED}✖${RESET} Remove ufw and iptables completely"
+        echo -e "  ${GREEN}✔${RESET} Install Podman as container runtime"
+        echo -e "  ${GREEN}✔${RESET} Install nftables as firewall"
+        echo
+
+        read -rp "Do you want to proceed? [y/N]: " CONFIRM
+        CONFIRM="${CONFIRM:-N}"
+
+        if [[ ! "$CONFIRM" =~ ^[yY]$ ]]; then
+            echo -e "${RED}Installation cancelled.${RESET}"
+            exit 0
+        fi
+
+        source "$SCRIPT_DIR/scripts/remove-docker.sh"
+        source "$SCRIPT_DIR/scripts/remove-firewall.sh"
+        source "$SCRIPT_DIR/scripts/install-podman.sh"
+        source "$SCRIPT_DIR/scripts/install-nftables.sh"
+
+        remove_docker
+        remove_firewall
+        install_podman
+        install_nftables
+
+        if [[ "$OPTION" == "1" ]]; then
+            source "$SCRIPT_DIR/scripts/dashboard/install-dashboard.sh"
+            install_dashboard
+        else
+            source "$SCRIPT_DIR/scripts/agent/install-agent.sh"
+            install_agent
+        fi
         ;;
     *)
         echo -e "${RED}Invalid option. Exiting.${RESET}" >&2
