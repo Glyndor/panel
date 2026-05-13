@@ -69,9 +69,10 @@ case "$OPTION" in
         echo
         echo -e "${RED}${BOLD}IMPORTANT:${RESET} Before proceeding, make sure you have backed up:"
         echo -e "  ${YELLOW}•${RESET} Docker volumes and container data"
-        echo -e "  ${YELLOW}•${RESET} Current firewall rules (ufw/iptables)"
+        echo -e "  ${YELLOW}•${RESET} Current firewall rules (ufw/iptables/nftables)"
+        echo -e "  ${YELLOW}•${RESET} Existing Podman images, containers and volumes"
         echo -e "  ${YELLOW}•${RESET} Any other data you want to keep"
-        echo -e "${RED}Everything will be permanently deleted. We are not responsible for data loss.${RESET}"
+        echo -e "${RED}Everything will be permanently deleted or overwritten. We are not responsible for data loss.${RESET}"
         echo
         read -rp "I have made a backup and want to continue [y/N]: " BACKUP_CONFIRM
         BACKUP_CONFIRM="${BACKUP_CONFIRM:-N}"

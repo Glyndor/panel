@@ -42,6 +42,14 @@ install_nftables() {
     fi
 
     # -----------------------------------------------------------------------------
+    # Detect SSH port
+    # -----------------------------------------------------------------------------
+    SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+    SSH_PORT="${SSH_PORT:-22}"
+    echo -e "${CYAN}Detected SSH port: ${BOLD}${SSH_PORT}${RESET}"
+    echo -e "${YELLOW}This port will be allowed through the firewall.${RESET}"
+
+    # -----------------------------------------------------------------------------
     # Base ruleset — allow SSH, drop everything else
     # -----------------------------------------------------------------------------
     echo -e "${CYAN}Applying base nftables ruleset...${RESET}"
@@ -57,8 +65,8 @@ install_nftables() {
     # Allow loopback
     nft add rule inet filter input iif lo accept
 
-    # Allow SSH (port 22)
-    nft add rule inet filter input tcp dport 22 accept
+    # Allow SSH on detected port
+    nft add rule inet filter input tcp dport "$SSH_PORT" accept
 
     # Save ruleset
     nft list ruleset > /etc/nftables.conf
