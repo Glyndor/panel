@@ -1,0 +1,17 @@
+version: 2
+
+updates:
+  - package-ecosystem: "bun"
+    directory: "/lynx/dashboard/ui"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dashboard"
+    open-pull-requests-limit: 5
+    target-branch: "develop"
+    groups:
+      types:
+        patterns: ["@types/*"]
+      tailwind:
+        patterns: ["tailwindcss", "@tailwindcss/*"]
