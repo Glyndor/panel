@@ -41,7 +41,10 @@ install_nftables() {
         esac
     fi
 
-    # Apply base ruleset — allow SSH, drop everything else
+    # -----------------------------------------------------------------------------
+    # Base ruleset — allow SSH, drop everything else
+    # -----------------------------------------------------------------------------
+    echo -e "${CYAN}Applying base nftables ruleset...${RESET}"
     nft flush ruleset
     nft add table inet filter
     nft add chain inet filter input  '{ type filter hook input priority 0; policy drop; }'

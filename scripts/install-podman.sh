@@ -18,25 +18,25 @@ install_podman() {
     if command -v podman &>/dev/null; then
         EXISTING_VERSION=$(podman --version)
         echo -e "${YELLOW}Podman already installed: ${BOLD}${EXISTING_VERSION}${RESET}"
-        echo -e "${CYAN}Skipping installation, configuring registries...${RESET}"
+        echo -e "${CYAN}Skipping installation, applying Lynx configuration...${RESET}"
     else
         # Update package index
         eval "$PKG_UPDATE"
 
-    case "$PKG_MANAGER" in
-        apt-get)
-            $PKG_INSTALL podman
-            ;;
-        dnf)
-            $PKG_INSTALL podman
-            ;;
-        pacman)
-            $PKG_INSTALL podman
-            ;;
-        *)
-            echo -e "${RED}Error: unsupported package manager: ${PKG_MANAGER}${RESET}" >&2
-            exit 1
-            ;;
+        case "$PKG_MANAGER" in
+            apt-get)
+                $PKG_INSTALL podman
+                ;;
+            dnf)
+                $PKG_INSTALL podman
+                ;;
+            pacman)
+                $PKG_INSTALL podman
+                ;;
+            *)
+                echo -e "${RED}Error: unsupported package manager: ${PKG_MANAGER}${RESET}" >&2
+                exit 1
+                ;;
         esac
     fi
 
