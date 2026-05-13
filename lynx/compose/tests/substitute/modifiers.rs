@@ -132,3 +132,75 @@ fn yaml_default_in_string() {
         "image: myapp:latest"
     );
 }
+
+// ---------------------------------------------------------------------------
+// New: substitution in compose-style positions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn substitution_in_image_name() {
+    let v = vars(&[("VERSION", "1.2.3")]);
+    assert_eq!(
+        substitute("image: myapp:${VERSION:-dev}", &v).unwrap(),
+        "image: myapp:1.2.3"
+    );
+}
+
+#[test]
+fn substitution_in_volume_path() {
+    let v = vars(&[]);
+    assert_eq!(
+        substitute("- ${DATA_DIR:-./data}:/app/data", &v).unwrap(),
+        "- ./data:/app/data"
+    );
+}
+
+#[test]
+fn substitution_in_port() {
+    let v = vars(&[]);
+    assert_eq!(
+        substitute("- \"${HOST_PORT:-8080}:80\"", &v).unwrap(),
+        "- \"8080:80\""
+    );
+}
+
+#[test]
+fn empty_vs_unset_for_colon_dash() {
+    // :- treats both unset and empty as "use default"
+    assert_eq!(substitute("${V:-def}", &vars(&[])).unwrap(), "def");
+    assert_eq!(substitute("${V:-def}", &vars(&[("V", "")])).unwrap(), "def");
+}
+
+#[test]
+fn empty_vs_unset_for_dash() {
+    // - treats empty as "use the empty string" — different from :-
+    assert_eq!(substitute("${V-def}", &vars(&[])).unwrap(), "def");
+    assert_eq!(substitute("${V-def}", &vars(&[("V", "")])).unwrap(), "");
+}
+
+#[test]
+fn special_chars_in_default_with_spaces() {
+    assert_eq!(
+        substitute("${V:-hello world}", &vars(&[])).unwrap(),
+        "hello world"
+    );
+}
+
+#[test]
+fn special_chars_in_default_with_url() {
+    assert_eq!(
+        substitute("${V:-http://example.com}", &vars(&[])).unwrap(),
+        "http://example.com"
+    );
+}
+
+#[test]
+fn nested_like_two_subs_in_one_string() {
+    let v = vars(&[("V1", "hello"), ("V2", "world")]);
+    assert_eq!(substitute("${V1}_${V2}", &v).unwrap(), "hello_world");
+}
+
+#[test]
+fn trailing_dollar_preserved() {
+    assert_eq!(substitute("price: $", &vars(&[])).unwrap(), "price: $");
+}

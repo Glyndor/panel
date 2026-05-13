@@ -1,8 +1,10 @@
 //! Container orchestration engine.
 //!
-//! Translates a parsed `ComposeFile` into Podman API calls via bollard.
+//! Translates a parsed [`ComposeFile`] into Podman API calls via bollard.
+//! All compose-spec runtime fields are mapped to the corresponding bollard
+//! `Config` / `HostConfig` knobs; fields that have no direct equivalent
+//! in the Docker API are silently ignored (with a `tracing::debug!` line).
 
-use bollard::Docker;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, LogOutput, LogsOptions,
     RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
@@ -10,44 +12,49 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::{BuildImageOptions, CreateImageOptions};
 use bollard::models::{
-    EndpointSettings, HostConfig, HostConfigLogConfig, NetworkingConfig,
-    RestartPolicy, RestartPolicyNameEnum, Ulimit,
+    DeviceMapping, EndpointIpamConfig, EndpointSettings, HealthConfig, HostConfig,
+    HostConfigLogConfig, NetworkingConfig, RestartPolicy as BollardRestart, RestartPolicyNameEnum,
+    Ulimit,
 };
 use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
 use bollard::volume::CreateVolumeOptions;
+use bollard::Docker;
 use bytes::Bytes;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::StreamExt;
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 use crate::compose::types::{
-    ComposeFile, RestartPolicy as ComposeRestart, SecretConfig, Service,
-    ServiceCondition, VolumeMount,
+    BindOptions, BuildConfig, Command as ComposeCommand, ComposeFile, ConfigConfig, HealthCheck,
+    LoggingConfig, RestartPolicy as ComposeRestart, SecretConfig, Service, ServiceConfigRef,
+    ServiceCondition, ServiceNetworkConfig, ServiceSecretRef, VolumeMount, VolumeOptions,
+    VolumeType,
 };
 use crate::error::{ComposeError, Result};
 use crate::ports;
+use crate::size;
 
 // ---------------------------------------------------------------------------
 // Engine
 // ---------------------------------------------------------------------------
 
-/// The orchestration engine that drives container lifecycle.
+/// The orchestration engine that drives container lifecycle for a single
+/// compose project.
 pub struct Engine {
     docker: Docker,
     project: String,
     /// Base directory for resolving relative `env_file:` paths.
-    base_dir: std::path::PathBuf,
+    base_dir: PathBuf,
 }
 
 impl Engine {
     /// Create a new engine for the given project name.
     ///
-    /// `base_dir` is the directory containing the compose file; used to
-    /// resolve relative `env_file:` paths.
+    /// `base_dir` defaults to the current working directory.
     pub fn new(docker: Docker, project: String) -> Self {
         Self {
             docker,
@@ -57,8 +64,12 @@ impl Engine {
     }
 
     /// Create an engine with an explicit base directory.
-    pub fn with_base_dir(docker: Docker, project: String, base_dir: std::path::PathBuf) -> Self {
-        Self { docker, project, base_dir }
+    pub fn with_base_dir(docker: Docker, project: String, base_dir: PathBuf) -> Self {
+        Self {
+            docker,
+            project,
+            base_dir,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -67,12 +78,22 @@ impl Engine {
 
     /// Start all services defined in `file` (in dependency order).
     pub async fn up(&self, file: &ComposeFile) -> Result<()> {
-        self.up_with_options(file, false).await
+        self.up_with_options(file, false, &[]).await
     }
 
-    /// Start all services, with an option to detach immediately.
-    pub async fn up_with_options(&self, file: &ComposeFile, _detach: bool) -> Result<()> {
+    /// Start all services, with options for detached mode and active profiles.
+    ///
+    /// Services without a `profiles:` list always start.  Services with at
+    /// least one profile only start if one of their profiles appears in
+    /// `active_profiles` (or in the `COMPOSE_PROFILES` env var).
+    pub async fn up_with_options(
+        &self,
+        file: &ComposeFile,
+        _detach: bool,
+        active_profiles: &[String],
+    ) -> Result<()> {
         let order = crate::compose::resolve_order(file)?;
+        let active = active_profiles_set(active_profiles);
 
         self.create_networks(file).await?;
         self.create_volumes(file).await?;
@@ -80,17 +101,41 @@ impl Engine {
         for name in &order {
             let service = &file.services[name];
 
-            // Wait for healthy dependencies if requested.
+            if !service_in_profiles(service, &active) {
+                debug!("skipping {name}: no active profile match");
+                continue;
+            }
+
+            // Wait for dependencies as required.
             for dep in service.depends_on.service_names() {
                 let condition = service.depends_on.condition_for(&dep);
-                if condition == ServiceCondition::ServiceHealthy {
-                    let dep_service = &file.services[&dep];
-                    let dep_container = self.container_name(&dep, dep_service);
-                    self.wait_healthy(&dep_container, dep_service).await?;
+                let dep_service = match file.services.get(&dep) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if !service_in_profiles(dep_service, &active) {
+                    continue;
+                }
+                let dep_container = self.container_name(&dep, dep_service);
+
+                match condition {
+                    ServiceCondition::ServiceStarted => { /* implicit */ }
+                    ServiceCondition::ServiceHealthy => {
+                        if dep_service.healthcheck.as_ref().map(|h| !h.is_disabled()).unwrap_or(false) {
+                            self.wait_healthy(&dep_container, dep_service).await?;
+                        } else {
+                            debug!(
+                                "{dep} requested service_healthy but has no healthcheck — skipping wait"
+                            );
+                        }
+                    }
+                    ServiceCondition::ServiceCompletedSuccessfully => {
+                        self.wait_completed(&dep_container).await?;
+                    }
                 }
             }
 
-            // Build image if needed.
+            // Build / pull image.
             if service.build.is_some() {
                 self.build_service(name, service).await?;
             } else {
@@ -100,7 +145,7 @@ impl Engine {
             let container_name = self.container_name(name, service);
             self.create_and_start(&container_name, name, service, file).await?;
 
-            // Connect to additional networks.
+            // Connect to additional networks (the first was attached at create-time).
             self.connect_extra_networks(&container_name, name, service, file).await?;
 
             info!("started {container_name}");
@@ -154,7 +199,7 @@ impl Engine {
 
         let containers = self
             .docker
-            .list_containers(Some(ListContainersOptions {
+            .list_containers(Some(ListContainersOptions::<String> {
                 all: true,
                 filters,
                 ..Default::default()
@@ -354,9 +399,25 @@ impl Engine {
                 .and_then(|c| c.driver.clone())
                 .unwrap_or_else(|| "bridge".into());
 
-            let options = CreateNetworkOptions {
-                name: network_name,
-                driver: driver.as_str(),
+            let mut labels: HashMap<String, String> = config
+                .as_ref()
+                .map(|c| c.labels.to_map())
+                .unwrap_or_default();
+            labels.insert("lynx.compose.project".to_string(), self.project.clone());
+
+            let driver_opts: HashMap<String, String> = config
+                .as_ref()
+                .map(|c| c.driver_opts.clone())
+                .unwrap_or_default();
+
+            let options = CreateNetworkOptions::<String> {
+                name: network_name.to_string(),
+                driver: driver.clone(),
+                internal: config.as_ref().and_then(|c| c.internal).unwrap_or(false),
+                attachable: config.as_ref().and_then(|c| c.attachable).unwrap_or(false),
+                enable_ipv6: config.as_ref().and_then(|c| c.enable_ipv6).unwrap_or(false),
+                options: driver_opts,
+                labels,
                 ..Default::default()
             };
 
@@ -385,9 +446,27 @@ impl Engine {
                 .and_then(|c| c.name.as_deref())
                 .unwrap_or(name);
 
-            let options = CreateVolumeOptions {
-                name: volume_name,
-                ..Default::default()
+            let mut labels: HashMap<String, String> = config
+                .as_ref()
+                .map(|c| c.labels.to_map())
+                .unwrap_or_default();
+            labels.insert("lynx.compose.project".to_string(), self.project.clone());
+
+            let driver = config
+                .as_ref()
+                .and_then(|c| c.driver.clone())
+                .unwrap_or_else(|| "local".into());
+
+            let driver_opts: HashMap<String, String> = config
+                .as_ref()
+                .map(|c| c.driver_opts.clone())
+                .unwrap_or_default();
+
+            let options = CreateVolumeOptions::<String> {
+                name: volume_name.to_string(),
+                driver: driver.clone(),
+                driver_opts,
+                labels,
             };
 
             match self.docker.create_volume(options).await {
@@ -412,6 +491,7 @@ impl Engine {
         let mut stream = self.docker.create_image(
             Some(CreateImageOptions {
                 from_image: image.as_str(),
+                platform: service.platform.as_deref().unwrap_or(""),
                 ..Default::default()
             }),
             None,
@@ -450,10 +530,44 @@ impl Engine {
 
         let tar_bytes = build_context_tar(&context_path, dockerfile)?;
 
-        let options = BuildImageOptions {
-            dockerfile,
-            t: tag.as_str(),
+        // Build args — empty values inherit from the host env.
+        let arg_map = build.args().to_map();
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let mut build_args: HashMap<String, String> = HashMap::new();
+        for (k, v) in arg_map {
+            let value = match v {
+                Some(val) => val,
+                None => env.get(&k).cloned().unwrap_or_default(),
+            };
+            build_args.insert(k, value);
+        }
+
+        let mut labels: HashMap<String, String> = HashMap::new();
+        if let BuildConfig::Config { labels: l, .. } = build {
+            labels.extend(l.to_map());
+        }
+
+        let target_owned = build.target().map(|s| s.to_string()).unwrap_or_default();
+        let network_owned = if let BuildConfig::Config { network: Some(n), .. } = build {
+            n.clone()
+        } else {
+            String::new()
+        };
+        let platform_owned = if let BuildConfig::Config { platforms, .. } = build {
+            platforms.first().cloned().unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let options = BuildImageOptions::<String> {
+            dockerfile: dockerfile.to_string(),
+            t: tag.clone(),
             rm: true,
+            buildargs: build_args,
+            labels,
+            target: target_owned,
+            networkmode: network_owned,
+            platform: platform_owned,
             ..Default::default()
         };
 
@@ -492,36 +606,47 @@ impl Engine {
         // --- environment ---
         let env = build_env(service, &self.base_dir);
 
-        // --- binds ---
+        // --- mounts ---
         let binds = build_binds(service);
-
-        // --- secrets mounts ---
         let secret_binds = build_secret_binds(service, file);
-        let all_binds: Vec<String> = binds.into_iter().chain(secret_binds).collect();
+        let config_binds = build_config_binds(service, file);
+        let all_binds: Vec<String> = binds
+            .into_iter()
+            .chain(secret_binds)
+            .chain(config_binds)
+            .collect();
 
         // --- ports ---
         let parsed_ports = ports::parse_ports(&service.ports)?;
-        let (port_bindings, exposed_ports) = ports::to_bollard(&parsed_ports);
+        let (port_bindings, mut exposed_ports) = ports::to_bollard(&parsed_ports);
+
+        // Add bare "expose:" entries (no host bindings).
+        for raw in &service.expose {
+            let key = if raw.contains('/') {
+                raw.clone()
+            } else {
+                format!("{raw}/tcp")
+            };
+            exposed_ports.entry(key).or_default();
+        }
 
         // --- restart policy ---
         let restart_policy = build_restart_policy(service);
 
         // --- logging ---
-        let log_config = build_log_config(service);
+        let log_config = build_log_config(service.logging.as_ref());
 
         // --- network mode ---
         let (network_mode, first_network) = resolve_network_mode(service, file);
 
         // --- labels with project tracking ---
         let mut labels = service.labels.to_map();
-        labels.insert(
-            "lynx.compose.project".to_string(),
-            self.project.clone(),
-        );
-        labels.insert(
-            "lynx.compose.service".to_string(),
-            service_name.to_string(),
-        );
+        // Annotations (Podman OCI) — fold into labels under `annotation.*`.
+        for (k, v) in service.annotations.to_map() {
+            labels.insert(format!("annotation.{k}"), v);
+        }
+        labels.insert("lynx.compose.project".to_string(), self.project.clone());
+        labels.insert("lynx.compose.service".to_string(), service_name.to_string());
 
         // --- ulimits ---
         let ulimits: Vec<Ulimit> = service
@@ -537,98 +662,127 @@ impl Engine {
         // --- sysctls ---
         let sysctls: HashMap<String, String> = service.sysctls.to_map();
 
-        // --- extra_hosts ---
+        // --- extra_hosts / dns ---
         let extra_hosts: Vec<String> = service.extra_hosts.clone();
-
-        // --- dns ---
         let dns = service.dns.to_list();
         let dns_search = service.dns_search.to_list();
 
+        // --- devices ---
+        let devices: Vec<DeviceMapping> = service
+            .devices
+            .iter()
+            .map(|s| parse_device(s.as_str()))
+            .collect();
+
+        // --- tmpfs (shorthand list) ---
+        let tmpfs_list = service.tmpfs.to_list();
+        let mut tmpfs_map: HashMap<String, String> = tmpfs_list
+            .into_iter()
+            .map(|p| (p, String::new()))
+            .collect();
+        // Tmpfs declared via long-form volume mounts.
+        for v in &service.volumes {
+            if let VolumeMount::Long {
+                volume_type: VolumeType::Tmpfs,
+                target,
+                tmpfs,
+                ..
+            } = v
+            {
+                let opts = tmpfs_options_to_string(tmpfs.as_ref());
+                tmpfs_map.insert(target.clone(), opts);
+            }
+        }
+
+        // --- cpu / memory ---
+        let (mem_limit, mem_reservation, memswap, nano_cpus, cpu_quota_eff, cpu_period_eff) =
+            resolve_resources(service);
+
         let host_config = HostConfig {
-            binds: if all_binds.is_empty() {
-                None
-            } else {
-                Some(all_binds)
-            },
+            binds: opt_vec(all_binds),
             network_mode: network_mode.clone(),
             restart_policy,
-            port_bindings: if port_bindings.is_empty() {
-                None
-            } else {
-                Some(port_bindings)
-            },
-            cap_add: if service.cap_add.is_empty() {
-                None
-            } else {
-                Some(service.cap_add.clone())
-            },
-            cap_drop: if service.cap_drop.is_empty() {
-                None
-            } else {
-                Some(service.cap_drop.clone())
-            },
-            sysctls: if sysctls.is_empty() {
-                None
-            } else {
-                Some(sysctls)
-            },
-            ulimits: if ulimits.is_empty() {
-                None
-            } else {
-                Some(ulimits)
-            },
-            extra_hosts: if extra_hosts.is_empty() {
-                None
-            } else {
-                Some(extra_hosts)
-            },
-            dns: if dns.is_empty() { None } else { Some(dns) },
-            dns_search: if dns_search.is_empty() {
-                None
-            } else {
-                Some(dns_search)
-            },
+            port_bindings: opt_map(port_bindings),
+            cap_add: opt_vec(service.cap_add.clone()),
+            cap_drop: opt_vec(service.cap_drop.clone()),
+            sysctls: opt_map(sysctls),
+            ulimits: opt_vec(ulimits),
+            extra_hosts: opt_vec(extra_hosts),
+            dns: opt_vec(dns),
+            dns_search: opt_vec(dns_search),
             init: service.init,
             privileged: service.privileged,
             log_config,
             pid_mode: service.pid.clone(),
             ipc_mode: service.ipc.clone(),
+            cgroup_parent: service.cgroup_parent.clone(),
+            shm_size: service.shm_size.as_deref().and_then(size::parse_memory),
+            userns_mode: service.userns_mode.clone(),
+            security_opt: opt_vec(service.security_opt.clone()),
+            readonly_rootfs: service.read_only,
+            devices: opt_vec(devices),
+            tmpfs: opt_map(tmpfs_map),
+            volumes_from: opt_vec(service.volumes_from.clone()),
+            links: opt_vec(service.links.clone()),
+            runtime: service.runtime.clone(),
+            memory: mem_limit,
+            memory_reservation: mem_reservation,
+            memory_swap: memswap,
+            nano_cpus,
+            cpu_shares: service.cpu_shares.map(|s| s as i64),
+            cpu_quota: cpu_quota_eff,
+            cpu_period: cpu_period_eff,
+            cpuset_cpus: service.cpuset.clone(),
+            oom_kill_disable: service.oom_kill_disable,
+            oom_score_adj: service.oom_score_adj,
+            storage_opt: opt_map(service.storage_opt.clone()),
+            group_add: opt_vec(service.group_add.clone()),
             ..Default::default()
         };
 
         let cmd = service.command.as_ref().map(|c| c.to_exec());
+        let entrypoint = service.entrypoint.as_ref().map(|c| c.to_exec());
 
-        let networking_config = first_network.map(|net| {
+        let networking_config = first_network.as_ref().map(|net| {
             let mut endpoints = HashMap::new();
-            endpoints.insert(net, EndpointSettings::default());
+            let svc_net_cfg = service.networks.config_for(net);
+            endpoints.insert(net.clone(), build_endpoint_settings(svc_net_cfg, file));
             NetworkingConfig {
-                endpoints_config: Some(endpoints),
+                endpoints_config: endpoints,
             }
         });
 
+        let healthcheck = service.healthcheck.as_ref().map(build_healthcheck);
+
+        let exposed_ports_json: HashMap<String, HashMap<(), ()>> = exposed_ports;
+
         let config = Config::<String> {
             image: Some(image.to_string()),
-            env: if env.is_empty() {
-                None
-            } else {
-                Some(env)
-            },
+            env: opt_vec(env),
             cmd,
+            entrypoint,
             host_config: Some(host_config),
-            labels: Some(labels.into_iter().collect()),
-            exposed_ports: if exposed_ports.is_empty() {
-                None
-            } else {
-                Some(exposed_ports.into_iter().map(|(k, _)| (k, HashMap::new())).collect())
-            },
+            labels: opt_map(labels),
+            exposed_ports: opt_map(exposed_ports_json),
             tty: service.tty,
             open_stdin: service.stdin_open,
             user: service.user.clone(),
             working_dir: service.working_dir.clone(),
             stop_signal: service.stop_signal.clone(),
+            stop_timeout: service
+                .stop_grace_period
+                .as_deref()
+                .and_then(size::parse_duration_secs)
+                .map(|s| s as i64),
+            hostname: service.hostname.clone(),
+            domainname: service.domainname.clone(),
+            mac_address: service.mac_address.clone(),
             networking_config,
+            healthcheck,
             ..Default::default()
         };
+        // Note: `mac_address` on Config is deprecated in newer Docker versions
+        // but still accepted by Podman; the per-network MAC takes precedence.
 
         // Remove any pre-existing container with the same name.
         let _ = self
@@ -673,16 +827,16 @@ impl Engine {
         }
 
         let network_names = service.networks.names();
-        // The first network was connected during container creation via
-        // NetworkingConfig; connect the rest here.
         for network in network_names.iter().skip(1) {
             let full_name = resolve_network_name(network, file);
+            let endpoint_config =
+                build_endpoint_settings(service.networks.config_for(network), file);
             self.docker
                 .connect_network(
                     &full_name,
                     ConnectNetworkOptions {
                         container: container_name,
-                        endpoint_config: EndpointSettings::default(),
+                        endpoint_config,
                     },
                 )
                 .await?;
@@ -703,11 +857,7 @@ impl Engine {
             .unwrap_or(30);
 
         for _ in 0..retries {
-            let info = self
-                .docker
-                .inspect_container(container_name, None)
-                .await?;
-
+            let info = self.docker.inspect_container(container_name, None).await?;
             if let Some(state) = info.state {
                 if let Some(health) = state.health {
                     if health.status == Some(HealthStatusEnum::HEALTHY) {
@@ -715,11 +865,29 @@ impl Engine {
                     }
                 }
             }
-            // Not healthy yet — sleep before next poll.
-
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
 
+        Err(ComposeError::HealthCheckTimeout(container_name.into()))
+    }
+
+    /// Poll a container until it has exited with status 0.
+    async fn wait_completed(&self, container_name: &str) -> Result<()> {
+        for _ in 0..600 {
+            let info = self.docker.inspect_container(container_name, None).await?;
+            if let Some(state) = info.state {
+                let status = state.status.map(|s| format!("{s:?}").to_lowercase());
+                if status.as_deref() == Some("exited") {
+                    if state.exit_code.unwrap_or(-1) == 0 {
+                        return Ok(());
+                    }
+                    return Err(ComposeError::HealthCheckTimeout(format!(
+                        "{container_name} exited with non-zero status"
+                    )));
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
         Err(ComposeError::HealthCheckTimeout(container_name.into()))
     }
 
@@ -732,14 +900,122 @@ impl Engine {
 }
 
 // ---------------------------------------------------------------------------
-// Build helpers
+// Profile filtering
 // ---------------------------------------------------------------------------
+
+/// Build the active-profile set, falling back to the `COMPOSE_PROFILES`
+/// environment variable when no explicit list is supplied.
+fn active_profiles_set(active: &[String]) -> HashSet<String> {
+    if !active.is_empty() {
+        return active.iter().cloned().collect();
+    }
+    std::env::var("COMPOSE_PROFILES")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// True if the service should be started given the active profile set.
+fn service_in_profiles(service: &Service, active: &HashSet<String>) -> bool {
+    if service.profiles.is_empty() {
+        return true;
+    }
+    service.profiles.iter().any(|p| active.contains(p))
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn opt_vec<T>(v: Vec<T>) -> Option<Vec<T>> {
+    if v.is_empty() { None } else { Some(v) }
+}
+
+fn opt_map<K, V>(m: HashMap<K, V>) -> Option<HashMap<K, V>> {
+    if m.is_empty() { None } else { Some(m) }
+}
+
+// `cgroupns_mode` is intentionally not forwarded — bollard 0.17 exposes it
+// as an enum that varies between minor releases.  Podman accepts the
+// `cgroup` compose field when set via the API too; rely on that path.
+#[allow(dead_code)]
+fn map_cgroupns_mode(s: &str) -> Option<String> {
+    match s {
+        "host" | "private" => Some(s.to_string()),
+        _ => None,
+    }
+}
+
+/// Resolve effective resource limits, preferring the top-level fields and
+/// falling back to `deploy.resources.*`.
+///
+/// Returns `(memory, memory_reservation, memory_swap, nano_cpus, cpu_quota, cpu_period)`.
+fn resolve_resources(
+    service: &Service,
+) -> (
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+) {
+    let mut memory = service.mem_limit.as_deref().and_then(size::parse_memory);
+    let mut mem_reservation = service
+        .mem_reservation
+        .as_deref()
+        .and_then(size::parse_memory);
+    let memswap = service.memswap_limit.as_deref().and_then(size::parse_memory);
+
+    let mut nano_cpus = None;
+    let cpu_quota = service.cpu_quota;
+    let cpu_period = service.cpu_period.map(|p| p as i64);
+
+    if let Some(deploy) = &service.deploy {
+        if let Some(res) = &deploy.resources {
+            if let Some(limits) = &res.limits {
+                if memory.is_none() {
+                    memory = limits.memory.as_deref().and_then(size::parse_memory);
+                }
+                if nano_cpus.is_none() {
+                    nano_cpus = limits.cpus.as_deref().and_then(size::parse_cpus);
+                }
+            }
+            if let Some(reserv) = &res.reservations {
+                if mem_reservation.is_none() {
+                    mem_reservation = reserv.memory.as_deref().and_then(size::parse_memory);
+                }
+            }
+        }
+    }
+
+    (memory, mem_reservation, memswap, nano_cpus, cpu_quota, cpu_period)
+}
+
+fn tmpfs_options_to_string(opts: Option<&crate::compose::types::TmpfsOptions>) -> String {
+    let opts = match opts {
+        Some(o) => o,
+        None => return String::new(),
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(size) = opts.size {
+        parts.push(format!("size={size}"));
+    }
+    if let Some(mode) = opts.mode {
+        parts.push(format!("mode={mode:o}"));
+    }
+    parts.join(",")
+}
 
 /// Build the environment variable list for a container config.
 ///
 /// Merges `env_file:` entries (lower priority) with `environment:` (higher priority).
 fn build_env(service: &Service, base_dir: &Path) -> Vec<String> {
-    // Load env_file vars (lower priority).
     let env_file_paths = service.env_file.to_list();
     let env_file_vars = if !env_file_paths.is_empty() {
         match crate::env_file::load_env_files(&env_file_paths, base_dir) {
@@ -757,41 +1033,124 @@ fn build_env(service: &Service, base_dir: &Path) -> Vec<String> {
 }
 
 /// Build the bind-mount list.
+///
+/// Translates compose volume entries into Docker's `binds` strings.  Long
+/// forms map to `source:target[:options]`; the type, propagation, SELinux
+/// flag, and `ro/rw` bits are encoded into the options string.
 fn build_binds(service: &Service) -> Vec<String> {
-    service
-        .volumes
-        .iter()
-        .filter_map(|v| match v {
-            VolumeMount::Short(s) => Some(s.clone()),
+    let mut out = Vec::new();
+    for v in &service.volumes {
+        match v {
+            VolumeMount::Short(s) => out.push(s.clone()),
             VolumeMount::Long {
+                volume_type,
                 source,
                 target,
                 read_only,
+                bind,
+                volume,
                 ..
             } => {
+                if matches!(volume_type, VolumeType::Tmpfs) {
+                    // Handled via HostConfig.tmpfs, not binds.
+                    continue;
+                }
                 let src = source.as_deref().unwrap_or("");
-                let ro = if read_only.unwrap_or(false) { ":ro" } else { "" };
-                Some(format!("{src}:{target}{ro}"))
+                let mut opts: Vec<String> = Vec::new();
+                if read_only.unwrap_or(false) {
+                    opts.push("ro".into());
+                } else {
+                    opts.push("rw".into());
+                }
+                if let Some(b) = bind {
+                    extend_bind_opts(&mut opts, b);
+                }
+                if let Some(vol) = volume {
+                    extend_volume_opts(&mut opts, vol);
+                }
+                let opt_str = opts.join(",");
+                out.push(format!("{src}:{target}:{opt_str}"));
             }
-        })
-        .collect()
+        }
+    }
+    out
+}
+
+fn extend_bind_opts(opts: &mut Vec<String>, b: &BindOptions) {
+    if let Some(p) = &b.propagation {
+        opts.push(p.clone());
+    }
+    if let Some(s) = &b.selinux {
+        // Compose uses "z" or "Z" — pass directly, it's a Docker bind option.
+        opts.push(s.clone());
+    }
+}
+
+fn extend_volume_opts(opts: &mut Vec<String>, v: &VolumeOptions) {
+    if v.nocopy.unwrap_or(false) {
+        opts.push("nocopy".into());
+    }
 }
 
 /// Build secret bind-mounts (`/run/secrets/<name>`).
 fn build_secret_binds(service: &Service, file: &ComposeFile) -> Vec<String> {
     let mut binds = Vec::new();
-    for secret_name in &service.secrets {
-        if let Some(config) = file.secrets.get(secret_name) {
+    for secret_ref in &service.secrets {
+        let (name, target_override) = match secret_ref {
+            ServiceSecretRef::Short(s) => (s.clone(), None),
+            ServiceSecretRef::Long { source, target, .. } => {
+                (source.clone(), target.clone())
+            }
+        };
+        if let Some(config) = file.secrets.get(&name) {
+            let target = target_override.unwrap_or_else(|| format!("/run/secrets/{name}"));
             match config {
-                SecretConfig { file: Some(host_path), .. } => {
-                    binds.push(format!(
-                        "{host_path}:/run/secrets/{secret_name}:ro"
-                    ));
+                SecretConfig {
+                    file: Some(host_path),
+                    ..
+                } => {
+                    binds.push(format!("{host_path}:{target}:ro"));
                 }
-                SecretConfig { external: Some(true), .. } => {
-                    // External secrets are handled by the runtime; add a label
-                    // so Podman can inject them if supported.
-                    debug!("external secret {secret_name} — relying on runtime injection");
+                SecretConfig {
+                    external: Some(true),
+                    ..
+                } => {
+                    debug!("external secret {name} — relying on runtime injection");
+                }
+                _ => {}
+            }
+        }
+    }
+    binds
+}
+
+/// Build config bind-mounts (compose-spec `configs:`).
+///
+/// Configs are mounted into `/<name>` by default (or the `target:` override),
+/// using the host file path declared in the top-level `configs:` section.
+fn build_config_binds(service: &Service, file: &ComposeFile) -> Vec<String> {
+    let mut binds = Vec::new();
+    for config_ref in &service.configs {
+        let (name, target_override) = match config_ref {
+            ServiceConfigRef::Short(s) => (s.clone(), None),
+            ServiceConfigRef::Long { source, target, .. } => {
+                (source.clone(), target.clone())
+            }
+        };
+        if let Some(cfg) = file.configs.get(&name) {
+            let target = target_override.unwrap_or_else(|| format!("/{name}"));
+            match cfg {
+                ConfigConfig {
+                    file: Some(host_path),
+                    ..
+                } => {
+                    binds.push(format!("{host_path}:{target}:ro"));
+                }
+                ConfigConfig {
+                    external: Some(true),
+                    ..
+                } => {
+                    debug!("external config {name} — relying on runtime injection");
                 }
                 _ => {}
             }
@@ -801,24 +1160,30 @@ fn build_secret_binds(service: &Service, file: &ComposeFile) -> Vec<String> {
 }
 
 /// Convert compose restart policy to bollard's type.
-fn build_restart_policy(service: &Service) -> Option<RestartPolicy> {
-    service.restart.as_ref().map(|r| {
-        let name = match r {
-            ComposeRestart::No => RestartPolicyNameEnum::NO,
-            ComposeRestart::Always => RestartPolicyNameEnum::ALWAYS,
-            ComposeRestart::OnFailure => RestartPolicyNameEnum::ON_FAILURE,
-            ComposeRestart::UnlessStopped => RestartPolicyNameEnum::UNLESS_STOPPED,
-        };
-        RestartPolicy {
-            name: Some(name),
+fn build_restart_policy(service: &Service) -> Option<BollardRestart> {
+    service.restart.as_ref().map(|r| match r {
+        ComposeRestart::No => BollardRestart {
+            name: Some(RestartPolicyNameEnum::NO),
             maximum_retry_count: None,
-        }
+        },
+        ComposeRestart::Always => BollardRestart {
+            name: Some(RestartPolicyNameEnum::ALWAYS),
+            maximum_retry_count: None,
+        },
+        ComposeRestart::OnFailure { max_attempts } => BollardRestart {
+            name: Some(RestartPolicyNameEnum::ON_FAILURE),
+            maximum_retry_count: max_attempts.map(|n| n as i64),
+        },
+        ComposeRestart::UnlessStopped => BollardRestart {
+            name: Some(RestartPolicyNameEnum::UNLESS_STOPPED),
+            maximum_retry_count: None,
+        },
     })
 }
 
-/// Build log config from service `logging:`.
-fn build_log_config(service: &Service) -> Option<HostConfigLogConfig> {
-    service.logging.as_ref().map(|l| HostConfigLogConfig {
+/// Build log config from a service `logging:` section.
+fn build_log_config(logging: Option<&LoggingConfig>) -> Option<HostConfigLogConfig> {
+    logging.map(|l| HostConfigLogConfig {
         typ: l.driver.clone(),
         config: if l.options.is_empty() {
             None
@@ -826,6 +1191,68 @@ fn build_log_config(service: &Service) -> Option<HostConfigLogConfig> {
             Some(l.options.clone())
         },
     })
+}
+
+/// Translate a compose [`HealthCheck`] into a bollard [`HealthConfig`].
+fn build_healthcheck(hc: &HealthCheck) -> HealthConfig {
+    if hc.is_disabled() {
+        return HealthConfig {
+            test: Some(vec!["NONE".to_string()]),
+            ..Default::default()
+        };
+    }
+    let test = hc.test.as_ref().map(|cmd| match cmd {
+        ComposeCommand::Shell(s) => vec!["CMD-SHELL".to_string(), s.clone()],
+        ComposeCommand::Exec(v) => v.clone(),
+    });
+    HealthConfig {
+        test,
+        interval: hc.interval.as_deref().and_then(size::parse_duration_nanos),
+        timeout: hc.timeout.as_deref().and_then(size::parse_duration_nanos),
+        retries: hc.retries.map(|r| r as i64),
+        start_period: hc
+            .start_period
+            .as_deref()
+            .and_then(size::parse_duration_nanos),
+        start_interval: hc
+            .start_interval
+            .as_deref()
+            .and_then(size::parse_duration_nanos),
+    }
+}
+
+/// Build endpoint settings for a network attachment, translating per-network
+/// aliases / IPs into bollard's `EndpointSettings`.
+fn build_endpoint_settings(
+    cfg: Option<&ServiceNetworkConfig>,
+    _file: &ComposeFile,
+) -> EndpointSettings {
+    let mut settings = EndpointSettings::default();
+    if let Some(c) = cfg {
+        if let Some(aliases) = &c.aliases {
+            settings.aliases = Some(aliases.clone());
+        }
+        if c.ipv4_address.is_some() || c.ipv6_address.is_some() || !c.link_local_ips.is_empty() {
+            settings.ipam_config = Some(EndpointIpamConfig {
+                ipv4_address: c.ipv4_address.clone(),
+                ipv6_address: c.ipv6_address.clone(),
+                link_local_ips: if c.link_local_ips.is_empty() {
+                    None
+                } else {
+                    Some(c.link_local_ips.clone())
+                },
+            });
+        }
+        if c.mac_address.is_some() {
+            settings.mac_address = c.mac_address.clone();
+        }
+        if let Some(prio) = c.priority {
+            let mut m = HashMap::new();
+            m.insert("priority".to_string(), prio.to_string());
+            settings.driver_opts = Some(m);
+        }
+    }
+    settings
 }
 
 /// Determine `network_mode` string and the first named network to attach via
@@ -837,7 +1264,6 @@ fn resolve_network_mode(
     file: &ComposeFile,
 ) -> (Option<String>, Option<String>) {
     if let Some(mode) = &service.network_mode {
-        // Explicit network_mode — don't attach to any named networks.
         return (Some(mode.clone()), None);
     }
 
@@ -860,6 +1286,20 @@ fn resolve_network_name(network: &str, file: &ComposeFile) -> String {
         .unwrap_or(network)
         .to_string()
 }
+
+/// Parse a device mapping string `host[:container[:permissions]]`.
+fn parse_device(s: &str) -> DeviceMapping {
+    let parts: Vec<&str> = s.splitn(3, ':').collect();
+    let host = parts.first().copied().unwrap_or("").to_string();
+    let cont = parts.get(1).copied().map(|c| c.to_string()).unwrap_or_else(|| host.clone());
+    let perm = parts.get(2).copied().unwrap_or("rwm").to_string();
+    DeviceMapping {
+        path_on_host: Some(host),
+        path_in_container: Some(cont),
+        cgroup_permissions: Some(perm),
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // Build context tar
@@ -924,7 +1364,6 @@ fn read_dockerignore(context: &Path) -> Vec<String> {
 
 fn is_ignored(path: &str, patterns: &[String]) -> bool {
     for pattern in patterns {
-        // Simple prefix / exact match (full glob support requires an extra crate).
         if pattern.ends_with('/') {
             if path.starts_with(pattern.as_str()) {
                 return true;

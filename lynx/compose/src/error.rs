@@ -35,6 +35,12 @@ pub enum ComposeError {
 
     #[error("build error: {0}")]
     Build(String),
+
+    #[error("extends error: {0}")]
+    Extends(String),
+
+    #[error("include error: {0}")]
+    Include(String),
 }
 
 pub type Result<T> = std::result::Result<T, ComposeError>;

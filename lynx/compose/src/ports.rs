@@ -3,8 +3,8 @@
 //! Handles all docker-compose port format variants and converts them to
 //! bollard's `PortBinding` structures.
 
-use std::collections::HashMap;
 use bollard::models::PortBinding;
+use std::collections::HashMap;
 
 use crate::compose::types::{PortMapping, StringOrU16};
 use crate::error::{ComposeError, Result};
@@ -14,11 +14,11 @@ use crate::error::{ComposeError, Result};
 pub struct ParsedPort {
     /// Container port number.
     pub container_port: u16,
-    /// Protocol (`tcp` or `udp`).
+    /// Protocol (`tcp`, `udp`, `sctp`).
     pub protocol: String,
     /// Host IP (may be empty to mean all interfaces).
     pub host_ip: String,
-    /// Host port (`None` means random / ephemeral).
+    /// Host port (`None` means random / ephemeral; `Some(0)` means runtime-assigned).
     pub host_port: Option<u16>,
 }
 
@@ -33,7 +33,8 @@ pub fn parse_ports(ports: &[PortMapping]) -> Result<Vec<ParsedPort>> {
 
 /// Convert parsed ports into bollard's `PortBindings` and `ExposedPorts` maps.
 ///
-/// Returns `(port_bindings, exposed_ports)`.
+/// Returns `(port_bindings, exposed_ports)`.  Port 0 is encoded as an empty
+/// host_port string per the Docker API convention for "auto-assign".
 pub fn to_bollard(
     ports: &[ParsedPort],
 ) -> (
@@ -50,7 +51,11 @@ pub fn to_bollard(
         } else {
             p.host_ip.clone()
         };
-        let host_port = p.host_port.map(|p| p.to_string());
+        let host_port = match p.host_port {
+            Some(0) => Some(String::new()),
+            Some(n) => Some(n.to_string()),
+            None => None,
+        };
         let binding = PortBinding {
             host_ip: Some(host_ip),
             host_port,
@@ -79,6 +84,7 @@ fn parse_one(mapping: &PortMapping) -> Result<Vec<ParsedPort>> {
             published,
             protocol,
             host_ip,
+            ..
         } => {
             let proto = protocol.clone().unwrap_or_else(|| "tcp".into());
             let hip = host_ip.clone().unwrap_or_default();
@@ -103,7 +109,7 @@ fn parse_one(mapping: &PortMapping) -> Result<Vec<ParsedPort>> {
 /// - `container/proto`
 /// - `host:container`
 /// - `host:container/proto`
-/// - `ip:host:container`
+/// - `ip:host:container` (ip may be IPv4 or `[ipv6]`)
 /// - `ip:host:container/proto`
 /// - `host_start-host_end:container_start-container_end`
 fn parse_short(s: &str) -> Result<Vec<ParsedPort>> {
@@ -113,6 +119,17 @@ fn parse_short(s: &str) -> Result<Vec<ParsedPort>> {
     } else {
         (s, "tcp".to_string())
     };
+
+    // IPv6 form: `[::1]:host:container` or `[::1]:container`.
+    if let Some(rest) = rest.strip_prefix('[') {
+        let close = rest
+            .find(']')
+            .ok_or_else(|| ComposeError::InvalidPort(format!("unclosed `[` in {s}")))?;
+        let ip = &rest[..close];
+        let after = &rest[close + 1..];
+        let after = after.strip_prefix(':').unwrap_or(after);
+        return parse_with_ip(ip, after, &proto, s);
+    }
 
     // Count colons to determine format.
     let colon_count = rest.chars().filter(|&c| c == ':').count();
@@ -133,7 +150,6 @@ fn parse_short(s: &str) -> Result<Vec<ParsedPort>> {
         }
         1 => {
             let (left, right) = split_last_colon(rest);
-            // left = host_port (or range), right = container_port (or range)
             let host_ports = expand_port_range(left)?;
             let container_ports = expand_port_range(right)?;
             if host_ports.len() != container_ports.len() && host_ports.len() != 1 {
@@ -153,31 +169,45 @@ fn parse_short(s: &str) -> Result<Vec<ParsedPort>> {
                 .collect())
         }
         _ => {
-            // ip:host:container or ip:host_range:container_range
-            // Split into at most 3 parts from left.
             let parts: Vec<&str> = rest.splitn(3, ':').collect();
             if parts.len() < 3 {
                 return Err(ComposeError::InvalidPort(format!("invalid port spec: {s}")));
             }
-            let ip = parts[0];
-            let host_ports = expand_port_range(parts[1])?;
-            let container_ports = expand_port_range(parts[2])?;
-            if host_ports.len() != container_ports.len() && host_ports.len() != 1 {
-                return Err(ComposeError::InvalidPort(format!(
-                    "port range mismatch: {s}"
-                )));
-            }
-            Ok(host_ports
-                .into_iter()
-                .zip(container_ports.into_iter())
-                .map(|(hp, cp)| ParsedPort {
-                    container_port: cp,
-                    protocol: proto.clone(),
-                    host_ip: ip.to_string(),
-                    host_port: Some(hp),
-                })
-                .collect())
+            parse_with_ip(parts[0], &format!("{}:{}", parts[1], parts[2]), &proto, s)
         }
+    }
+}
+
+/// Parse the `host[:container]` portion when an explicit IP prefix is present.
+fn parse_with_ip(ip: &str, after: &str, proto: &str, full: &str) -> Result<Vec<ParsedPort>> {
+    if let Some((left, right)) = after.split_once(':') {
+        let host_ports = expand_port_range(left)?;
+        let container_ports = expand_port_range(right)?;
+        if host_ports.len() != container_ports.len() && host_ports.len() != 1 {
+            return Err(ComposeError::InvalidPort(format!(
+                "port range mismatch: {full}"
+            )));
+        }
+        Ok(host_ports
+            .into_iter()
+            .zip(container_ports.into_iter())
+            .map(|(hp, cp)| ParsedPort {
+                container_port: cp,
+                protocol: proto.to_string(),
+                host_ip: ip.to_string(),
+                host_port: Some(hp),
+            })
+            .collect())
+    } else {
+        let cp: u16 = after
+            .parse()
+            .map_err(|_| ComposeError::InvalidPort(format!("bad port: {full}")))?;
+        Ok(vec![ParsedPort {
+            container_port: cp,
+            protocol: proto.to_string(),
+            host_ip: ip.to_string(),
+            host_port: None,
+        }])
     }
 }
 
@@ -213,4 +243,3 @@ fn expand_port_range(s: &str) -> Result<Vec<u16>> {
         Ok(vec![p])
     }
 }
-

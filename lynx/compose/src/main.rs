@@ -23,6 +23,10 @@ struct Cli {
     #[arg(long, env = "PODMAN_SOCKET")]
     socket: Option<String>,
 
+    /// Active profiles (comma-separated).  May also be set via `COMPOSE_PROFILES`.
+    #[arg(long, value_delimiter = ',', global = true)]
+    profile: Vec<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -66,6 +70,8 @@ enum Commands {
         /// Only restart this service.
         service: Option<String>,
     },
+    /// Print the resolved compose file (after substitution / extends / include).
+    Config,
 }
 
 #[tokio::main]
@@ -77,6 +83,14 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let file = lynx_compose::parse_file(&cli.file)?;
+
+    // The `config` command does not need a Podman connection.
+    if matches!(cli.command, Commands::Config) {
+        let yaml = serde_yaml::to_string(&file)?;
+        println!("{yaml}");
+        return Ok(());
+    }
+
     let docker = lynx_compose::podman::connect(cli.socket.as_deref())?;
     let base_dir = cli
         .file
@@ -86,7 +100,11 @@ async fn main() -> anyhow::Result<()> {
     let engine = lynx_compose::Engine::with_base_dir(docker, cli.project, base_dir);
 
     match cli.command {
-        Commands::Up { detach } => engine.up_with_options(&file, detach).await?,
+        Commands::Up { detach } => {
+            engine
+                .up_with_options(&file, detach, &cli.profile)
+                .await?
+        }
         Commands::Down { volumes } => engine.down_with_options(&file, volumes).await?,
         Commands::Ps => engine.ps(&file).await?,
         Commands::Logs { service, follow } => {
@@ -95,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Exec { service, cmd } => engine.exec(&file, &service, cmd).await?,
         Commands::Pull => engine.pull(&file).await?,
         Commands::Restart { service } => engine.restart(&file, service.as_deref()).await?,
+        Commands::Config => unreachable!("handled above"),
     }
 
     Ok(())

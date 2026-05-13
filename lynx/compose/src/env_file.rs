@@ -6,13 +6,15 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::error::Result;
+use crate::error::{ComposeError, Result};
 
 /// Load all `env_file` paths relative to `base_dir`.
 ///
 /// Returns a merged map.  If the same key appears in multiple files, the
 /// first file wins (earlier entries in the list have higher priority).
 /// `env_file:` never overrides service-level `environment:`.
+///
+/// Returns [`ComposeError::FileNotFound`] when an env file does not exist.
 pub fn load_env_files(paths: &[String], base_dir: &Path) -> Result<HashMap<String, String>> {
     let mut result: HashMap<String, String> = HashMap::new();
 
@@ -20,8 +22,11 @@ pub fn load_env_files(paths: &[String], base_dir: &Path) -> Result<HashMap<Strin
         let abs = base_dir.join(rel);
         let content = match std::fs::read_to_string(&abs) {
             Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ComposeError::FileNotFound(abs.display().to_string()));
+            }
             Err(e) => {
-                return Err(crate::error::ComposeError::Io(e));
+                return Err(ComposeError::Io(e));
             }
         };
 
@@ -77,4 +82,3 @@ pub fn merge_env(
         })
         .collect()
 }
-

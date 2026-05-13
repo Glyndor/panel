@@ -49,3 +49,31 @@ fn range_expansion() {
     assert_eq!(ports[1].container_port, 8001);
     assert_eq!(ports[2].container_port, 8002);
 }
+
+#[test]
+fn ipv6_host_ip() {
+    let ports = parse_ports(&[short("[::1]:8080:80")]).unwrap();
+    assert_eq!(ports[0].host_ip, "::1");
+    assert_eq!(ports[0].host_port, Some(8080));
+    assert_eq!(ports[0].container_port, 80);
+}
+
+#[test]
+fn random_host_port_via_zero() {
+    let ports = parse_ports(&[short("0:80")]).unwrap();
+    assert_eq!(ports[0].container_port, 80);
+    assert_eq!(ports[0].host_port, Some(0));
+}
+
+#[test]
+fn sctp_protocol() {
+    let ports = parse_ports(&[short("80:80/sctp")]).unwrap();
+    assert_eq!(ports[0].protocol, "sctp");
+}
+
+#[test]
+fn range_with_udp() {
+    let ports = parse_ports(&[short("5000-5010:5000-5010/udp")]).unwrap();
+    assert_eq!(ports.len(), 11);
+    assert!(ports.iter().all(|p| p.protocol == "udp"));
+}
