@@ -15,24 +15,31 @@ set -euo pipefail
 install_nftables() {
     echo -e "${CYAN}Installing nftables...${RESET}"
 
-    # Update package index
-    eval "$PKG_UPDATE"
+    # Skip if already installed
+    if command -v nft &>/dev/null; then
+        EXISTING_VERSION=$(nft --version)
+        echo -e "${YELLOW}nftables already installed: ${BOLD}${EXISTING_VERSION}${RESET}"
+        echo -e "${CYAN}Skipping installation, applying base ruleset...${RESET}"
+    else
+        # Update package index
+        eval "$PKG_UPDATE"
 
-    case "$PKG_MANAGER" in
-        apt-get)
-            $PKG_INSTALL nftables
-            ;;
-        dnf)
-            $PKG_INSTALL nftables
-            ;;
-        pacman)
-            $PKG_INSTALL nftables
-            ;;
-        *)
-            echo -e "${RED}Error: unsupported package manager: ${PKG_MANAGER}${RESET}" >&2
-            exit 1
-            ;;
-    esac
+        case "$PKG_MANAGER" in
+            apt-get)
+                $PKG_INSTALL nftables
+                ;;
+            dnf)
+                $PKG_INSTALL nftables
+                ;;
+            pacman)
+                $PKG_INSTALL nftables
+                ;;
+            *)
+                echo -e "${RED}Error: unsupported package manager: ${PKG_MANAGER}${RESET}" >&2
+                exit 1
+                ;;
+        esac
+    fi
 
     # Apply base ruleset — allow SSH, drop everything else
     nft flush ruleset

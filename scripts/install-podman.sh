@@ -14,8 +14,14 @@ set -euo pipefail
 install_podman() {
     echo -e "${CYAN}Installing Podman...${RESET}"
 
-    # Update package index
-    eval "$PKG_UPDATE"
+    # Skip if already installed
+    if command -v podman &>/dev/null; then
+        EXISTING_VERSION=$(podman --version)
+        echo -e "${YELLOW}Podman already installed: ${BOLD}${EXISTING_VERSION}${RESET}"
+        echo -e "${CYAN}Skipping installation, configuring registries...${RESET}"
+    else
+        # Update package index
+        eval "$PKG_UPDATE"
 
     case "$PKG_MANAGER" in
         apt-get)
@@ -31,10 +37,34 @@ install_podman() {
             echo -e "${RED}Error: unsupported package manager: ${PKG_MANAGER}${RESET}" >&2
             exit 1
             ;;
-    esac
+        esac
+    fi
 
     # Enable and start Podman socket
     systemctl enable --now podman.socket
+
+    # Configure registries
+    echo -e "${CYAN}Configuring Podman registries...${RESET}"
+    mkdir -p /etc/containers
+    cat > /etc/containers/registries.conf <<'EOF'
+# Lynx — Podman registry configuration
+# Only trusted registries are allowed as unqualified search sources.
+
+unqualified-search-registries = ["docker.io", "ghcr.io", "quay.io"]
+
+[[registry]]
+prefix = "docker.io"
+location = "docker.io"
+
+[[registry]]
+prefix = "ghcr.io"
+location = "ghcr.io"
+
+[[registry]]
+prefix = "quay.io"
+location = "quay.io"
+EOF
+    echo -e "${GREEN}Registries configured: docker.io, ghcr.io, quay.io${RESET}"
 
     # Verify installation
     if ! command -v podman &>/dev/null; then
