@@ -1,2 +1,27 @@
+# Private Claude instructions (per-repo, not shared)
 CLAUDE.md
+
+# Personal dev scratch space
 dev/
+
+# Rust build artifacts
+lynx/target/
+target/
+*.rs.bk
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Claude Code / AI agent files
+**/.agents/
+**/skills-lock.json
+
+# Env files (real ones — .env.example is tracked)
+.env
+.env.local
+.env.*.local
+
+# Editor
+*.swp
+*.swo
