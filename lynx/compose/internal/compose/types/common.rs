@@ -446,6 +446,66 @@ impl HealthCheck {
 }
 
 // ---------------------------------------------------------------------------
+// BlkioConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct BlkioConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub weight_device: Vec<BlkioWeightDevice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_read_bps: Vec<BlkioRateDevice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_write_bps: Vec<BlkioRateDevice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_read_iops: Vec<BlkioRateDevice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_write_iops: Vec<BlkioRateDevice>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BlkioWeightDevice {
+    pub path: String,
+    pub weight: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BlkioRateDevice {
+    pub path: String,
+    pub rate: serde_yaml::Value,
+}
+
+impl BlkioRateDevice {
+    /// Return rate as bytes/second (or IOPS as a plain integer).
+    pub fn rate_value(&self) -> i64 {
+        match &self.rate {
+            serde_yaml::Value::Number(n) => n.as_i64().unwrap_or(0),
+            serde_yaml::Value::String(s) => crate::size::parse_memory(s).unwrap_or(0),
+            _ => 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LifecycleHook
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LifecycleHook {
+    pub command: Command,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privileged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub environment: EnvVars,
+}
+
+// ---------------------------------------------------------------------------
 // RestartPolicy
 // ---------------------------------------------------------------------------
 

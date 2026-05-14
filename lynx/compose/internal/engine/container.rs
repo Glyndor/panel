@@ -4,8 +4,8 @@ use std::path::Path;
 use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions};
 use bollard::container::NetworkingConfig;
 use bollard::models::{
-    DeviceMapping, HealthConfig, HostConfig, HostConfigLogConfig, ResourcesUlimits,
-    RestartPolicy as BollardRestart, RestartPolicyNameEnum,
+    DeviceMapping, HealthConfig, HostConfig, HostConfigLogConfig, ResourcesBlkioWeightDevice,
+    ResourcesUlimits, RestartPolicy as BollardRestart, RestartPolicyNameEnum, ThrottleDevice,
 };
 use tracing::warn;
 
@@ -35,7 +35,7 @@ impl Engine {
 
         let env = build_env(service, &self.base_dir);
 
-        let binds = build_binds(service);
+        let binds = build_binds(service, &self.base_dir);
         let secret_binds = self.build_secret_binds(service, file)?;
         let config_binds = self.build_config_binds(service, file)?;
         let all_binds: Vec<String> = binds
@@ -61,6 +61,12 @@ impl Engine {
         let (network_mode, first_network) = resolve_network_mode(service, file);
 
         let mut labels = service.labels.to_map();
+        // Merge deploy.labels (lower priority than service.labels).
+        if let Some(deploy) = &service.deploy {
+            for (k, v) in deploy.labels.to_map() {
+                labels.entry(k).or_insert(v);
+            }
+        }
         for (k, v) in service.annotations.to_map() {
             labels.insert(format!("annotation.{k}"), v);
         }
@@ -105,8 +111,13 @@ impl Engine {
             }
         }
 
-        let (mem_limit, mem_reservation, memswap, nano_cpus, cpu_quota_eff, cpu_period_eff) =
+        let (mem_limit, mem_reservation, memswap, nano_cpus, cpu_quota_eff, cpu_period_eff, pids_limit) =
             resolve_resources(service);
+
+        let blkio = build_blkio_config(service);
+
+        let mut all_links: Vec<String> = service.links.clone();
+        all_links.extend_from_slice(&service.external_links);
 
         let host_config = HostConfig {
             binds: opt_vec(all_binds),
@@ -126,28 +137,38 @@ impl Engine {
             log_config,
             pid_mode: service.pid.clone(),
             ipc_mode: service.ipc.clone(),
+            uts_mode: service.uts.clone(),
             cgroup_parent: service.cgroup_parent.clone(),
             shm_size: service.shm_size.as_deref().and_then(size::parse_memory),
             userns_mode: service.userns_mode.clone(),
             security_opt: opt_vec(service.security_opt.clone()),
             readonly_rootfs: service.read_only,
             devices: opt_vec(devices),
+            device_cgroup_rules: opt_vec(service.device_cgroup_rules.clone()),
             tmpfs: opt_map(tmpfs_map),
             volumes_from: opt_vec(service.volumes_from.clone()),
-            links: opt_vec(service.links.clone()),
+            links: opt_vec(all_links),
             runtime: service.runtime.clone(),
             memory: mem_limit,
             memory_reservation: mem_reservation,
             memory_swap: memswap,
+            memory_swappiness: service.mem_swappiness,
             nano_cpus,
             cpu_shares: service.cpu_shares.map(|s| s as i64),
             cpu_quota: cpu_quota_eff,
             cpu_period: cpu_period_eff,
             cpuset_cpus: service.cpuset.clone(),
+            pids_limit,
             oom_kill_disable: service.oom_kill_disable,
             oom_score_adj: service.oom_score_adj,
             storage_opt: opt_map(service.storage_opt.clone()),
             group_add: opt_vec(service.group_add.clone()),
+            blkio_weight: blkio.as_ref().and_then(|b| b.weight),
+            blkio_weight_device: blkio.as_ref().and_then(|b| b.weight_device.clone()),
+            blkio_device_read_bps: blkio.as_ref().and_then(|b| b.device_read_bps.clone()),
+            blkio_device_write_bps: blkio.as_ref().and_then(|b| b.device_write_bps.clone()),
+            blkio_device_read_iops: blkio.as_ref().and_then(|b| b.device_read_iops.clone()),
+            blkio_device_write_iops: blkio.as_ref().and_then(|b| b.device_write_iops.clone()),
             ..Default::default()
         };
 
@@ -289,13 +310,14 @@ fn build_healthcheck(hc: &HealthCheck) -> HealthConfig {
 
 fn resolve_resources(
     service: &Service,
-) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
+) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
     let mut memory = service.mem_limit.as_deref().and_then(size::parse_memory);
     let mut mem_reservation = service.mem_reservation.as_deref().and_then(size::parse_memory);
     let memswap = service.memswap_limit.as_deref().and_then(size::parse_memory);
-    let mut nano_cpus = None;
+    let mut nano_cpus = service.cpus.as_deref().and_then(size::parse_cpus);
     let cpu_quota = service.cpu_quota;
     let cpu_period = service.cpu_period.map(|p| p as i64);
+    let mut pids_limit = service.pids_limit;
 
     if let Some(deploy) = &service.deploy {
         if let Some(res) = &deploy.resources {
@@ -306,6 +328,9 @@ fn resolve_resources(
                 if nano_cpus.is_none() {
                     nano_cpus = limits.cpus.as_deref().and_then(size::parse_cpus);
                 }
+                if pids_limit.is_none() {
+                    pids_limit = limits.pids.map(|p| p as i64);
+                }
             }
             if let Some(reserv) = &res.reservations {
                 if mem_reservation.is_none() {
@@ -315,7 +340,7 @@ fn resolve_resources(
         }
     }
 
-    (memory, mem_reservation, memswap, nano_cpus, cpu_quota, cpu_period)
+    (memory, mem_reservation, memswap, nano_cpus, cpu_quota, cpu_period, pids_limit)
 }
 
 fn parse_device(s: &str) -> DeviceMapping {
@@ -357,4 +382,56 @@ fn opt_vec<T>(v: Vec<T>) -> Option<Vec<T>> {
 
 fn opt_map<K, V>(m: HashMap<K, V>) -> Option<HashMap<K, V>> {
     if m.is_empty() { None } else { Some(m) }
+}
+
+struct BlkioHostConfig {
+    weight: Option<u16>,
+    weight_device: Option<Vec<ResourcesBlkioWeightDevice>>,
+    device_read_bps: Option<Vec<ThrottleDevice>>,
+    device_write_bps: Option<Vec<ThrottleDevice>>,
+    device_read_iops: Option<Vec<ThrottleDevice>>,
+    device_write_iops: Option<Vec<ThrottleDevice>>,
+}
+
+fn build_blkio_config(service: &Service) -> Option<BlkioHostConfig> {
+    use crate::compose::types::BlkioConfig;
+    let cfg: &BlkioConfig = service.blkio_config.as_ref()?;
+
+    let weight_device = if cfg.weight_device.is_empty() {
+        None
+    } else {
+        Some(
+            cfg.weight_device
+                .iter()
+                .map(|d| ResourcesBlkioWeightDevice {
+                    path: Some(d.path.clone()),
+                    weight: Some(d.weight as usize),
+                })
+                .collect(),
+        )
+    };
+
+    let to_throttle = |devs: &[crate::compose::types::BlkioRateDevice]| {
+        if devs.is_empty() {
+            None
+        } else {
+            Some(
+                devs.iter()
+                    .map(|d| ThrottleDevice {
+                        path: Some(d.path.clone()),
+                        rate: Some(d.rate_value()),
+                    })
+                    .collect(),
+            )
+        }
+    };
+
+    Some(BlkioHostConfig {
+        weight: cfg.weight,
+        weight_device,
+        device_read_bps: to_throttle(&cfg.device_read_bps),
+        device_write_bps: to_throttle(&cfg.device_write_bps),
+        device_read_iops: to_throttle(&cfg.device_read_iops),
+        device_write_iops: to_throttle(&cfg.device_write_iops),
+    })
 }

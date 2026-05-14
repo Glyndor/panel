@@ -72,12 +72,16 @@ pub enum BuildConfig {
         context: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dockerfile: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dockerfile_inline: Option<String>,
         #[serde(default)]
         args: EnvVars,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         cache_from: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        cache_to: Vec<String>,
         #[serde(default)]
         labels: Labels,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,6 +92,16 @@ pub enum BuildConfig {
         platforms: Vec<String>,
         #[serde(default, skip_serializing_if = "HashMap::is_empty")]
         additional_contexts: HashMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        no_cache: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pull: Option<bool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extra_hosts: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tags: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        privileged: Option<bool>,
     },
 }
 
@@ -117,6 +131,48 @@ impl BuildConfig {
         match self {
             BuildConfig::Context(_) => None,
             BuildConfig::Config { target, .. } => target.as_deref(),
+        }
+    }
+
+    pub fn no_cache(&self) -> bool {
+        match self {
+            BuildConfig::Context(_) => false,
+            BuildConfig::Config { no_cache, .. } => no_cache.unwrap_or(false),
+        }
+    }
+
+    pub fn pull(&self) -> bool {
+        match self {
+            BuildConfig::Context(_) => false,
+            BuildConfig::Config { pull, .. } => pull.unwrap_or(false),
+        }
+    }
+
+    pub fn shm_size(&self) -> Option<&str> {
+        match self {
+            BuildConfig::Context(_) => None,
+            BuildConfig::Config { shm_size, .. } => shm_size.as_deref(),
+        }
+    }
+
+    pub fn extra_hosts(&self) -> &[String] {
+        match self {
+            BuildConfig::Context(_) => &[],
+            BuildConfig::Config { extra_hosts, .. } => extra_hosts,
+        }
+    }
+
+    pub fn tags(&self) -> &[String] {
+        match self {
+            BuildConfig::Context(_) => &[],
+            BuildConfig::Config { tags, .. } => tags,
+        }
+    }
+
+    pub fn dockerfile_inline(&self) -> Option<&str> {
+        match self {
+            BuildConfig::Context(_) => None,
+            BuildConfig::Config { dockerfile_inline, .. } => dockerfile_inline.as_deref(),
         }
     }
 }

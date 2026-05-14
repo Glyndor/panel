@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use bollard::image::{BuildImageOptions, CreateImageOptions};
+use bollard::image::{BuildImageOptions, CreateImageOptions, TagImageOptions};
 use bytes::Bytes;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 
 use crate::compose::types::{BuildConfig, Service};
 use crate::error::{ComposeError, Result};
+use crate::size;
 
 use super::Engine;
 
@@ -53,7 +54,6 @@ impl Engine {
         };
 
         let context_path = self.base_dir.join(build.context());
-        let dockerfile = build.dockerfile().unwrap_or("Dockerfile");
         let tag = service
             .image
             .clone()
@@ -61,7 +61,16 @@ impl Engine {
 
         info!("building {tag} from {}", context_path.display());
 
-        let tar_bytes = build_context_tar(&context_path, dockerfile)?;
+        let (tar_bytes, dockerfile_name) = if let Some(inline) = build.dockerfile_inline() {
+            build_context_tar_with_inline(&context_path, inline)?
+        } else {
+            let df = build.dockerfile().unwrap_or("Dockerfile");
+            if let Some(target) = build.target() {
+                build_context_tar_with_target(&context_path, df, target)?
+            } else {
+                (build_context_tar(&context_path, df)?, df.to_string())
+            }
+        };
 
         let arg_map = build.args().to_map();
         let env: std::collections::HashMap<String, String> = std::env::vars().collect();
@@ -81,7 +90,6 @@ impl Engine {
             labels.extend(l.to_map());
         }
 
-        let target_owned = build.target().map(|s| s.to_string()).unwrap_or_default();
         let network_owned = if let BuildConfig::Config { network: Some(n), .. } = build {
             n.clone()
         } else {
@@ -92,16 +100,21 @@ impl Engine {
         } else {
             String::new()
         };
+        let shmsize = build.shm_size().and_then(size::parse_memory).map(|s| s as u64).unwrap_or(0);
+        let extrahosts = build.extra_hosts().join(",");
 
         let options = BuildImageOptions::<String> {
-            dockerfile: dockerfile.to_string(),
+            dockerfile: dockerfile_name,
             t: tag.clone(),
             rm: true,
+            nocache: build.no_cache(),
+            pull: build.pull(),
             buildargs: build_args,
             labels,
             networkmode: network_owned,
             platform: platform_owned,
-            target: target_owned,
+            shmsize: if shmsize > 0 { Some(shmsize) } else { None },
+            extrahosts: if extrahosts.is_empty() { None } else { Some(extrahosts) },
             ..Default::default()
         };
 
@@ -122,6 +135,21 @@ impl Engine {
             }
         }
 
+        // Apply additional tags.
+        for extra_tag in build.tags() {
+            let (repo, tag_str) = extra_tag
+                .rsplit_once(':')
+                .map(|(r, t)| (r.to_string(), t.to_string()))
+                .unwrap_or_else(|| (extra_tag.clone(), "latest".to_string()));
+            if let Err(e) = self
+                .docker
+                .tag_image(&tag, Some(TagImageOptions { repo, tag: tag_str }))
+                .await
+            {
+                warn!("failed to apply extra tag {extra_tag}: {e}");
+            }
+        }
+
         Ok(())
     }
 }
@@ -129,6 +157,48 @@ impl Engine {
 // ---------------------------------------------------------------------------
 // Build context tar
 // ---------------------------------------------------------------------------
+
+/// Write inline Dockerfile content into the context tar as `.dockerfile-inline`.
+fn build_context_tar_with_inline(context: &Path, inline: &str) -> Result<(Vec<u8>, String)> {
+    let inline_name = ".dockerfile-inline";
+    let ignore_patterns = read_dockerignore(context);
+
+    let encoder = GzEncoder::new(Vec::new(), Compression::default());
+    let mut tar = tar::Builder::new(encoder);
+
+    // Inline Dockerfile first.
+    let mut header = tar::Header::new_gnu();
+    header.set_size(inline.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    tar.append_data(&mut header, inline_name, inline.as_bytes())
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
+
+    for entry in WalkDir::new(context).follow_links(false) {
+        let entry = entry.map_err(|e| ComposeError::Io(e.into()))?;
+        let abs = entry.path();
+        let rel = abs
+            .strip_prefix(context)
+            .map_err(|_| ComposeError::Build("path strip error".into()))?;
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let rel_str = rel.to_string_lossy();
+        if is_ignored(&rel_str, &ignore_patterns) {
+            continue;
+        }
+        if abs.is_dir() {
+            tar.append_dir(rel, abs).map_err(|e| ComposeError::Build(e.to_string()))?;
+        } else {
+            tar.append_path_with_name(abs, rel)
+                .map_err(|e| ComposeError::Build(e.to_string()))?;
+        }
+    }
+
+    let gz = tar.into_inner().map_err(|e| ComposeError::Build(e.to_string()))?;
+    let bytes = gz.finish().map_err(|e| ComposeError::Build(e.to_string()))?;
+    Ok((bytes, inline_name.to_string()))
+}
 
 fn build_context_tar(context: &Path, _dockerfile: &str) -> Result<Vec<u8>> {
     let ignore_patterns = read_dockerignore(context);
@@ -169,6 +239,101 @@ fn build_context_tar(context: &Path, _dockerfile: &str) -> Result<Vec<u8>> {
         .map_err(|e| ComposeError::Build(e.to_string()))?;
 
     Ok(bytes)
+}
+
+/// Build a context tar with the Dockerfile truncated to stages up to `target`.
+///
+/// Achieves the same result as `docker build --target=<target>` without requiring
+/// bollard API support for the target parameter.
+fn build_context_tar_with_target(
+    context: &Path,
+    dockerfile: &str,
+    target: &str,
+) -> Result<(Vec<u8>, String)> {
+    let df_path = context.join(dockerfile);
+    let df_content = std::fs::read_to_string(&df_path).map_err(ComposeError::Io)?;
+    let truncated = truncate_dockerfile_to_target(&df_content, target);
+
+    let ignore_patterns = read_dockerignore(context);
+    let encoder = GzEncoder::new(Vec::new(), Compression::default());
+    let mut tar = tar::Builder::new(encoder);
+
+    // Write truncated Dockerfile first.
+    let df_bytes = truncated.as_bytes();
+    let mut header = tar::Header::new_gnu();
+    header.set_size(df_bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    tar.append_data(&mut header, dockerfile, df_bytes)
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
+
+    // Add context, skipping the original Dockerfile (already wrote truncated version).
+    for entry in WalkDir::new(context).follow_links(false) {
+        let entry = entry.map_err(|e| ComposeError::Io(e.into()))?;
+        let abs = entry.path();
+        let rel = abs
+            .strip_prefix(context)
+            .map_err(|_| ComposeError::Build("path strip error".into()))?;
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let rel_str = rel.to_string_lossy();
+        if is_ignored(&rel_str, &ignore_patterns) {
+            continue;
+        }
+        if rel_str == dockerfile {
+            continue; // Replaced by truncated version above.
+        }
+        if abs.is_dir() {
+            tar.append_dir(rel, abs).map_err(|e| ComposeError::Build(e.to_string()))?;
+        } else {
+            tar.append_path_with_name(abs, rel)
+                .map_err(|e| ComposeError::Build(e.to_string()))?;
+        }
+    }
+
+    let gz = tar.into_inner().map_err(|e| ComposeError::Build(e.to_string()))?;
+    let bytes = gz.finish().map_err(|e| ComposeError::Build(e.to_string()))?;
+    Ok((bytes, dockerfile.to_string()))
+}
+
+/// Truncate a Dockerfile to only include stages up to and including `target`.
+///
+/// Stages after `target` are dropped, making the target stage the effective
+/// final output — equivalent to `docker build --target=<target>`.
+fn truncate_dockerfile_to_target(content: &str, target: &str) -> String {
+    let target_lower = target.to_lowercase();
+    let mut lines: Vec<&str> = Vec::new();
+    let mut found_target = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim().to_ascii_lowercase();
+
+        if trimmed.starts_with("from ") {
+            if found_target {
+                // First FROM after our target stage — stop here.
+                break;
+            }
+            lines.push(line);
+            if let Some(as_idx) = trimmed.find(" as ") {
+                let stage = trimmed[as_idx + 4..].trim().to_string();
+                if stage == target_lower {
+                    found_target = true;
+                }
+            }
+        } else {
+            lines.push(line);
+        }
+    }
+
+    if !found_target {
+        tracing::warn!(
+            "build.target '{target}' not found as a named stage in Dockerfile — using full Dockerfile"
+        );
+        return content.to_string();
+    }
+
+    lines.join("\n")
 }
 
 fn read_dockerignore(context: &Path) -> Vec<String> {

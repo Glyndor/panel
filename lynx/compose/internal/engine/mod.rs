@@ -21,7 +21,7 @@ use bollard::Docker;
 use futures::StreamExt;
 use tracing::info;
 
-use crate::compose::types::{ComposeFile, Service, ServiceCondition};
+use crate::compose::types::{ComposeFile, LifecycleHook, Service, ServiceCondition};
 use crate::error::{ComposeError, Result};
 
 use profiles::{active_profiles_set, service_in_profiles};
@@ -111,10 +111,11 @@ impl Engine {
             }
 
             let policy = service.pull_policy.as_deref().unwrap_or("missing");
-            if service.build.is_some() {
-                self.build_service(name, service).await?;
-            } else if policy != "never" && policy != "build" {
-                self.pull_image(service).await?;
+            match (service.build.is_some(), policy) {
+                (true, _) => self.build_service(name, service).await?,
+                (false, "never") => {}
+                (false, "always") => self.pull_image(service).await?,
+                (false, _) => self.pull_image(service).await?,
             }
 
             let replicas = service
@@ -131,6 +132,11 @@ impl Engine {
                 self.create_and_start(&container_name, name, service, file).await?;
                 self.connect_extra_networks(&container_name, service, file).await?;
                 info!("started {container_name}");
+
+                // Execute post_start lifecycle hooks.
+                for hook in &service.post_start {
+                    self.run_lifecycle_hook(&container_name, hook).await?;
+                }
             }
         }
 
@@ -148,6 +154,11 @@ impl Engine {
         for name in &order {
             let service = &file.services[name];
             for container_name in self.replica_names(name, service) {
+                // Execute pre_stop lifecycle hooks before stopping.
+                for hook in &service.pre_stop {
+                    let _ = self.run_lifecycle_hook(&container_name, hook).await;
+                }
+
                 let _ = self
                     .docker
                     .stop_container(&container_name, Some(StopContainerOptions { t: 10 }))
@@ -358,6 +369,63 @@ impl Engine {
     // -----------------------------------------------------------------------
     // Internal
     // -----------------------------------------------------------------------
+
+    async fn run_lifecycle_hook(
+        &self,
+        container_name: &str,
+        hook: &LifecycleHook,
+    ) -> Result<()> {
+        use bollard::exec::{CreateExecOptions, StartExecResults};
+
+        let cmd = hook.command.to_exec();
+        let env: Option<Vec<String>> = {
+            let m = hook.environment.to_map();
+            if m.is_empty() {
+                None
+            } else {
+                Some(m.into_iter().filter_map(|(k, v)| v.map(|v| format!("{k}={v}"))).collect())
+            }
+        };
+
+        let exec_id = self
+            .docker
+            .create_exec(
+                container_name,
+                CreateExecOptions::<String> {
+                    cmd: Some(cmd),
+                    user: hook.user.clone(),
+                    privileged: hook.privileged,
+                    working_dir: hook.working_dir.clone(),
+                    env,
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await?
+            .id;
+
+        match self.docker.start_exec(&exec_id, None).await? {
+            StartExecResults::Attached { mut output, .. } => {
+                use bollard::container::LogOutput;
+                use futures::StreamExt;
+                while let Some(msg) = output.next().await {
+                    match msg? {
+                        LogOutput::StdOut { message } => {
+                            print!("{}", String::from_utf8_lossy(&message));
+                        }
+                        LogOutput::StdErr { message } => {
+                            eprint!("{}", String::from_utf8_lossy(&message));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            StartExecResults::Detached => {}
+        }
+
+        Ok(())
+    }
 
     fn container_name(&self, service_name: &str, service: &Service) -> String {
         service

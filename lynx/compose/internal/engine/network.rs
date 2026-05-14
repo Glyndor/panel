@@ -172,7 +172,7 @@ fn build_ipam(ipam: &IpamConfig) -> Ipam {
                     subnet: pool.subnet.clone(),
                     gateway: pool.gateway.clone(),
                     ip_range: pool.ip_range.clone(),
-                    aux_addresses: if pool.aux_addresses.is_empty() {
+                    auxiliary_addresses: if pool.aux_addresses.is_empty() {
                         None
                     } else {
                         Some(pool.aux_addresses.clone())

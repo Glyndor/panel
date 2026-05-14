@@ -63,7 +63,7 @@ impl Engine {
 // Free helpers (pub(super) for container.rs)
 // ---------------------------------------------------------------------------
 
-pub(super) fn build_binds(service: &Service) -> Vec<String> {
+pub(super) fn build_binds(service: &Service, base_dir: &std::path::Path) -> Vec<String> {
     let mut out = Vec::new();
     for v in &service.volumes {
         match v {
@@ -81,6 +81,26 @@ pub(super) fn build_binds(service: &Service) -> Vec<String> {
                     continue;
                 }
                 let src = source.as_deref().unwrap_or("");
+
+                // Auto-create host directory for bind mounts when requested.
+                if matches!(volume_type, VolumeType::Bind) {
+                    if let Some(b) = bind {
+                        if b.create_host_path.unwrap_or(false) && !src.is_empty() {
+                            let abs = if std::path::Path::new(src).is_absolute() {
+                                std::path::PathBuf::from(src)
+                            } else {
+                                base_dir.join(src)
+                            };
+                            if let Err(e) = std::fs::create_dir_all(&abs) {
+                                tracing::warn!(
+                                    "create_host_path: failed to create {}: {e}",
+                                    abs.display()
+                                );
+                            }
+                        }
+                    }
+                }
+
                 let mut opts: Vec<String> = Vec::new();
                 if read_only.unwrap_or(false) {
                     opts.push("ro".into());

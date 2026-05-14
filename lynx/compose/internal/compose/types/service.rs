@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use super::build::{BuildConfig, ExtendsConfig};
 use super::common::{
-    Command, DependsOn, EnvFile, EnvVars, HealthCheck, Labels, LoggingConfig, PortMapping,
-    RestartPolicy, StringOrList, Sysctls, UlimitConfig,
+    BlkioConfig, Command, DependsOn, EnvFile, EnvVars, HealthCheck, Labels, LifecycleHook,
+    LoggingConfig, PortMapping, RestartPolicy, StringOrList, Sysctls, UlimitConfig,
 };
 use super::deploy::DeployConfig;
 use super::network::ServiceNetworks;
@@ -60,6 +60,8 @@ pub struct Service {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_links: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_hosts: Vec<String>,
     #[serde(default)]
     pub dns: StringOrList,
@@ -85,6 +87,10 @@ pub struct Service {
     pub stop_grace_period: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_start: Vec<LifecycleHook>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_stop: Vec<LifecycleHook>,
 
     // ---------------- identity / labels ----------------
     #[serde(default)]
@@ -132,6 +138,8 @@ pub struct Service {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub uts: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cgroup_parent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cgroup: Option<String>,
@@ -139,6 +147,8 @@ pub struct Service {
     // ---------------- devices / filesystem ----------------
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub devices: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_cgroup_rules: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub storage_opt: HashMap<String, String>,
 
@@ -154,15 +164,23 @@ pub struct Service {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpuset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mem_limit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memswap_limit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mem_reservation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_swappiness: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pids_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub oom_kill_disable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oom_score_adj: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blkio_config: Option<BlkioConfig>,
 
     // ---------------- logging / sysctl / ulimit ----------------
     #[serde(skip_serializing_if = "Option::is_none")]
