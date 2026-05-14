@@ -41,6 +41,9 @@ pub enum ComposeError {
 
     #[error("include error: {0}")]
     Include(String),
+
+    #[error("watch error: {0}")]
+    Watch(String),
 }
 
 pub type Result<T> = std::result::Result<T, ComposeError>;

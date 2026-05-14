@@ -72,6 +72,8 @@ enum Commands {
     },
     /// Print the resolved compose file (after substitution / extends / include).
     Config,
+    /// Watch for file changes and sync/rebuild/restart as configured by develop.watch.
+    Watch,
 }
 
 #[tokio::main]
@@ -114,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Pull => engine.pull(&file).await?,
         Commands::Restart { service } => engine.restart(&file, service.as_deref()).await?,
         Commands::Config => unreachable!("handled above"),
+        Commands::Watch => engine.watch(&file).await?,
     }
 
     Ok(())

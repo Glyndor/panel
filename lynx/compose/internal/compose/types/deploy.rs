@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::common::Labels;
@@ -48,6 +50,44 @@ pub struct ResourceSpec {
     pub memory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pids: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<DeviceReservation>,
+}
+
+// ---------------------------------------------------------------------------
+// Device reservations (GPU / accelerators)
+// ---------------------------------------------------------------------------
+
+/// `deploy.resources.reservations.devices` — generic device reservation.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct DeviceReservation {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<CountOrAll>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub options: HashMap<String, String>,
+}
+
+/// `count: all` or `count: N`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CountOrAll {
+    Named(String),
+    N(i64),
+}
+
+impl CountOrAll {
+    pub fn to_i64(&self) -> i64 {
+        match self {
+            CountOrAll::Named(_) => -1,
+            CountOrAll::N(n) => *n,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

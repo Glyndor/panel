@@ -1,7 +1,8 @@
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::common::{EnvVars, Labels, StringOrList};
+use super::common::{EnvVars, Labels, StringOrList, UlimitConfig};
 
 // ---------------------------------------------------------------------------
 // IncludeConfig
@@ -102,6 +103,20 @@ pub enum BuildConfig {
         tags: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         privileged: Option<bool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ssh: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        secrets: Vec<String>,
+        #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+        ulimits: IndexMap<String, UlimitConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        isolation: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        entitlements: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<serde_yaml::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sbom: Option<bool>,
     },
 }
 

@@ -506,6 +506,28 @@ pub struct LifecycleHook {
 }
 
 // ---------------------------------------------------------------------------
+// GpuSpec  (top-level `gpus:` shorthand)
+// ---------------------------------------------------------------------------
+
+/// `gpus: all` or `gpus: 2` top-level service field.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum GpuSpec {
+    Named(String),
+    Count(u32),
+}
+
+impl GpuSpec {
+    /// -1 = all; positive = exact count.
+    pub fn to_count(&self) -> i64 {
+        match self {
+            GpuSpec::Named(_) => -1,
+            GpuSpec::Count(n) => *n as i64,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RestartPolicy
 // ---------------------------------------------------------------------------
 

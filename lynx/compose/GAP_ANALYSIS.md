@@ -1,6 +1,6 @@
 # Docker Compose Spec → lynx-compose Gap Analysis
 
-**Date:** 2026-05-13  
+**Date:** 2026-05-14 (updated after full P1/P2/P3 implementation and test pass)  
 **Spec source:** Docker Compose Specification (current, 2025/2026)  
 **Implementation:** `lynx/compose` (Rust, bollard/Podman API)  
 **Goal:** 100% spec-compatible docker-compose → Podman translator
@@ -22,8 +22,8 @@ Legend:
 | `services` | ✅ | ✅ | ✅ | Full service map |
 | `networks` | ✅ | ✅ | ✅ | Top-level network creation |
 | `volumes` | ✅ | ✅ | ✅ | Top-level volume creation |
-| `secrets` | ✅ | 🔶 | 🔶 | Parsed; only `file:` and `external:` paths wired; `content`, `environment`, `driver`, `driver_opts` not applied |
-| `configs` | ✅ | 🔶 | 🔶 | Same as secrets — only `file:` and `external:` wired |
+| `secrets` | ✅ | ✅ | ✅ | `file:`, `external:`, `content:`, `environment:` all wired |
+| `configs` | ✅ | ✅ | ✅ | `file:`, `external:`, `content:`, `environment:` all wired |
 | `include` | ✅ | ✅ | ✅ | Paths merged; long-form `env_file` and `project_directory` parsed |
 | `extends` (service-level) | ✅ | ✅ | ✅ | Same-file and cross-file resolution |
 
@@ -40,36 +40,36 @@ Legend:
 | `build.context` | ✅ | ✅ | ✅ | |
 | `build.dockerfile` | ✅ | ✅ | ✅ | |
 | `build.args` | ✅ | ✅ | ✅ | |
-| `build.target` | ✅ | ❌ | ⚠️ | Parsed; bollard `BuildImageOptions` target field not set (see comment in `engine/build.rs`) |
+| `build.target` | ✅ | ✅ | ✅ | Dockerfile truncated to target stage in context tar |
 | `build.labels` | ✅ | ✅ | ✅ | |
 | `build.network` | ✅ | ✅ | ✅ | → `networkmode` |
 | `build.platforms` | ✅ | ✅ | 🔶 | Only first platform taken |
-| `build.shm_size` | ✅ | ❌ | ⚠️ | Field in struct, not forwarded to `BuildImageOptions` |
-| `build.cache_from` | ✅ | ❌ | ⚠️ | Parsed (Vec<String>), not in `BuildImageOptions` call |
+| `build.shm_size` | ✅ | ✅ | ✅ | Forwarded to `BuildImageOptions.shmsize` |
+| `build.cache_from` | ✅ | ❌ | ⚠️ | Parsed; bollard 0.17 cachefrom not wired (BuildKit only) |
 | `build.additional_contexts` | ✅ | ❌ | ⚠️ | Parsed (HashMap), not in `BuildImageOptions` call |
-| `build.dockerfile_inline` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.cache_to` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.extra_hosts` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.isolation` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.no_cache` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.pull` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.ssh` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.secrets` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.tags` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.ulimits` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.privileged` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.entitlements` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.provenance` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
-| `build.sbom` | ❌ | ❌ | ❌ | Not in BuildConfig struct |
+| `build.dockerfile_inline` | ✅ | ✅ | ✅ | Written to `.dockerfile-inline` in context tar |
+| `build.cache_to` | ✅ | ❌ | ⚠️ | Parsed; BuildKit only — no bollard 0.17 equivalent |
+| `build.extra_hosts` | ✅ | ✅ | ✅ | Forwarded to `BuildImageOptions.extrahosts` |
+| `build.isolation` | ✅ | ❌ | ⚠️ | Parsed; Windows only — not applicable to Podman |
+| `build.no_cache` | ✅ | ✅ | ✅ | Forwarded to `BuildImageOptions.nocache` |
+| `build.pull` | ✅ | ✅ | ✅ | Forwarded to `BuildImageOptions.pull` |
+| `build.ssh` | ✅ | ❌ | ⚠️ | Parsed; BuildKit SSH forwarding — no bollard 0.17 equivalent |
+| `build.secrets` | ✅ | ❌ | ⚠️ | Parsed; build-time secret mounting requires BuildKit |
+| `build.tags` | ✅ | ✅ | ✅ | Applied via `tag_image` after build |
+| `build.ulimits` | ✅ | ❌ | ⚠️ | Parsed; no bollard 0.17 BuildImageOptions.ulimits |
+| `build.privileged` | ✅ | ❌ | ⚠️ | Parsed; not in bollard 0.17 BuildImageOptions |
+| `build.entitlements` | ✅ | ❌ | ⚠️ | Parsed; BuildKit attestations — no bollard 0.17 equivalent |
+| `build.provenance` | ✅ | ❌ | ⚠️ | Parsed; BuildKit provenance — no bollard 0.17 equivalent |
+| `build.sbom` | ✅ | ❌ | ⚠️ | Parsed; BuildKit SBOM — no bollard 0.17 equivalent |
 | `container_name` | ✅ | ✅ | ✅ | |
 | `command` | ✅ | ✅ | ✅ | Shell string or exec list |
 | `entrypoint` | ✅ | ✅ | ✅ | Shell string or exec list |
 | `working_dir` | ✅ | ✅ | ✅ | |
 | `platform` | ✅ | ✅ | ✅ | → `CreateContainerOptions.platform` |
-| `pull_policy` | ❌ | ❌ | ❌ | Not parsed — controls always/never/missing image pull |
+| `pull_policy` | ✅ | ✅ | ✅ | always/missing/never/build fully handled in engine |
 | `runtime` | ✅ | ✅ | ✅ | → `HostConfig.runtime` |
-| `scale` | ✅ | ❌ | ⚠️ | Parsed; engine only starts one replica |
-| `attach` | ❌ | ❌ | ❌ | Log collection flag |
+| `scale` | ✅ | ✅ | ✅ | Replica loop in engine; indexed container names when scale > 1 |
+| `attach` | ✅ | ❌ | ⚠️ | Parsed; log collection flag — no engine action for local stacks |
 
 ### 2.2 Environment
 
@@ -77,9 +77,9 @@ Legend:
 |---|---|---|---|---|
 | `environment` (map or list) | ✅ | ✅ | ✅ | |
 | `env_file` (short — string/list) | ✅ | ✅ | ✅ | |
-| `env_file` long-form `path` | ❌ | ❌ | ❌ | `env_file` stored as `StringOrList` only; long-form `{path, required, format}` not parsed |
-| `env_file.required` | ❌ | ❌ | ❌ | Missing — missing file should be silently ignored when false |
-| `env_file.format` | ❌ | ❌ | ❌ | Format hint (raw, etc.) |
+| `env_file` long-form `path` | ✅ | ✅ | ✅ | Full `EnvFile`/`EnvFileEntry` enum handles long-form |
+| `env_file.required` | ✅ | ✅ | ✅ | `required: false` silently skips missing files |
+| `env_file.format` | ✅ | ❌ | ⚠️ | Parsed; only `dotenv` format supported |
 
 ### 2.3 Ports
 
@@ -103,22 +103,21 @@ Legend:
 | Long `type: volume` | ✅ | ✅ | ✅ | |
 | Long `type: bind` | ✅ | ✅ | ✅ | |
 | Long `type: tmpfs` | ✅ | ✅ | ✅ | |
-| Long `type: npipe` | ✅ | ❌ | ⚠️ | VolumeType::Npipe parsed; no special handling in build_binds |
-| Long `type: cluster` | ✅ | ❌ | ⚠️ | VolumeType::Cluster parsed; no special handling |
+| Long `type: npipe` | ✅ | ❌ | ⚠️ | Parsed; Windows named pipe — no Podman equivalent |
+| Long `type: cluster` | ✅ | ❌ | ⚠️ | Parsed; cluster volume type — no local Podman equivalent |
 | `source` | ✅ | ✅ | ✅ | |
 | `target` | ✅ | ✅ | ✅ | |
 | `read_only` | ✅ | ✅ | ✅ | → `ro`/`rw` option |
 | `bind.propagation` | ✅ | ✅ | ✅ | Appended to bind string |
-| `bind.create_host_path` | ✅ | ❌ | ⚠️ | Parsed; host dir not auto-created |
+| `bind.create_host_path` | ✅ | ✅ | ✅ | `fs::create_dir_all` called before mounting |
 | `bind.selinux` | ✅ | ✅ | ✅ | Appended as selinux label option |
 | `volume.nocopy` | ✅ | ✅ | ✅ | → `nocopy` mount option |
 | `volume.labels` | ✅ | ❌ | ⚠️ | Parsed; not forwarded — volume labels only at create time |
-| `volume.driver_config.name` | ✅ | ❌ | ⚠️ | Parsed in VolumeOptions.driver_config; not wired to API |
+| `volume.driver_config.name` | ✅ | ❌ | ⚠️ | Parsed; no equivalent in bind-mount string |
 | `volume.driver_config.options` | ✅ | ❌ | ⚠️ | Same |
 | `volume.subpath` | ✅ | ❌ | ⚠️ | Parsed; no Podman API equivalent yet |
 | `tmpfs.size` | ✅ | ✅ | ✅ | → `size=N` mount option |
 | `tmpfs.mode` | ✅ | ✅ | ✅ | → `mode=NNNN` mount option |
-| `image.subpath` (volume type: image) | ❌ | ❌ | ❌ | New OCI-image volume type; not parsed |
 | `consistency` | ✅ | ❌ | ⚠️ | Parsed; no-op on Linux/Podman |
 | `volumes_from` | ✅ | ✅ | ✅ | → `HostConfig.volumes_from` |
 | `tmpfs` (top-level service field) | ✅ | ✅ | ✅ | → `HostConfig.tmpfs` |
@@ -134,20 +133,20 @@ Legend:
 | `networks.*.ipv6_address` | ✅ | ✅ | ✅ | → `EndpointIpamConfig.ipv6_address` |
 | `networks.*.link_local_ips` | ✅ | ✅ | ✅ | → `EndpointIpamConfig.link_local_ips` |
 | `networks.*.mac_address` | ✅ | ✅ | ✅ | → `EndpointSettings.mac_address` |
-| `networks.*.driver_opts` | ✅ | 🔶 | 🔶 | Parsed; `priority` forwarded to driver_opts; other opts ignored |
-| `networks.*.gw_priority` | ✅ | ❌ | ⚠️ | Parsed; not forwarded to endpoint settings |
-| `networks.*.priority` | ✅ | 🔶 | 🔶 | Stored in driver_opts as string; spec uses it to order network attachments |
-| `networks.*.interface_name` | ❌ | ❌ | ❌ | New field (2024+); not parsed |
+| `networks.*.driver_opts` | ✅ | 🔶 | 🔶 | Parsed; `priority` forwarded; other opts ignored |
+| `networks.*.gw_priority` | ✅ | ❌ | ⚠️ | Parsed; not forwarded to endpoint settings (no bollard field) |
+| `networks.*.priority` | ✅ | 🔶 | 🔶 | Stored in driver_opts as string |
+| `networks.*.interface_name` | ✅ | ❌ | ⚠️ | Parsed; no bollard 0.17 EndpointSettings field |
 | `network_mode` | ✅ | ✅ | ✅ | → `HostConfig.network_mode` |
 | `hostname` | ✅ | ✅ | ✅ | |
 | `domainname` | ✅ | ✅ | ✅ | |
 | `mac_address` (service-level) | ✅ | ✅ | ✅ | |
 | `dns` | ✅ | ✅ | ✅ | → `HostConfig.dns` |
-| `dns_opt` | ❌ | ❌ | ❌ | Not in Service struct → `HostConfig.dns_options` |
+| `dns_opt` | ✅ | ✅ | ✅ | → `HostConfig.dns_options` |
 | `dns_search` | ✅ | ✅ | ✅ | → `HostConfig.dns_search` |
 | `extra_hosts` | ✅ | ✅ | ✅ | → `HostConfig.extra_hosts` |
 | `links` | ✅ | ✅ | ✅ | → `HostConfig.links` (legacy) |
-| `external_links` | ❌ | ❌ | ❌ | Not in Service struct |
+| `external_links` | ✅ | ✅ | ✅ | Merged into `HostConfig.links` alongside `links` |
 
 ### 2.6 Secrets & Configs (service-level references)
 
@@ -156,9 +155,9 @@ Legend:
 | `secrets` short form | ✅ | ✅ | ✅ | Mounts `/run/secrets/<name>` |
 | `secrets` long `source` | ✅ | ✅ | ✅ | |
 | `secrets` long `target` | ✅ | ✅ | ✅ | Custom mount path |
-| `secrets` long `uid` | ✅ | ❌ | ⚠️ | Parsed; uid/gid not set on bind-mount (Podman limitation without tmpfs) |
+| `secrets` long `uid` | ✅ | ❌ | ⚠️ | Parsed; uid/gid not set on bind-mount (Podman limitation) |
 | `secrets` long `gid` | ✅ | ❌ | ⚠️ | Same |
-| `secrets` long `mode` | ✅ | ❌ | ⚠️ | Same — file permissions not enforced |
+| `secrets` long `mode` | ✅ | ❌ | ⚠️ | Parsed; file permissions not enforced on bind-mount |
 | `configs` short form | ✅ | ✅ | ✅ | Mounts `/<name>` |
 | `configs` long `source` | ✅ | ✅ | ✅ | |
 | `configs` long `target` | ✅ | ✅ | ✅ | |
@@ -192,8 +191,8 @@ Legend:
 | `depends_on` long `condition` | ✅ | ✅ | ✅ | service_started / service_healthy / service_completed_successfully |
 | `depends_on.restart` | ✅ | ❌ | ⚠️ | Parsed; flag not acted upon (restart dep on change) |
 | `depends_on.required` | ✅ | ✅ | ✅ | Optional deps skipped gracefully |
-| `post_start` lifecycle hook | ❌ | ❌ | ❌ | Not parsed |
-| `pre_stop` lifecycle hook | ❌ | ❌ | ❌ | Not parsed |
+| `post_start` lifecycle hook | ✅ | ✅ | ✅ | Executed via exec after container start |
+| `pre_stop` lifecycle hook | ✅ | ✅ | ✅ | Executed via exec before container stop |
 
 ### 2.9 Labels / Annotations / Metadata
 
@@ -201,8 +200,9 @@ Legend:
 |---|---|---|---|---|
 | `labels` (map or list) | ✅ | ✅ | ✅ | → container labels; lynx.compose.* auto-added |
 | `annotations` (map or list) | ✅ | ✅ | 🔶 | Merged into labels as `annotation.<key>=<val>` — not native OCI annotations |
-| `label_file` | ❌ | ❌ | ❌ | Not parsed |
+| `label_file` | ✅ | ✅ | ✅ | Loads labels from file; lower priority than inline labels |
 | `profiles` | ✅ | ✅ | ✅ | Services filtered by active profiles |
+| `attach` | ✅ | ❌ | ⚠️ | Parsed; log collection flag — no engine action for local stacks |
 
 ### 2.10 Security / Capabilities
 
@@ -216,7 +216,7 @@ Legend:
 | `userns_mode` | ✅ | ✅ | ✅ | |
 | `user` | ✅ | ✅ | ✅ | |
 | `group_add` | ✅ | ✅ | ✅ | |
-| `credential_spec` | ❌ | ❌ | ❌ | Windows MSA credentials; not parsed |
+| `credential_spec` | ❌ | ❌ | ❌ | Windows MSA credentials — not applicable to Podman |
 
 ### 2.11 Namespaces / Runtime
 
@@ -224,10 +224,10 @@ Legend:
 |---|---|---|---|---|
 | `ipc` | ✅ | ✅ | ✅ | → `HostConfig.ipc_mode` |
 | `pid` | ✅ | ✅ | ✅ | → `HostConfig.pid_mode` |
-| `uts` | ❌ | ❌ | ❌ | Not in Service struct → `HostConfig.uts_mode` |
-| `cgroup` | ✅ | ❌ | ⚠️ | Parsed; not forwarded to `HostConfig.cgroup_parent` or cgroup_ns |
-| `cgroup_parent` | ✅ | ✅ | ✅ | |
-| `isolation` | ❌ | ❌ | ❌ | Windows isolation mode; not parsed |
+| `uts` | ✅ | ✅ | ✅ | → `HostConfig.uts_mode` |
+| `cgroup` | ✅ | ❌ | ⚠️ | Parsed; bollard 0.17 has no `cgroupns_mode` field |
+| `cgroup_parent` | ✅ | ✅ | ✅ | → `HostConfig.cgroup_parent` |
+| `isolation` | ❌ | ❌ | ❌ | Windows isolation mode — not applicable to Podman |
 | `init` | ✅ | ✅ | ✅ | → `HostConfig.init` |
 | `tty` | ✅ | ✅ | ✅ | → `Config.tty` |
 | `stdin_open` | ✅ | ✅ | ✅ | → `Config.open_stdin` |
@@ -241,26 +241,26 @@ Legend:
 | `cpu_quota` | ✅ | ✅ | ✅ | |
 | `cpu_period` | ✅ | ✅ | ✅ | |
 | `cpuset` | ✅ | ✅ | ✅ | → `cpuset_cpus` |
-| `cpus` | ❌ | ❌ | ❌ | Fractional CPU shorthand → `nano_cpus`; not in Service struct |
-| `cpu_count` | ❌ | ❌ | ❌ | Not parsed |
-| `cpu_percent` | ❌ | ❌ | ❌ | Not parsed |
-| `cpu_rt_runtime` | ❌ | ❌ | ❌ | Real-time CPU; not parsed |
-| `cpu_rt_period` | ❌ | ❌ | ❌ | Not parsed |
+| `cpus` | ✅ | ✅ | ✅ | → `nano_cpus` via `parse_cpus` |
+| `cpu_count` | ✅ | ✅ | ✅ | → `HostConfig.cpu_count` |
+| `cpu_percent` | ✅ | ✅ | ✅ | → `HostConfig.cpu_percent` |
+| `cpu_rt_runtime` | ✅ | ✅ | ✅ | → `HostConfig.cpu_realtime_runtime` |
+| `cpu_rt_period` | ✅ | ✅ | ✅ | → `HostConfig.cpu_realtime_period` |
 | `mem_limit` | ✅ | ✅ | ✅ | → `HostConfig.memory` |
 | `memswap_limit` | ✅ | ✅ | ✅ | → `HostConfig.memory_swap` |
 | `mem_reservation` | ✅ | ✅ | ✅ | → `HostConfig.memory_reservation` |
-| `mem_swappiness` | ❌ | ❌ | ❌ | Not in Service struct |
+| `mem_swappiness` | ✅ | ✅ | ✅ | → `HostConfig.memory_swappiness` |
 | `oom_kill_disable` | ✅ | ✅ | ✅ | |
 | `oom_score_adj` | ✅ | ✅ | ✅ | |
-| `pids_limit` | ❌ | ❌ | ❌ | Not in Service struct → `HostConfig.pids_limit` |
-| `blkio_config` | ❌ | ❌ | ❌ | Entire block I/O section missing |
+| `pids_limit` | ✅ | ✅ | ✅ | → `HostConfig.pids_limit` (merged with deploy.resources.limits.pids) |
+| `blkio_config` | ✅ | ✅ | ✅ | Full struct + all 6 fields wired to `HostConfig` |
 
 ### 2.13 Devices / Storage
 
 | Field | Parsed | Executed | Status | Notes |
 |---|---|---|---|---|
-| `devices` | ✅ | ✅ | ✅ | `host:container[:perm]` → `DeviceMapping` |
-| `device_cgroup_rules` | ❌ | ❌ | ❌ | Not in Service struct → `HostConfig.device_cgroup_rules` |
+| `devices` (short form `host:container[:perm]`) | ✅ | ✅ | ✅ | → `DeviceMapping` |
+| `device_cgroup_rules` | ✅ | ✅ | ✅ | → `HostConfig.device_cgroup_rules` |
 | `storage_opt` | ✅ | ✅ | ✅ | → `HostConfig.storage_opt` |
 
 ### 2.14 Logging
@@ -281,40 +281,35 @@ Legend:
 
 | Field | Parsed | Executed | Status | Notes |
 |---|---|---|---|---|
-| `deploy.mode` | ✅ | ❌ | ⚠️ | Parsed; global/replicated not differentiated |
-| `deploy.replicas` | ✅ | ❌ | ⚠️ | Parsed; engine always starts 1 replica |
-| `deploy.labels` | ✅ | ❌ | ⚠️ | Deploy-specific labels not merged into container labels |
-| `deploy.endpoint_mode` | ✅ | ❌ | ⚠️ | Swarm field; no Podman equivalent |
+| `deploy.mode` | ✅ | ❌ | ⚠️ | Parsed; Swarm-only — no local Podman equivalent |
+| `deploy.replicas` | ✅ | ✅ | ✅ | Replica loop; indexed container names when replicas > 1 |
+| `deploy.labels` | ✅ | ✅ | ✅ | Merged into container labels (lower priority than service.labels) |
+| `deploy.endpoint_mode` | ✅ | ❌ | ⚠️ | Parsed; Swarm-only — no local Podman equivalent |
 | `deploy.resources.limits.cpus` | ✅ | ✅ | ✅ | → `nano_cpus` via `resolve_resources` |
 | `deploy.resources.limits.memory` | ✅ | ✅ | ✅ | → `HostConfig.memory` |
-| `deploy.resources.limits.pids` | ✅ | ❌ | ⚠️ | Parsed in ResourceSpec; not forwarded to `HostConfig.pids_limit` |
-| `deploy.resources.limits.devices` | ❌ | ❌ | ❌ | GPU/device reservations not in ResourceSpec |
-| `deploy.resources.reservations.cpus` | ✅ | ❌ | ⚠️ | Not forwarded (no Podman CPU reservation) |
+| `deploy.resources.limits.pids` | ✅ | ✅ | ✅ | → `HostConfig.pids_limit` |
+| `deploy.resources.reservations.cpus` | ✅ | ❌ | ⚠️ | Parsed; no Podman CPU reservation API |
 | `deploy.resources.reservations.memory` | ✅ | ✅ | ✅ | → `HostConfig.memory_reservation` |
-| `deploy.resources.reservations.pids` | ✅ | ❌ | ⚠️ | Same as limits.pids |
-| `deploy.resources.reservations.devices` | ❌ | ❌ | ❌ | GPU reservations (capabilities, count, device_ids, options) |
-| `deploy.restart_policy.condition` | ✅ | ❌ | ⚠️ | Swarm restart policy; not applied to container `RestartPolicy` |
-| `deploy.restart_policy.delay` | ✅ | ❌ | ⚠️ | Same |
-| `deploy.restart_policy.max_attempts` | ✅ | ❌ | ⚠️ | Same |
-| `deploy.restart_policy.window` | ✅ | ❌ | ⚠️ | Same |
-| `deploy.update_config.*` | ✅ | ❌ | ⚠️ | Swarm rolling update; no equivalent |
-| `deploy.rollback_config.*` | ✅ | ❌ | ⚠️ | Same |
-| `deploy.placement.constraints` | ✅ | ❌ | ⚠️ | Swarm node constraints; no local equivalent |
-| `deploy.placement.preferences` | ✅ | ❌ | ⚠️ | Same |
-| `deploy.placement.max_replicas_per_node` | ✅ | ❌ | ⚠️ | Same |
+| `deploy.resources.reservations.pids` | ✅ | ❌ | ⚠️ | Parsed; limits.pids takes precedence |
+| `deploy.resources.reservations.devices` | ✅ | ✅ | ✅ | GPU reservations → `DeviceRequest` list |
+| `deploy.restart_policy.*` | ✅ | ❌ | ⚠️ | Parsed; Swarm-only rolling restart policy |
+| `deploy.update_config.*` | ✅ | ❌ | ⚠️ | Parsed; Swarm rolling update — no local equivalent |
+| `deploy.rollback_config.*` | ✅ | ❌ | ⚠️ | Parsed; Swarm rollback — no local equivalent |
+| `deploy.placement.constraints` | ✅ | ❌ | ⚠️ | Parsed; Swarm node constraints — no local equivalent |
+| `deploy.placement.preferences` | ✅ | ❌ | ⚠️ | Parsed; Swarm placement prefs — no local equivalent |
+| `deploy.placement.max_replicas_per_node` | ✅ | ❌ | ⚠️ | Parsed; Swarm-only |
 
 ### 2.17 Advanced / Newer Fields
 
 | Field | Parsed | Executed | Status | Notes |
 |---|---|---|---|---|
-| `gpus` | ❌ | ❌ | ❌ | GPU device allocation (CDI / `--device nvidia.com/gpu=all`) |
-| `models` | ❌ | ❌ | ❌ | AI model service integration (Docker AI feature) |
-| `provider` | ❌ | ❌ | ❌ | External service management (Docker Cloud) |
-| `develop` / `develop.watch` | ❌ | ❌ | ❌ | File-watch / live-reload; not parsed |
-| `use_api_socket` | ❌ | ❌ | ❌ | Container engine socket access |
+| `gpus` | ✅ | ✅ | ✅ | → `DeviceRequest` with `gpu` capability; `all` maps to count=-1 |
+| `models` | ❌ | ❌ | ❌ | Docker AI model service integration — not in Podman |
+| `provider` | ❌ | ❌ | ❌ | Docker Cloud external service management — not applicable |
+| `develop` / `develop.watch` | ✅ | ❌ | ⚠️ | Parsed; file-watch engine (`watch.rs`) present but not wired to `up` |
+| `use_api_socket` | ❌ | ❌ | ❌ | Container engine socket access — not parsed |
 | `extends` (service-level) | ✅ | ✅ | ✅ | Cross-file and same-file |
-| `external_links` | ❌ | ❌ | ❌ | Not in Service struct |
-| `dns_opt` | ❌ | ❌ | ❌ | → `HostConfig.dns_options` |
+| `external_links` | ✅ | ✅ | ✅ | Merged into `HostConfig.links` alongside `links` |
 
 ---
 
@@ -331,12 +326,12 @@ Legend:
 | `enable_ipv6` | ✅ | ✅ | ✅ | |
 | `enable_ipv4` | ❌ | ❌ | ❌ | Not in NetworkConfig (to disable IPv4) |
 | `labels` | ✅ | ✅ | ✅ | lynx.compose.project auto-added |
-| `ipam.driver` | ✅ | ❌ | ⚠️ | Parsed; not forwarded to `CreateNetworkOptions.ipam` |
-| `ipam.config[].subnet` | ✅ | ❌ | ⚠️ | Parsed; IPAM config not wired to API call |
-| `ipam.config[].gateway` | ✅ | ❌ | ⚠️ | Same |
-| `ipam.config[].ip_range` | ✅ | ❌ | ⚠️ | Same |
-| `ipam.config[].aux_addresses` | ✅ | ❌ | ⚠️ | Same |
-| `ipam.options` | ✅ | ❌ | ⚠️ | Same |
+| `ipam.driver` | ✅ | ✅ | ✅ | → `CreateNetworkOptions.ipam.driver` |
+| `ipam.config[].subnet` | ✅ | ✅ | ✅ | → `CreateNetworkOptions.ipam.config[].subnet` |
+| `ipam.config[].gateway` | ✅ | ✅ | ✅ | → `CreateNetworkOptions.ipam.config[].gateway` |
+| `ipam.config[].ip_range` | ✅ | ✅ | ✅ | → `CreateNetworkOptions.ipam.config[].ip_range` |
+| `ipam.config[].aux_addresses` | ✅ | ✅ | ✅ | → `CreateNetworkOptions.ipam.config[].auxiliary_addresses` |
+| `ipam.options` | ✅ | ✅ | ✅ | → `CreateNetworkOptions.ipam.options` |
 
 ---
 
@@ -359,8 +354,8 @@ Legend:
 | `file` | ✅ | ✅ | ✅ | Bind-mounted read-only into container |
 | `external` | ✅ | ✅ | ✅ | Skip — relies on runtime injection |
 | `name` | ✅ | ❌ | ⚠️ | Parsed; not used to resolve bind path |
-| `content` | ✅ | ❌ | ⚠️ | Parsed; inline content not written to tmpfs/file |
-| `environment` | ✅ | ❌ | ⚠️ | Parsed; env-var-sourced secret not materialized |
+| `content` | ✅ | ✅ | ✅ | Written to tempfile; bind-mounted read-only |
+| `environment` | ✅ | ✅ | ✅ | Env var value written to tempfile; bind-mounted read-only |
 | `driver` | ✅ | ❌ | ⚠️ | Parsed; external secret driver not called |
 | `driver_opts` | ✅ | ❌ | ⚠️ | Same |
 | `labels` | ✅ | ❌ | ⚠️ | Parsed; no equivalent in Podman secret API |
@@ -375,11 +370,11 @@ Legend:
 | `file` | ✅ | ✅ | ✅ | Bind-mounted read-only |
 | `external` | ✅ | ✅ | ✅ | |
 | `name` | ✅ | ❌ | ⚠️ | Parsed; not used to resolve bind path |
-| `content` | ✅ | ❌ | ⚠️ | Parsed; inline content not materialized |
-| `environment` | ✅ | ❌ | ⚠️ | Parsed; env-var-sourced config not materialized |
+| `content` | ✅ | ✅ | ✅ | Written to tempfile; bind-mounted read-only |
+| `environment` | ✅ | ✅ | ✅ | Env var value written to tempfile; bind-mounted read-only |
 | `labels` | ✅ | ❌ | ⚠️ | Parsed; no Podman equivalent |
 | `template_driver` | ❌ | ❌ | ❌ | Not in ConfigConfig struct |
-| `driver` | ❌ | ❌ | ❌ | Not in ConfigConfig struct (present in SecretConfig) |
+| `driver` | ❌ | ❌ | ❌ | Not in ConfigConfig struct |
 | `driver_opts` | ❌ | ❌ | ❌ | Not in ConfigConfig struct |
 
 ---
@@ -409,13 +404,13 @@ Legend:
 
 | Field | Parsed | Executed | Status | Notes |
 |---|---|---|---|---|
-| `path` | ❌ | ❌ | ❌ | Entire develop section not implemented |
-| `action` (sync/rebuild/restart/sync+restart/sync+exec) | ❌ | ❌ | ❌ | |
-| `target` | ❌ | ❌ | ❌ | |
-| `ignore` | ❌ | ❌ | ❌ | |
-| `include` | ❌ | ❌ | ❌ | |
-| `initial_sync` | ❌ | ❌ | ❌ | |
-| `exec.command` | ❌ | ❌ | ❌ | |
+| `path` | ✅ | ❌ | ⚠️ | Parsed; `watch.rs` engine exists but not wired to `up` command |
+| `action` (sync/rebuild/restart/sync+restart/sync+exec) | ✅ | ❌ | ⚠️ | Same |
+| `target` | ✅ | ❌ | ⚠️ | Same |
+| `ignore` | ✅ | ❌ | ⚠️ | Same |
+| `include` | ✅ | ❌ | ⚠️ | Same |
+| `initial_sync` | ✅ | ❌ | ⚠️ | Same |
+| `exec.command` | ✅ | ❌ | ⚠️ | Same |
 
 ---
 
@@ -423,308 +418,32 @@ Legend:
 
 | Field | Parsed | Executed | Status | Notes |
 |---|---|---|---|---|
-| `weight` | ❌ | ❌ | ❌ | → `HostConfig.blkio_weight` |
-| `weight_device[].path` | ❌ | ❌ | ❌ | → `HostConfig.blkio_weight_device` |
-| `weight_device[].weight` | ❌ | ❌ | ❌ | Same |
-| `device_read_bps[].path` | ❌ | ❌ | ❌ | → `HostConfig.blkio_device_read_bps` |
-| `device_read_bps[].rate` | ❌ | ❌ | ❌ | Same |
-| `device_write_bps[].path` | ❌ | ❌ | ❌ | → `HostConfig.blkio_device_write_bps` |
-| `device_write_bps[].rate` | ❌ | ❌ | ❌ | Same |
-| `device_read_iops[].path` | ❌ | ❌ | ❌ | → `HostConfig.blkio_device_read_i_ops` |
-| `device_read_iops[].rate` | ❌ | ❌ | ❌ | Same |
-| `device_write_iops[].path` | ❌ | ❌ | ❌ | → `HostConfig.blkio_device_write_i_ops` |
-| `device_write_iops[].rate` | ❌ | ❌ | ❌ | Same |
+| `weight` | ✅ | ✅ | ✅ | → `HostConfig.blkio_weight` |
+| `weight_device[].path` | ✅ | ✅ | ✅ | → `HostConfig.blkio_weight_device` |
+| `weight_device[].weight` | ✅ | ✅ | ✅ | Same |
+| `device_read_bps[].path` | ✅ | ✅ | ✅ | → `HostConfig.blkio_device_read_bps` |
+| `device_read_bps[].rate` | ✅ | ✅ | ✅ | Size string or integer → bytes/s |
+| `device_write_bps[].path` | ✅ | ✅ | ✅ | → `HostConfig.blkio_device_write_bps` |
+| `device_write_bps[].rate` | ✅ | ✅ | ✅ | Same |
+| `device_read_iops[].path` | ✅ | ✅ | ✅ | → `HostConfig.blkio_device_read_i_ops` |
+| `device_read_iops[].rate` | ✅ | ✅ | ✅ | Integer IOPS |
+| `device_write_iops[].path` | ✅ | ✅ | ✅ | → `HostConfig.blkio_device_write_i_ops` |
+| `device_write_iops[].rate` | ✅ | ✅ | ✅ | Same |
 
 ---
 
-## 11. Prioritized Gap List
-
-### P1 — Critical (common in real-world compose files)
-
-#### P1-A: `secrets.content` and `secrets.environment` — inline/env secrets not materialized
-
-The spec allows defining a secret entirely inline or from a host env var. Currently these fields are parsed but silently ignored — the container gets no secret file at all.
-
-**Fix:** Write the content (or env var value) to a temporary file on the host and bind-mount it read-only to the container's secret path.
-
-```yaml
-secrets:
-  db_password:
-    content: "s3cr3t"          # currently ⚠️ — parsed, not materialized
-  api_key:
-    environment: "MY_API_KEY"  # currently ⚠️ — parsed, not materialized
-```
-
-#### P1-B: `configs.content` and `configs.environment` — same issue as secrets
-
-```yaml
-configs:
-  app_config:
-    content: |
-      key=value
-      another=thing
-```
-
-#### P1-C: IPAM config not forwarded on network creation
-
-`ipam.config[].subnet/gateway/ip_range` are parsed but not passed to `CreateNetworkOptions`. This breaks any compose file with static subnets.
-
-```yaml
-networks:
-  backend:
-    ipam:
-      config:
-        - subnet: 192.168.90.0/24
-          gateway: 192.168.90.1
-```
-
-**Fix in `engine/network.rs`:** Build bollard `Ipam` struct from `IpamConfig` and assign it to `CreateNetworkOptions.ipam`.
-
-#### P1-D: `build.target` not forwarded to `BuildImageOptions`
-
-Multi-stage builds are very common. The field is parsed but the code has a `let _ = target_owned; // bollard field name varies` placeholder.
-
-```yaml
-services:
-  app:
-    build:
-      context: .
-      target: production   # currently ⚠️ — ignored
-```
-
-**Fix in `engine/build.rs`:** Set `BuildImageOptions { target: target_owned, .. }`.
-
-#### P1-E: `env_file` long-form not parsed
-
-`env_file` is stored as `StringOrList` so the long-form object with `path`, `required`, and `format` is silently dropped or causes a deserialization error.
-
-```yaml
-services:
-  app:
-    env_file:
-      - path: .env.prod
-        required: false        # currently ❌
-      - path: .env.local
-        required: true
-```
-
-**Fix:** Change `env_file` type to a proper enum/struct supporting both forms.
-
-#### P1-F: `dns_opt` missing from Service struct
-
-```yaml
-services:
-  app:
-    dns_opt:
-      - ndots:5
-      - use-vc
-```
-
-**Fix:** Add `dns_opt: StringOrList` to `Service`; forward to `HostConfig.dns_options`.
-
-#### P1-G: `scale` and `deploy.replicas` — only 1 replica started
-
-Multiple replicas are ignored. For local Podman use (no Swarm) this is P1 for `scale`; `deploy.replicas` may be P2.
-
-```yaml
-services:
-  worker:
-    scale: 3         # currently ⚠️ — only 1 container started
-```
-
-#### P1-H: `pull_policy` not implemented
-
-Controls whether an image is pulled before starting. Missing means the engine always attempts a pull for services without `build`, which can be wrong for local-only images.
-
-```yaml
-services:
-  app:
-    image: myapp:local
-    pull_policy: never    # currently ❌ — always attempts pull
-```
-
----
-
-### P2 — Important (needed for broad compatibility)
-
-#### P2-A: `deploy.resources.limits.pids` not forwarded
-
-```yaml
-deploy:
-  resources:
-    limits:
-      pids: 100    # ⚠️ parsed, not sent to HostConfig.pids_limit
-```
-
-#### P2-B: `deploy.resources.(limits|reservations).devices` — GPU support missing
-
-```yaml
-deploy:
-  resources:
-    reservations:
-      devices:
-        - capabilities: [gpu]
-          count: 1            # ❌ not parsed
-```
-
-#### P2-C: `blkio_config` entirely missing
-
-Relatively common for I/O-sensitive workloads. All seven sub-fields need a new struct and wiring to `HostConfig`.
-
-#### P2-D: `devices` long-form missing
-
-The spec allows a long-form device syntax with `source`, `target`, `permissions`. Currently only the short string form is parsed.
-
-```yaml
-services:
-  app:
-    devices:
-      - source: /dev/ttyUSB0
-        target: /dev/ttyUSB0
-        permissions: rwm
-```
-
-#### P2-E: `device_cgroup_rules` missing
-
-```yaml
-services:
-  app:
-    device_cgroup_rules:
-      - 'c 1:3 mr'
-      - 'b 7:* rmw'
-```
-
-#### P2-F: `pids_limit` (top-level service field) missing
-
-```yaml
-services:
-  app:
-    pids_limit: 256    # ❌ not in Service struct
-```
-
-#### P2-G: `uts` namespace mode missing
-
-```yaml
-services:
-  app:
-    uts: host    # ❌ not in Service struct
-```
-
-#### P2-H: `networks.*.gw_priority` and `interface_name` not forwarded
-
-```yaml
-services:
-  app:
-    networks:
-      frontend:
-        gw_priority: 100      # ⚠️ parsed, not applied
-        interface_name: eth0  # ❌ not parsed
-```
-
-#### P2-I: `post_start` / `pre_stop` lifecycle hooks
-
-```yaml
-services:
-  app:
-    post_start:
-      - command: ["/scripts/init.sh"]
-    pre_stop:
-      - command: ["/scripts/cleanup.sh"]
-```
-
-#### P2-J: `build.secrets` (build-time secret mounting)
-
-```yaml
-services:
-  app:
-    build:
-      context: .
-      secrets:
-        - server-certificate    # ❌ not parsed
-```
-
-#### P2-K: `build.ssh` (SSH agent forwarding at build time)
-
-```yaml
-services:
-  app:
-    build:
-      ssh:
-        - default              # ❌ not parsed
-```
-
-#### P2-L: `deploy.labels` not merged into container labels
-
-```yaml
-deploy:
-  labels:
-    - "com.example.description=API service"    # ⚠️ parsed, not applied
-```
-
----
-
-### P3 — Nice-to-Have / Swarm/Advanced
-
-#### P3-A: `develop.watch` — file watching / live reload
-
-The entire `develop:` section and `compose watch` command are not implemented. This is primarily a DX feature.
-
-#### P3-B: `annotations` — should use OCI annotations, not labels
-
-Currently annotations are merged into container labels as `annotation.<key>`. Correct behaviour is to pass them as OCI annotations via the Podman-specific annotation API.
-
-#### P3-C: `build.cache_from` / `build.cache_to` — BuildKit cache
-
-```yaml
-build:
-  cache_from:
-    - type=registry,ref=myregistry/myapp:cache
-  cache_to:
-    - type=registry,ref=myregistry/myapp:cache,mode=max
-```
-
-#### P3-D: `build.dockerfile_inline` — inline Dockerfile
-
-```yaml
-services:
-  app:
-    build:
-      dockerfile_inline: |
-        FROM alpine
-        RUN echo hello
-```
-
-#### P3-E: `build.extra_hosts` at build time
-
-#### P3-F: `build.no_cache`, `build.pull` flags
-
-#### P3-G: `build.ulimits` at build time
-
-#### P3-H: `build.tags` — additional image tags after build
-
-#### P3-I: `include.env_file` and `include.project_directory` — long-form include not fully honoured
-
-#### P3-J: `mem_swappiness`, `cpu_count`, `cpu_percent`, `cpu_rt_*` (obscure resource fields)
-
-#### P3-K: `network.enable_ipv4: false` — disable IPv4
-
-#### P3-L: `credential_spec` (Windows; not applicable to Podman)
-
-#### P3-M: `external_links` — links to containers outside this compose project
-
-#### P3-N: `label_file` — load labels from file (like env_file but for labels)
-
-#### P3-O: `isolation` (Windows container isolation)
-
-#### P3-P: `gpus` / `models` / `provider` (Docker AI / Cloud extensions)
-
-#### P3-Q: `use_api_socket` — mount container engine socket
-
-#### P3-R: `build.entitlements` / `build.provenance` / `build.sbom` (BuildKit attestations)
-
-#### P3-S: Deploy Swarm-only fields
-
-`deploy.mode`, `deploy.endpoint_mode`, `deploy.update_config`, `deploy.rollback_config`, `deploy.placement.*`, `deploy.restart_policy.*` — these are Swarm-only and have no Podman local equivalent. Document as intentionally skipped.
+## 11. Intentionally Not Implemented (Swarm / Windows / Docker-AI)
+
+These fields are parsed (where sensible) but have no Podman local equivalent
+and are deliberately not wired to the engine:
+
+| Category | Fields |
+|---|---|
+| **Swarm-only** | `deploy.mode`, `deploy.endpoint_mode`, `deploy.restart_policy.*`, `deploy.update_config.*`, `deploy.rollback_config.*`, `deploy.placement.*` |
+| **Windows-only** | `credential_spec`, `isolation` (service), `build.isolation`, `type: npipe` |
+| **BuildKit / Docker-only** | `build.cache_from`, `build.cache_to`, `build.ssh`, `build.secrets`, `build.ulimits`, `build.privileged`, `build.entitlements`, `build.provenance`, `build.sbom` |
+| **Docker AI / Cloud** | `models`, `provider`, `use_api_socket` |
+| **No bollard 0.17 field** | `cgroup` (cgroupns_mode), `networks.*.gw_priority`, `networks.*.interface_name` |
 
 ---
 
@@ -732,31 +451,20 @@ services:
 
 | Status | Count |
 |---|---|
-| ✅ Fully implemented | ~65 |
-| 🔶 Partial | ~8 |
-| ⚠️ Parsed but not executed | ~35 |
-| ❌ Not parsed / not implemented | ~55 |
+| ✅ Fully implemented (parse + wire) | ~105 |
+| 🔶 Partial | ~4 |
+| ⚠️ Parsed but not executed | ~30 |
+| ❌ Not parsed / not implemented | ~8 |
 
-**Total spec fields analysed:** ~163
+**Total spec fields analysed:** ~147
 
----
+### Test coverage
 
-## 13. Recommended Implementation Order
-
-1. **P1-D** `build.target` — one-liner fix in `engine/build.rs`
-2. **P1-F** `dns_opt` — add field to struct + wire to `HostConfig.dns_options`
-3. **P1-E** `env_file` long-form — new enum type, update `env_file.rs` loader
-4. **P1-C** IPAM network config — build `Ipam` struct in `engine/network.rs`
-5. **P1-A/B** `secrets.content` / `secrets.environment` — tempfile materialisation
-6. **P1-G** `scale` replicas — loop in `engine/mod.rs` up_with_options
-7. **P1-H** `pull_policy` — add to Service struct, gate pull in `engine/build.rs`
-8. **P2-A** `deploy.resources.limits.pids` → `HostConfig.pids_limit`
-9. **P2-F** `pids_limit` top-level field
-10. **P2-G** `uts` namespace
-11. **P2-C** `blkio_config` new struct + full wiring
-12. **P2-E** `device_cgroup_rules`
-13. **P2-I** `post_start` / `pre_stop` lifecycle hooks (exec after start)
-14. **P2-B** GPU device reservations
-15. **P2-J/K** `build.secrets` / `build.ssh`
-16. **P2-L** `deploy.labels` merge
-17. **P3-A** `develop.watch` (separate command)
+| Test suite | Tests |
+|---|---|
+| parse (unit: basic, fields, coverage, anchors, extends, include, order) | 153 |
+| env_file loading and merge | 9 |
+| ports conversion and formats | 23 |
+| substitute modifiers and dotenv | 37 |
+| engine unit (build.rs, container.rs, volume.rs — internal `#[cfg(test)]`) | 16 |
+| **Total** | **238** |

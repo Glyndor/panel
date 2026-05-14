@@ -200,7 +200,7 @@ fn build_context_tar_with_inline(context: &Path, inline: &str) -> Result<(Vec<u8
     Ok((bytes, inline_name.to_string()))
 }
 
-fn build_context_tar(context: &Path, _dockerfile: &str) -> Result<Vec<u8>> {
+pub(crate) fn build_context_tar(context: &Path, _dockerfile: &str) -> Result<Vec<u8>> {
     let ignore_patterns = read_dockerignore(context);
 
     let encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -301,7 +301,7 @@ fn build_context_tar_with_target(
 ///
 /// Stages after `target` are dropped, making the target stage the effective
 /// final output — equivalent to `docker build --target=<target>`.
-fn truncate_dockerfile_to_target(content: &str, target: &str) -> String {
+pub(crate) fn truncate_dockerfile_to_target(content: &str, target: &str) -> String {
     let target_lower = target.to_lowercase();
     let mut lines: Vec<&str> = Vec::new();
     let mut found_target = false;
@@ -359,4 +359,45 @@ fn is_ignored(path: &str, patterns: &[String]) -> bool {
         }
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_dockerfile_to_target;
+
+    #[test]
+    fn truncate_drops_stages_after_target() {
+        let df = "FROM base AS builder\nRUN build\nFROM builder AS production\nRUN run\nFROM production AS final\nRUN finalize\n";
+        let result = truncate_dockerfile_to_target(df, "production");
+        assert!(result.contains("FROM base AS builder"));
+        assert!(result.contains("FROM builder AS production"));
+        assert!(!result.contains("FROM production AS final"));
+    }
+
+    #[test]
+    fn truncate_unknown_target_returns_full() {
+        let df = "FROM alpine\nRUN echo hi\n";
+        let result = truncate_dockerfile_to_target(df, "nonexistent");
+        assert_eq!(result, df);
+    }
+
+    #[test]
+    fn truncate_case_insensitive_target() {
+        let df = "FROM base AS Builder\nRUN step\nFROM Builder AS Next\nRUN other\n";
+        let result = truncate_dockerfile_to_target(df, "builder");
+        assert!(result.contains("AS Builder"));
+        assert!(!result.contains("AS Next"));
+    }
+
+    #[test]
+    fn truncate_single_stage_target() {
+        let df = "FROM alpine AS app\nRUN echo done\n";
+        let result = truncate_dockerfile_to_target(df, "app");
+        assert!(result.contains("FROM alpine AS app"));
+        assert!(result.contains("echo done"));
+    }
 }

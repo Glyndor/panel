@@ -4,8 +4,9 @@ use std::path::Path;
 use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions};
 use bollard::container::NetworkingConfig;
 use bollard::models::{
-    DeviceMapping, HealthConfig, HostConfig, HostConfigLogConfig, ResourcesBlkioWeightDevice,
-    ResourcesUlimits, RestartPolicy as BollardRestart, RestartPolicyNameEnum, ThrottleDevice,
+    DeviceMapping, DeviceRequest, HealthConfig, HostConfig, HostConfigLogConfig,
+    ResourcesBlkioWeightDevice, ResourcesUlimits, RestartPolicy as BollardRestart,
+    RestartPolicyNameEnum, ThrottleDevice,
 };
 use tracing::warn;
 
@@ -59,8 +60,13 @@ impl Engine {
         let restart_policy = build_restart_policy(service);
         let log_config = build_log_config(service.logging.as_ref());
         let (network_mode, first_network) = resolve_network_mode(service, file);
+        let label_file_labels = build_label_file_labels(service, &self.base_dir);
 
         let mut labels = service.labels.to_map();
+        // Merge label_file labels (lower priority than inline labels).
+        for (k, v) in label_file_labels {
+            labels.entry(k).or_insert(v);
+        }
         // Merge deploy.labels (lower priority than service.labels).
         if let Some(deploy) = &service.deploy {
             for (k, v) in deploy.labels.to_map() {
@@ -94,6 +100,8 @@ impl Engine {
             .iter()
             .map(|s| parse_device(s.as_str()))
             .collect();
+
+        let device_requests = build_device_requests(service);
 
         let tmpfs_list = service.tmpfs.to_list();
         let mut tmpfs_map: HashMap<String, String> =
@@ -159,6 +167,10 @@ impl Engine {
             cpu_period: cpu_period_eff,
             cpuset_cpus: service.cpuset.clone(),
             pids_limit,
+            cpu_count: service.cpu_count,
+            cpu_percent: service.cpu_percent,
+            cpu_realtime_period: service.cpu_rt_period,
+            cpu_realtime_runtime: service.cpu_rt_runtime,
             oom_kill_disable: service.oom_kill_disable,
             oom_score_adj: service.oom_score_adj,
             storage_opt: opt_map(service.storage_opt.clone()),
@@ -169,6 +181,7 @@ impl Engine {
             blkio_device_write_bps: blkio.as_ref().and_then(|b| b.device_write_bps.clone()),
             blkio_device_read_iops: blkio.as_ref().and_then(|b| b.device_read_iops.clone()),
             blkio_device_write_iops: blkio.as_ref().and_then(|b| b.device_write_iops.clone()),
+            device_requests: if device_requests.is_empty() { None } else { Some(device_requests) },
             ..Default::default()
         };
 
@@ -259,7 +272,7 @@ fn build_env(service: &Service, base_dir: &Path) -> Vec<String> {
 }
 
 
-fn build_restart_policy(service: &Service) -> Option<BollardRestart> {
+pub(crate) fn build_restart_policy(service: &Service) -> Option<BollardRestart> {
     service.restart.as_ref().map(|r| match r {
         ComposeRestart::No => BollardRestart {
             name: Some(RestartPolicyNameEnum::NO),
@@ -343,7 +356,7 @@ fn resolve_resources(
     (memory, mem_reservation, memswap, nano_cpus, cpu_quota, cpu_period, pids_limit)
 }
 
-fn parse_device(s: &str) -> DeviceMapping {
+pub(crate) fn parse_device(s: &str) -> DeviceMapping {
     let parts: Vec<&str> = s.splitn(3, ':').collect();
     let host = parts.first().copied().unwrap_or("").to_string();
     let cont = parts
@@ -359,7 +372,7 @@ fn parse_device(s: &str) -> DeviceMapping {
     }
 }
 
-fn tmpfs_options_to_string(
+pub(crate) fn tmpfs_options_to_string(
     opts: Option<&crate::compose::types::TmpfsOptions>,
 ) -> String {
     let opts = match opts {
@@ -376,12 +389,40 @@ fn tmpfs_options_to_string(
     parts.join(",")
 }
 
-fn opt_vec<T>(v: Vec<T>) -> Option<Vec<T>> {
+pub(crate) fn opt_vec<T>(v: Vec<T>) -> Option<Vec<T>> {
     if v.is_empty() { None } else { Some(v) }
 }
 
-fn opt_map<K, V>(m: HashMap<K, V>) -> Option<HashMap<K, V>> {
+pub(crate) fn opt_map<K, V>(m: HashMap<K, V>) -> Option<HashMap<K, V>> {
     if m.is_empty() { None } else { Some(m) }
+}
+
+fn build_label_file_labels(service: &Service, base_dir: &Path) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    for path in service.label_file.to_list() {
+        let full = if std::path::Path::new(&path).is_absolute() {
+            std::path::PathBuf::from(&path)
+        } else {
+            base_dir.join(&path)
+        };
+        let Ok(content) = std::fs::read_to_string(&full) else {
+            warn!("label_file: cannot read {}", full.display());
+            continue;
+        };
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let mut parts = trimmed.splitn(2, '=');
+            let key = parts.next().unwrap_or("").trim().to_string();
+            let val = parts.next().unwrap_or("").to_string();
+            if !key.is_empty() {
+                labels.insert(key, val);
+            }
+        }
+    }
+    labels
 }
 
 struct BlkioHostConfig {
@@ -391,6 +432,67 @@ struct BlkioHostConfig {
     device_write_bps: Option<Vec<ThrottleDevice>>,
     device_read_iops: Option<Vec<ThrottleDevice>>,
     device_write_iops: Option<Vec<ThrottleDevice>>,
+}
+
+fn build_device_requests(service: &Service) -> Vec<DeviceRequest> {
+    use crate::compose::types::CountOrAll;
+
+    let mut requests: Vec<DeviceRequest> = Vec::new();
+
+    // Top-level `gpus:` shorthand.
+    if let Some(gpus) = &service.gpus {
+        requests.push(DeviceRequest {
+            driver: Some("".into()),
+            count: Some(gpus.to_count()),
+            device_ids: None,
+            capabilities: Some(vec![vec!["gpu".into()]]),
+            options: None,
+        });
+    }
+
+    // `deploy.resources.reservations.devices`.
+    if let Some(deploy) = &service.deploy {
+        if let Some(resources) = &deploy.resources {
+            if let Some(reservations) = &resources.reservations {
+                for dev in &reservations.devices {
+                    if dev.capabilities.is_empty() {
+                        continue;
+                    }
+
+                    let count = if !dev.device_ids.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            dev.count
+                                .as_ref()
+                                .map(|c: &CountOrAll| c.to_i64())
+                                .unwrap_or(-1),
+                        )
+                    };
+
+                    let device_ids = if dev.device_ids.is_empty() {
+                        None
+                    } else {
+                        Some(dev.device_ids.clone())
+                    };
+
+                    requests.push(DeviceRequest {
+                        driver: dev.driver.clone().or(Some("".into())),
+                        count,
+                        device_ids,
+                        capabilities: Some(vec![dev.capabilities.clone()]),
+                        options: if dev.options.is_empty() {
+                            None
+                        } else {
+                            Some(dev.options.clone())
+                        },
+                    });
+                }
+            }
+        }
+    }
+
+    requests
 }
 
 fn build_blkio_config(service: &Service) -> Option<BlkioHostConfig> {
@@ -434,4 +536,63 @@ fn build_blkio_config(service: &Service) -> Option<BlkioHostConfig> {
         device_read_iops: to_throttle(&cfg.device_read_iops),
         device_write_iops: to_throttle(&cfg.device_write_iops),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_device, tmpfs_options_to_string};
+    use crate::compose::types::TmpfsOptions;
+
+    #[test]
+    fn parse_device_host_container_perm() {
+        let d = parse_device("/dev/sda:/dev/xvda:rwm");
+        assert_eq!(d.path_on_host.as_deref(), Some("/dev/sda"));
+        assert_eq!(d.path_in_container.as_deref(), Some("/dev/xvda"));
+        assert_eq!(d.cgroup_permissions.as_deref(), Some("rwm"));
+    }
+
+    #[test]
+    fn parse_device_default_perm() {
+        let d = parse_device("/dev/null:/dev/null");
+        assert_eq!(d.cgroup_permissions.as_deref(), Some("rwm"));
+    }
+
+    #[test]
+    fn parse_device_same_path_both_sides() {
+        let d = parse_device("/dev/dri");
+        assert_eq!(d.path_on_host.as_deref(), Some("/dev/dri"));
+        assert_eq!(d.path_in_container.as_deref(), Some("/dev/dri"));
+    }
+
+    #[test]
+    fn tmpfs_options_empty() {
+        let s = tmpfs_options_to_string(None);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn tmpfs_options_size_only() {
+        let opts = TmpfsOptions { size: Some(67108864), mode: None };
+        let s = tmpfs_options_to_string(Some(&opts));
+        assert_eq!(s, "size=67108864");
+    }
+
+    #[test]
+    fn tmpfs_options_mode_only() {
+        let opts = TmpfsOptions { size: None, mode: Some(0o1755) };
+        let s = tmpfs_options_to_string(Some(&opts));
+        assert_eq!(s, "mode=1755");
+    }
+
+    #[test]
+    fn tmpfs_options_size_and_mode() {
+        let opts = TmpfsOptions { size: Some(1024), mode: Some(0o755) };
+        let s = tmpfs_options_to_string(Some(&opts));
+        assert!(s.contains("size=1024"));
+        assert!(s.contains("mode=755"));
+    }
 }

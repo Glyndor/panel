@@ -3,6 +3,7 @@
 pub mod build;
 pub mod common;
 pub mod deploy;
+pub mod develop;
 pub mod network;
 pub mod service;
 pub mod volume;
@@ -10,6 +11,7 @@ pub mod volume;
 pub use build::*;
 pub use common::*;
 pub use deploy::*;
+pub use develop::*;
 pub use network::*;
 pub use service::*;
 pub use volume::*;

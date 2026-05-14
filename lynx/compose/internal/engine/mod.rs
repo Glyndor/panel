@@ -8,6 +8,7 @@ mod health;
 mod network;
 mod profiles;
 mod volume;
+mod watch;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

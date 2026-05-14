@@ -285,6 +285,10 @@ pub(super) fn merge_service(base: Service, override_svc: Service) -> Service {
         cpu_period: override_svc.cpu_period.or(base.cpu_period),
         cpuset: override_svc.cpuset.or(base.cpuset),
         cpus: override_svc.cpus.or(base.cpus),
+        cpu_count: override_svc.cpu_count.or(base.cpu_count),
+        cpu_percent: override_svc.cpu_percent.or(base.cpu_percent),
+        cpu_rt_runtime: override_svc.cpu_rt_runtime.or(base.cpu_rt_runtime),
+        cpu_rt_period: override_svc.cpu_rt_period.or(base.cpu_rt_period),
         mem_limit: override_svc.mem_limit.or(base.mem_limit),
         memswap_limit: override_svc.memswap_limit.or(base.memswap_limit),
         mem_reservation: override_svc.mem_reservation.or(base.mem_reservation),
@@ -306,7 +310,11 @@ pub(super) fn merge_service(base: Service, override_svc: Service) -> Service {
             }
             m
         },
+        label_file: merge_sol(base.label_file, override_svc.label_file),
+        attach: override_svc.attach.or(base.attach),
         pull_policy: override_svc.pull_policy.or(base.pull_policy),
         deploy: override_svc.deploy.or(base.deploy),
+        develop: override_svc.develop.or(base.develop),
+        gpus: override_svc.gpus.or(base.gpus),
     }
 }

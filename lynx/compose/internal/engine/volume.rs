@@ -63,7 +63,7 @@ impl Engine {
 // Free helpers (pub(super) for container.rs)
 // ---------------------------------------------------------------------------
 
-pub(super) fn build_binds(service: &Service, base_dir: &std::path::Path) -> Vec<String> {
+pub(crate) fn build_binds(service: &Service, base_dir: &std::path::Path) -> Vec<String> {
     let mut out = Vec::new();
     for v in &service.volumes {
         match v {
@@ -231,5 +231,100 @@ impl Engine {
     pub(super) fn cleanup_temp_dir(&self) {
         let dir = std::env::temp_dir().join(format!("lynx-compose-{}", self.project));
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::build_binds;
+    use crate::compose::types::{BindOptions, Service, VolumeMount, VolumeOptions, VolumeType};
+    use std::path::Path;
+
+    fn svc_with_volumes(vols: Vec<VolumeMount>) -> Service {
+        Service { volumes: vols, ..Default::default() }
+    }
+
+    #[test]
+    fn short_form_passthrough() {
+        let svc = svc_with_volumes(vec![VolumeMount::Short("./data:/app/data".into())]);
+        let binds = build_binds(&svc, Path::new("/base"));
+        assert_eq!(binds, vec!["./data:/app/data"]);
+    }
+
+    #[test]
+    fn long_form_bind_read_only() {
+        let svc = svc_with_volumes(vec![VolumeMount::Long {
+            volume_type: VolumeType::Bind,
+            source: Some("/host/path".into()),
+            target: "/container/path".into(),
+            read_only: Some(true),
+            bind: None,
+            volume: None,
+            tmpfs: None,
+            consistency: None,
+        }]);
+        let binds = build_binds(&svc, Path::new("/base"));
+        assert_eq!(binds.len(), 1);
+        assert!(binds[0].contains("ro"));
+        assert!(binds[0].contains("/host/path:/container/path"));
+    }
+
+    #[test]
+    fn long_form_bind_with_propagation() {
+        let svc = svc_with_volumes(vec![VolumeMount::Long {
+            volume_type: VolumeType::Bind,
+            source: Some("/host".into()),
+            target: "/cont".into(),
+            read_only: Some(false),
+            bind: Some(BindOptions {
+                propagation: Some("rshared".into()),
+                create_host_path: None,
+                selinux: None,
+            }),
+            volume: None,
+            tmpfs: None,
+            consistency: None,
+        }]);
+        let binds = build_binds(&svc, Path::new("/base"));
+        assert!(binds[0].contains("rshared"));
+    }
+
+    #[test]
+    fn long_form_volume_nocopy() {
+        let svc = svc_with_volumes(vec![VolumeMount::Long {
+            volume_type: VolumeType::Volume,
+            source: Some("myvolume".into()),
+            target: "/data".into(),
+            read_only: None,
+            bind: None,
+            volume: Some(VolumeOptions {
+                nocopy: Some(true),
+                ..Default::default()
+            }),
+            tmpfs: None,
+            consistency: None,
+        }]);
+        let binds = build_binds(&svc, Path::new("/base"));
+        assert!(binds[0].contains("nocopy"));
+    }
+
+    #[test]
+    fn tmpfs_type_excluded_from_binds() {
+        let svc = svc_with_volumes(vec![VolumeMount::Long {
+            volume_type: VolumeType::Tmpfs,
+            source: None,
+            target: "/run".into(),
+            read_only: None,
+            bind: None,
+            volume: None,
+            tmpfs: None,
+            consistency: None,
+        }]);
+        let binds = build_binds(&svc, Path::new("/base"));
+        assert!(binds.is_empty());
     }
 }

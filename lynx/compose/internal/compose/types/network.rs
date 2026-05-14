@@ -56,6 +56,8 @@ pub struct ServiceNetworkConfig {
     pub driver_opts: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gw_priority: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

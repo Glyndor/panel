@@ -4,10 +4,11 @@ use std::collections::HashMap;
 
 use super::build::{BuildConfig, ExtendsConfig};
 use super::common::{
-    BlkioConfig, Command, DependsOn, EnvFile, EnvVars, HealthCheck, Labels, LifecycleHook,
+    BlkioConfig, Command, DependsOn, EnvFile, EnvVars, GpuSpec, HealthCheck, Labels, LifecycleHook,
     LoggingConfig, PortMapping, RestartPolicy, StringOrList, Sysctls, UlimitConfig,
 };
 use super::deploy::DeployConfig;
+use super::develop::DevelopConfig;
 use super::network::ServiceNetworks;
 use super::volume::{ServiceConfigRef, ServiceSecretRef, VolumeMount};
 
@@ -166,6 +167,14 @@ pub struct Service {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_rt_runtime: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_rt_period: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mem_limit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memswap_limit: Option<String>,
@@ -190,6 +199,14 @@ pub struct Service {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub ulimits: IndexMap<String, UlimitConfig>,
 
+    // ---------------- labels / annotations ----------------
+    #[serde(default)]
+    pub label_file: StringOrList,
+
+    // ---------------- attach / log collection ----------------
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attach: Option<bool>,
+
     // ---------------- pull policy ----------------
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pull_policy: Option<String>,
@@ -197,4 +214,12 @@ pub struct Service {
     // ---------------- deploy ----------------
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deploy: Option<DeployConfig>,
+
+    // ---------------- develop (file-watch) ----------------
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub develop: Option<DevelopConfig>,
+
+    // ---------------- gpu shorthand ----------------
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpus: Option<GpuSpec>,
 }
