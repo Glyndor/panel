@@ -323,6 +323,102 @@ impl Engine {
         Ok(())
     }
 
+    /// Stream logs from all attached services until Ctrl+C.
+    ///
+    /// Services with `attach: false` are excluded. Respects the compose spec:
+    /// when not detaching, all attached services have their output forwarded.
+    pub async fn attach_logs(&self, file: &ComposeFile) -> Result<()> {
+        use bollard::container::LogsOptions;
+        use futures::StreamExt;
+
+        let attached: Vec<(String, String)> = file
+            .services
+            .iter()
+            .filter(|(_, s)| s.attach.unwrap_or(true))
+            .map(|(name, s)| (name.clone(), self.container_name(name, s)))
+            .collect();
+
+        if attached.is_empty() {
+            return Ok(());
+        }
+
+        let streams: Vec<_> = attached
+            .iter()
+            .map(|(name, cname)| {
+                let prefix = name.clone();
+                let mut stream = self.docker.logs(
+                    cname,
+                    Some(LogsOptions::<String> {
+                        stdout: true,
+                        stderr: true,
+                        follow: true,
+                        ..Default::default()
+                    }),
+                );
+                async move {
+                    while let Some(msg) = stream.next().await {
+                        match msg {
+                            Ok(LogOutput::StdOut { message }) => {
+                                print!("{prefix} | {}", String::from_utf8_lossy(&message));
+                            }
+                            Ok(LogOutput::StdErr { message }) => {
+                                eprint!("{prefix} | {}", String::from_utf8_lossy(&message));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            })
+            .collect();
+
+        tokio::select! {
+            _ = futures::future::join_all(streams) => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+
+        Ok(())
+    }
+
+    /// Remove containers that belong to this project but are no longer in the compose file.
+    pub async fn remove_orphans(&self, file: &ComposeFile) -> Result<()> {
+        let label = format!("lynx.compose.project={}", self.project);
+        let mut filters: HashMap<String, Vec<String>> = HashMap::new();
+        filters.insert("label".to_string(), vec![label]);
+
+        let running = self
+            .docker
+            .list_containers(Some(ListContainersOptions::<String> {
+                all: true,
+                filters,
+                ..Default::default()
+            }))
+            .await?;
+
+        let known: std::collections::HashSet<String> = file
+            .services
+            .iter()
+            .flat_map(|(n, s)| self.replica_names(n, s))
+            .collect();
+
+        for c in running {
+            let names = c.names.unwrap_or_default();
+            for raw in &names {
+                let name = raw.trim_start_matches('/');
+                if !known.contains(name) {
+                    tracing::info!("removing orphan container {name}");
+                    let _ = self
+                        .docker
+                        .remove_container(
+                            name,
+                            Some(RemoveContainerOptions { force: true, ..Default::default() }),
+                        )
+                        .await;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn pull(&self, file: &ComposeFile) -> Result<()> {
         let futs: Vec<_> = file
             .services
@@ -362,6 +458,26 @@ impl Engine {
                 .await?;
 
             info!("restarted {container_name}");
+
+            // Cascade restart to dependents with depends_on.restart: true.
+            for (dep_name, dep_service) in &file.services {
+                if dep_service.depends_on.restart_for(name) {
+                    let dep_container = self.container_name(dep_name, dep_service);
+                    let _ = self
+                        .docker
+                        .stop_container(&dep_container, Some(StopContainerOptions { t: 10 }))
+                        .await;
+                    if let Err(e) = self
+                        .docker
+                        .start_container(&dep_container, None::<StartContainerOptions<String>>)
+                        .await
+                    {
+                        tracing::warn!("cascade restart of {dep_name} failed: {e}");
+                    } else {
+                        info!("cascade-restarted {dep_container} (depends_on.restart)");
+                    }
+                }
+            }
         }
 
         Ok(())

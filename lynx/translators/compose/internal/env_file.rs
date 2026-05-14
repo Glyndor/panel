@@ -31,6 +31,14 @@ pub fn load_env_file_entries(
     let mut result: HashMap<String, String> = HashMap::new();
 
     for entry in entries {
+        if let EnvFileEntry::Config { format: Some(fmt), .. } = entry {
+            if fmt != "dotenv" {
+                return Err(ComposeError::Unsupported(format!(
+                    "env_file format '{fmt}' not supported (only 'dotenv')"
+                )));
+            }
+        }
+
         let abs = base_dir.join(entry.path());
         let content = match std::fs::read_to_string(&abs) {
             Ok(c) => c,

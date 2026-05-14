@@ -42,6 +42,8 @@ pub struct SecretConfig {
     pub driver_opts: HashMap<String, String>,
     #[serde(default)]
     pub labels: Labels,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_driver: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -58,6 +60,12 @@ pub struct ConfigConfig {
     pub environment: Option<String>,
     #[serde(default)]
     pub labels: Labels,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub driver_opts: HashMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_driver: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -82,4 +90,7 @@ pub struct ComposeFile {
     pub secrets: IndexMap<String, SecretConfig>,
     #[serde(default)]
     pub configs: IndexMap<String, ConfigConfig>,
+    /// Top-level `x-*` extension fields — preserved and round-tripped via `config` subcommand.
+    #[serde(flatten, default, skip_serializing_if = "IndexMap::is_empty")]
+    pub extensions: IndexMap<String, serde_yaml::Value>,
 }

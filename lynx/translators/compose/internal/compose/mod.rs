@@ -26,13 +26,19 @@ pub fn parse_file(path: &Path) -> Result<ComposeFile> {
 
     let includes = std::mem::take(&mut file.include);
     for inc in includes {
+        let (extra_env_files, project_dir_override) = match &inc {
+            types::IncludeConfig::Long { env_file, project_directory, .. } => (
+                env_file.as_ref().map(|ef| ef.to_list()).unwrap_or_default(),
+                project_directory.as_ref().map(|pd| dir.join(pd)),
+            ),
+            _ => (vec![], None),
+        };
         for rel in inc.paths() {
             let inc_path = dir.join(&rel);
-            let inc_dir = inc_path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| dir.clone());
-            let included = parse_file_inner(&inc_path, &inc_dir)?;
+            let inc_dir = project_dir_override.clone().unwrap_or_else(|| {
+                inc_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| dir.clone())
+            });
+            let included = parse_file_inner_with_env(&inc_path, &inc_dir, &extra_env_files)?;
             include::merge_compose_file(&mut file, included);
         }
     }
@@ -124,9 +130,21 @@ pub fn resolve_order(file: &ComposeFile) -> Result<Vec<String>> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn parse_file_inner(path: &Path, dir: &Path) -> Result<ComposeFile> {
+    parse_file_inner_with_env(path, dir, &[])
+}
+
+pub(crate) fn parse_file_inner_with_env(
+    path: &Path,
+    dir: &Path,
+    extra_env_files: &[String],
+) -> Result<ComposeFile> {
     let content = std::fs::read_to_string(path)
         .map_err(|_| ComposeError::FileNotFound(path.display().to_string()))?;
-    let vars = substitute::build_vars(dir);
+    let vars = if extra_env_files.is_empty() {
+        substitute::build_vars(dir)
+    } else {
+        substitute::build_vars_with_env_files(dir, extra_env_files)
+    };
     let substituted = substitute::substitute(&content, &vars)?;
     deserialize_with_merge(&substituted)
 }

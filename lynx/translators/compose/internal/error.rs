@@ -44,6 +44,9 @@ pub enum ComposeError {
 
     #[error("watch error: {0}")]
     Watch(String),
+
+    #[error("unsupported feature: {0}")]
+    Unsupported(String),
 }
 
 pub type Result<T> = std::result::Result<T, ComposeError>;

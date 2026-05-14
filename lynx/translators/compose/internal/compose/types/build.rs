@@ -184,6 +184,13 @@ impl BuildConfig {
         }
     }
 
+    pub fn cache_from(&self) -> &[String] {
+        match self {
+            BuildConfig::Context(_) => &[],
+            BuildConfig::Config { cache_from, .. } => cache_from,
+        }
+    }
+
     pub fn dockerfile_inline(&self) -> Option<&str> {
         match self {
             BuildConfig::Context(_) => None,

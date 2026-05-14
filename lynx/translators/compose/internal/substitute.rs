@@ -112,6 +112,38 @@ pub fn build_vars(dir: &Path) -> HashMap<String, String> {
     vars
 }
 
+/// Build vars additionally loading explicit env files (process env + dotenv + extra files).
+///
+/// Extra files are loaded after dotenv; process env still wins for all keys.
+pub fn build_vars_with_env_files(dir: &Path, extra: &[String]) -> HashMap<String, String> {
+    let mut vars = build_vars(dir);
+    for path in extra {
+        let abs = if std::path::Path::new(path).is_absolute() {
+            std::path::PathBuf::from(path)
+        } else {
+            dir.join(path)
+        };
+        let Ok(content) = std::fs::read_to_string(&abs) else {
+            continue;
+        };
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let (key, value) = if let Some(eq) = trimmed.find('=') {
+                (trimmed[..eq].trim().to_string(), trimmed[eq + 1..].to_string())
+            } else {
+                (trimmed.to_string(), String::new())
+            };
+            if !key.is_empty() {
+                vars.entry(key).or_insert(value);
+            }
+        }
+    }
+    vars
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

@@ -38,6 +38,12 @@ enum Commands {
         /// Run containers in the background.
         #[arg(short, long)]
         detach: bool,
+        /// Watch for file changes and sync/rebuild/restart per develop.watch rules.
+        #[arg(short, long)]
+        watch: bool,
+        /// Remove containers for services not defined in the compose file.
+        #[arg(long)]
+        remove_orphans: bool,
     },
     /// Stop and remove containers.
     Down {
@@ -102,10 +108,16 @@ async fn main() -> anyhow::Result<()> {
     let engine = lynx_compose::Engine::with_base_dir(docker, cli.project, base_dir);
 
     match cli.command {
-        Commands::Up { detach } => {
-            engine
-                .up_with_options(&file, detach, &cli.profile)
-                .await?
+        Commands::Up { detach, watch, remove_orphans } => {
+            if remove_orphans {
+                engine.remove_orphans(&file).await?;
+            }
+            engine.up_with_options(&file, detach, &cli.profile).await?;
+            if watch {
+                engine.watch(&file).await?;
+            } else if !detach {
+                engine.attach_logs(&file).await?;
+            }
         }
         Commands::Down { volumes } => engine.down_with_options(&file, volumes).await?,
         Commands::Ps => engine.ps(&file).await?,

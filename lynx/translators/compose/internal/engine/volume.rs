@@ -1,5 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
 
+use bollard::models::{
+    Mount, MountBindOptions, MountTmpfsOptions, MountTypeEnum, MountVolumeOptions,
+    MountVolumeOptionsDriverConfig,
+};
 use bollard::volume::CreateVolumeOptions;
 use tracing::info;
 
@@ -63,7 +68,7 @@ impl Engine {
 // Free helpers (pub(super) for container.rs)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn build_binds(service: &Service, base_dir: &std::path::Path) -> Vec<String> {
+pub(crate) fn build_binds(service: &Service, base_dir: &Path) -> Vec<String> {
     let mut out = Vec::new();
     for v in &service.volumes {
         match v {
@@ -80,13 +85,16 @@ pub(crate) fn build_binds(service: &Service, base_dir: &std::path::Path) -> Vec<
                 if matches!(volume_type, VolumeType::Tmpfs) {
                     continue;
                 }
+                // Volumes with subpath/labels/driver_config go through the Mount API.
+                if needs_mount_api(volume) {
+                    continue;
+                }
                 let src = source.as_deref().unwrap_or("");
 
-                // Auto-create host directory for bind mounts when requested.
                 if matches!(volume_type, VolumeType::Bind) {
                     if let Some(b) = bind {
                         if b.create_host_path.unwrap_or(false) && !src.is_empty() {
-                            let abs = if std::path::Path::new(src).is_absolute() {
+                            let abs = if Path::new(src).is_absolute() {
                                 std::path::PathBuf::from(src)
                             } else {
                                 base_dir.join(src)
@@ -120,6 +128,79 @@ pub(crate) fn build_binds(service: &Service, base_dir: &std::path::Path) -> Vec<
     out
 }
 
+fn needs_mount_api(volume: &Option<VolumeOptions>) -> bool {
+    volume.as_ref().map_or(false, |v| {
+        v.subpath.is_some() || !v.labels.is_empty() || v.driver_config.is_some()
+    })
+}
+
+pub(crate) fn build_mounts(service: &Service) -> Vec<Mount> {
+    let mut out = Vec::new();
+    for v in &service.volumes {
+        if let VolumeMount::Long { volume_type, source, target, read_only, bind, volume, tmpfs, consistency } = v {
+            if matches!(volume_type, VolumeType::Tmpfs) {
+                // Tmpfs via Mount API.
+                let tmpfs_options = tmpfs.as_ref().map(|t| MountTmpfsOptions {
+                    size_bytes: t.size.map(|s| s as i64),
+                    mode: t.mode.map(|m| m as i64),
+                });
+                out.push(Mount {
+                    target: Some(target.clone()),
+                    source: source.clone(),
+                    typ: Some(MountTypeEnum::TMPFS),
+                    read_only: *read_only,
+                    consistency: consistency.clone(),
+                    tmpfs_options,
+                    ..Default::default()
+                });
+                continue;
+            }
+            if !needs_mount_api(volume) {
+                continue;
+            }
+            let mount_type = match volume_type {
+                VolumeType::Bind => MountTypeEnum::BIND,
+                VolumeType::Volume => MountTypeEnum::VOLUME,
+                VolumeType::Npipe => MountTypeEnum::NPIPE,
+                VolumeType::Cluster => MountTypeEnum::CLUSTER,
+                VolumeType::Tmpfs => unreachable!(),
+            };
+            let bind_options = bind.as_ref().map(|b| MountBindOptions {
+                propagation: b.propagation.as_deref().and_then(|p| p.parse().ok()),
+                ..Default::default()
+            });
+            let volume_options = volume.as_ref().map(|v| {
+                let labels = if v.labels.is_empty() {
+                    None
+                } else {
+                    Some(v.labels.to_map())
+                };
+                let driver_config = v.driver_config.as_ref().map(|dc| MountVolumeOptionsDriverConfig {
+                    name: dc.name.clone(),
+                    options: if dc.options.is_empty() { None } else { Some(dc.options.clone()) },
+                });
+                MountVolumeOptions {
+                    no_copy: v.nocopy,
+                    labels,
+                    driver_config,
+                    subpath: v.subpath.clone(),
+                }
+            });
+            out.push(Mount {
+                target: Some(target.clone()),
+                source: source.clone(),
+                typ: Some(mount_type),
+                read_only: *read_only,
+                consistency: consistency.clone(),
+                bind_options,
+                volume_options,
+                ..Default::default()
+            });
+        }
+    }
+    out
+}
+
 fn extend_bind_opts(opts: &mut Vec<String>, b: &BindOptions) {
     if let Some(p) = &b.propagation {
         opts.push(p.clone());
@@ -143,9 +224,11 @@ impl Engine {
     ) -> Result<Vec<String>> {
         let mut binds = Vec::new();
         for secret_ref in &service.secrets {
-            let (name, target_override) = match secret_ref {
-                ServiceSecretRef::Short(s) => (s.clone(), None),
-                ServiceSecretRef::Long { source, target, .. } => (source.clone(), target.clone()),
+            let (name, target_override, ref_mode, ref_uid, ref_gid) = match secret_ref {
+                ServiceSecretRef::Short(s) => (s.clone(), None, None, None, None),
+                ServiceSecretRef::Long { source, target, mode, uid, gid } => {
+                    (source.clone(), target.clone(), *mode, uid.clone(), gid.clone())
+                }
             };
             if let Some(config) = file.secrets.get(&name) {
                 let target = target_override.unwrap_or_else(|| format!("/run/secrets/{name}"));
@@ -154,12 +237,18 @@ impl Engine {
                         binds.push(format!("{host_path}:{target}:ro"));
                     }
                     SecretConfig { content: Some(content), .. } => {
-                        let path = self.materialize_inline("secrets", &name, content.as_bytes())?;
+                        let path = self.materialize_inline_full(
+                            "secrets", &name, content.as_bytes(),
+                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                        )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
                     SecretConfig { environment: Some(env_var), .. } => {
                         let value = std::env::var(env_var).unwrap_or_default();
-                        let path = self.materialize_inline("secrets", &name, value.as_bytes())?;
+                        let path = self.materialize_inline_full(
+                            "secrets", &name, value.as_bytes(),
+                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                        )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
                     SecretConfig { external: Some(true), .. } => {
@@ -179,9 +268,11 @@ impl Engine {
     ) -> Result<Vec<String>> {
         let mut binds = Vec::new();
         for config_ref in &service.configs {
-            let (name, target_override) = match config_ref {
-                ServiceConfigRef::Short(s) => (s.clone(), None),
-                ServiceConfigRef::Long { source, target, .. } => (source.clone(), target.clone()),
+            let (name, target_override, ref_mode, ref_uid, ref_gid) = match config_ref {
+                ServiceConfigRef::Short(s) => (s.clone(), None, None, None, None),
+                ServiceConfigRef::Long { source, target, mode, uid, gid } => {
+                    (source.clone(), target.clone(), *mode, uid.clone(), gid.clone())
+                }
             };
             if let Some(cfg) = file.configs.get(&name) {
                 let target = target_override.unwrap_or_else(|| format!("/{name}"));
@@ -190,12 +281,18 @@ impl Engine {
                         binds.push(format!("{host_path}:{target}:ro"));
                     }
                     ConfigConfig { content: Some(content), .. } => {
-                        let path = self.materialize_inline("configs", &name, content.as_bytes())?;
+                        let path = self.materialize_inline_full(
+                            "configs", &name, content.as_bytes(),
+                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                        )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
                     ConfigConfig { environment: Some(env_var), .. } => {
                         let value = std::env::var(env_var).unwrap_or_default();
-                        let path = self.materialize_inline("configs", &name, value.as_bytes())?;
+                        let path = self.materialize_inline_full(
+                            "configs", &name, value.as_bytes(),
+                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                        )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
                     ConfigConfig { external: Some(true), .. } => {
@@ -210,20 +307,37 @@ impl Engine {
 
     /// Write `content` to a per-project temp file and return its path.
     ///
-    /// Files live at `$TMPDIR/lynx-compose-<project>/<kind>/<name>` and are
-    /// cleaned up by `Engine::cleanup_temp_dir` when the stack goes down.
-    fn materialize_inline(
+    fn materialize_inline_full(
         &self,
         kind: &str,
         name: &str,
         content: &[u8],
+        mode: Option<u32>,
+        uid: Option<&str>,
+        gid: Option<&str>,
     ) -> Result<std::path::PathBuf> {
+        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir()
             .join(format!("lynx-compose-{}", self.project))
             .join(kind);
         std::fs::create_dir_all(&dir).map_err(ComposeError::Io)?;
         let path = dir.join(name);
         std::fs::write(&path, content).map_err(ComposeError::Io)?;
+        if let Some(m) = mode {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(m))
+                .map_err(ComposeError::Io)?;
+        }
+        // Best-effort chown — succeeds in rootful Podman, silently ignored in rootless.
+        let uid_val: libc::uid_t =
+            uid.and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
+        let gid_val: libc::gid_t =
+            gid.and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
+        if uid_val != u32::MAX || gid_val != u32::MAX {
+            use std::ffi::CString;
+            if let Ok(p) = CString::new(path.to_string_lossy().as_bytes()) {
+                unsafe { libc::chown(p.as_ptr(), uid_val, gid_val); }
+            }
+        }
         Ok(path)
     }
 

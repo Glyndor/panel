@@ -115,6 +115,7 @@ impl Engine {
             platform: platform_owned,
             shmsize: if shmsize > 0 { Some(shmsize) } else { None },
             extrahosts: if extrahosts.is_empty() { None } else { Some(extrahosts) },
+            cachefrom: build.cache_from().to_vec(),
             ..Default::default()
         };
 

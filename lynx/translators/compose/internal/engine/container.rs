@@ -18,7 +18,7 @@ use crate::error::{ComposeError, Result};
 use crate::{env_file, ports, size};
 
 use super::network::{build_endpoint_settings, resolve_network_mode};
-use super::volume::build_binds;
+use super::volume::{build_binds, build_mounts};
 use super::Engine;
 
 impl Engine {
@@ -127,8 +127,11 @@ impl Engine {
         let mut all_links: Vec<String> = service.links.clone();
         all_links.extend_from_slice(&service.external_links);
 
+        let mounts = build_mounts(service);
+
         let host_config = HostConfig {
             binds: opt_vec(all_binds),
+            mounts: if mounts.is_empty() { None } else { Some(mounts) },
             network_mode: network_mode.clone(),
             restart_policy,
             port_bindings: opt_map(port_bindings),
@@ -147,6 +150,7 @@ impl Engine {
             ipc_mode: service.ipc.clone(),
             uts_mode: service.uts.clone(),
             cgroup_parent: service.cgroup_parent.clone(),
+            cgroupns_mode: service.cgroup.as_deref().and_then(|v| v.parse().ok()),
             shm_size: service.shm_size.as_deref().and_then(size::parse_memory),
             userns_mode: service.userns_mode.clone(),
             security_opt: opt_vec(service.security_opt.clone()),
@@ -182,6 +186,7 @@ impl Engine {
             blkio_device_read_iops: blkio.as_ref().and_then(|b| b.device_read_iops.clone()),
             blkio_device_write_iops: blkio.as_ref().and_then(|b| b.device_write_iops.clone()),
             device_requests: if device_requests.is_empty() { None } else { Some(device_requests) },
+            annotations: opt_map(service.annotations.to_map()),
             ..Default::default()
         };
 
@@ -273,24 +278,40 @@ fn build_env(service: &Service, base_dir: &Path) -> Vec<String> {
 
 
 pub(crate) fn build_restart_policy(service: &Service) -> Option<BollardRestart> {
-    service.restart.as_ref().map(|r| match r {
-        ComposeRestart::No => BollardRestart {
-            name: Some(RestartPolicyNameEnum::NO),
-            maximum_retry_count: None,
-        },
-        ComposeRestart::Always => BollardRestart {
-            name: Some(RestartPolicyNameEnum::ALWAYS),
-            maximum_retry_count: None,
-        },
-        ComposeRestart::OnFailure { max_attempts } => BollardRestart {
-            name: Some(RestartPolicyNameEnum::ON_FAILURE),
-            maximum_retry_count: max_attempts.map(|n| n as i64),
-        },
-        ComposeRestart::UnlessStopped => BollardRestart {
-            name: Some(RestartPolicyNameEnum::UNLESS_STOPPED),
-            maximum_retry_count: None,
-        },
-    })
+    if let Some(r) = &service.restart {
+        return Some(match r {
+            ComposeRestart::No => BollardRestart {
+                name: Some(RestartPolicyNameEnum::NO),
+                maximum_retry_count: None,
+            },
+            ComposeRestart::Always => BollardRestart {
+                name: Some(RestartPolicyNameEnum::ALWAYS),
+                maximum_retry_count: None,
+            },
+            ComposeRestart::OnFailure { max_attempts } => BollardRestart {
+                name: Some(RestartPolicyNameEnum::ON_FAILURE),
+                maximum_retry_count: max_attempts.map(|n| n as i64),
+            },
+            ComposeRestart::UnlessStopped => BollardRestart {
+                name: Some(RestartPolicyNameEnum::UNLESS_STOPPED),
+                maximum_retry_count: None,
+            },
+        });
+    }
+    // Fall back to deploy.restart_policy when service.restart is absent.
+    // delay/window are Swarm-specific and have no container API equivalent.
+    if let Some(drp) = service.deploy.as_ref().and_then(|d| d.restart_policy.as_ref()) {
+        let name = match drp.condition.as_deref().unwrap_or("any") {
+            "none" => RestartPolicyNameEnum::NO,
+            "on-failure" => RestartPolicyNameEnum::ON_FAILURE,
+            _ => RestartPolicyNameEnum::UNLESS_STOPPED,
+        };
+        return Some(BollardRestart {
+            name: Some(name),
+            maximum_retry_count: drp.max_attempts.map(|n| n as i64),
+        });
+    }
+    None
 }
 
 fn build_log_config(logging: Option<&LoggingConfig>) -> Option<HostConfigLogConfig> {

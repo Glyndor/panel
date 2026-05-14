@@ -79,6 +79,8 @@ pub struct NetworkConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_ipv6: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_ipv4: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attachable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipam: Option<IpamConfig>,
