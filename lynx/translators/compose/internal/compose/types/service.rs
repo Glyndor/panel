@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::build::{BuildConfig, ExtendsConfig};
-use super::common::{
+use super::{
     BlkioConfig, Command, DependsOn, EnvFile, EnvVars, GpuSpec, HealthCheck, Labels, LifecycleHook,
     LoggingConfig, PortMapping, RestartPolicy, StringOrList, Sysctls, UlimitConfig,
 };

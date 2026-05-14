@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::common::Labels;
+use super::Labels;
 
 // ---------------------------------------------------------------------------
 // DeployConfig
