@@ -43,7 +43,7 @@ pub fn substitute(input: &str, vars: &HashMap<String, String>) -> Result<String>
                 let value = resolve_modifier(var, modifier, vars)?;
                 out.push_str(&value);
             }
-            Some(c) if is_var_char(*c) => {
+            Some(c) if is_var_start(*c) => {
                 // Bare `$VAR`
                 let var = collect_var_name(&mut chars);
                 let value = vars.get(&var).cloned().unwrap_or_default();
@@ -115,6 +115,10 @@ pub fn build_vars(dir: &Path) -> HashMap<String, String> {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+fn is_var_start(c: char) -> bool {
+    c.is_alphabetic() || c == '_'
+}
 
 fn is_var_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'

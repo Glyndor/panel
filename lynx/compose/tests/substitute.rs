@@ -1,2 +1,2 @@
-mod dotenv;
-mod modifiers;
+#[path = "substitute/dotenv.rs"] mod dotenv;
+#[path = "substitute/modifiers.rs"] mod modifiers;

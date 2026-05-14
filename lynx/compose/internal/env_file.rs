@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::compose::types::EnvFileEntry;
 use crate::error::{ComposeError, Result};
 
 /// Load all `env_file` paths relative to `base_dir`.
@@ -16,18 +17,31 @@ use crate::error::{ComposeError, Result};
 ///
 /// Returns [`ComposeError::FileNotFound`] when an env file does not exist.
 pub fn load_env_files(paths: &[String], base_dir: &Path) -> Result<HashMap<String, String>> {
+    let entries: Vec<EnvFileEntry> = paths.iter().map(|p| EnvFileEntry::Path(p.clone())).collect();
+    load_env_file_entries(&entries, base_dir)
+}
+
+/// Load env_file entries supporting both short and long-form (with `required` and `format`).
+///
+/// When `required: false`, a missing file is silently skipped instead of returning an error.
+pub fn load_env_file_entries(
+    entries: &[EnvFileEntry],
+    base_dir: &Path,
+) -> Result<HashMap<String, String>> {
     let mut result: HashMap<String, String> = HashMap::new();
 
-    for rel in paths {
-        let abs = base_dir.join(rel);
+    for entry in entries {
+        let abs = base_dir.join(entry.path());
         let content = match std::fs::read_to_string(&abs) {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ComposeError::FileNotFound(abs.display().to_string()));
+                if entry.required() {
+                    return Err(ComposeError::FileNotFound(abs.display().to_string()));
+                } else {
+                    continue;
+                }
             }
-            Err(e) => {
-                return Err(ComposeError::Io(e));
-            }
+            Err(e) => return Err(ComposeError::Io(e)),
         };
 
         for line in content.lines() {
@@ -41,7 +55,6 @@ pub fn load_env_files(paths: &[String], base_dir: &Path) -> Result<HashMap<Strin
                 let v = trimmed[eq + 1..].to_string();
                 (k, v)
             } else {
-                // KEY without value — treat as empty string.
                 (trimmed.to_string(), String::new())
             };
 
@@ -49,7 +62,6 @@ pub fn load_env_files(paths: &[String], base_dir: &Path) -> Result<HashMap<Strin
                 continue;
             }
 
-            // First file wins for duplicate keys.
             result.entry(key).or_insert(value);
         }
     }

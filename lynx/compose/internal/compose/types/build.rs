@@ -1,0 +1,122 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use super::common::{EnvVars, Labels, StringOrList};
+
+// ---------------------------------------------------------------------------
+// IncludeConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum IncludeConfig {
+    Path(String),
+    Long {
+        path: StringOrList,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_file: Option<StringOrList>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_directory: Option<String>,
+    },
+}
+
+impl IncludeConfig {
+    pub fn paths(&self) -> Vec<String> {
+        match self {
+            IncludeConfig::Path(p) => vec![p.clone()],
+            IncludeConfig::Long { path, .. } => path.to_list(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExtendsConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ExtendsConfig {
+    Service(String),
+    Long {
+        service: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
+}
+
+impl ExtendsConfig {
+    pub fn service(&self) -> &str {
+        match self {
+            ExtendsConfig::Service(s) => s,
+            ExtendsConfig::Long { service, .. } => service,
+        }
+    }
+
+    pub fn file(&self) -> Option<&str> {
+        match self {
+            ExtendsConfig::Service(_) => None,
+            ExtendsConfig::Long { file, .. } => file.as_deref(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BuildConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum BuildConfig {
+    Context(String),
+    Config {
+        context: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dockerfile: Option<String>,
+        #[serde(default)]
+        args: EnvVars,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        cache_from: Vec<String>,
+        #[serde(default)]
+        labels: Labels,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shm_size: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        platforms: Vec<String>,
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        additional_contexts: HashMap<String, String>,
+    },
+}
+
+impl BuildConfig {
+    pub fn context(&self) -> &str {
+        match self {
+            BuildConfig::Context(ctx) => ctx,
+            BuildConfig::Config { context, .. } => context,
+        }
+    }
+
+    pub fn dockerfile(&self) -> Option<&str> {
+        match self {
+            BuildConfig::Context(_) => None,
+            BuildConfig::Config { dockerfile, .. } => dockerfile.as_deref(),
+        }
+    }
+
+    pub fn args(&self) -> EnvVars {
+        match self {
+            BuildConfig::Context(_) => EnvVars::Empty,
+            BuildConfig::Config { args, .. } => args.clone(),
+        }
+    }
+
+    pub fn target(&self) -> Option<&str> {
+        match self {
+            BuildConfig::Context(_) => None,
+            BuildConfig::Config { target, .. } => target.as_deref(),
+        }
+    }
+}

@@ -339,7 +339,7 @@ services:
       - app_cfg
       - source: inline_cfg
         target: /etc/inline.conf
-        mode: 0644
+        mode: 420
 "#;
     let file = parse_str(yaml).unwrap();
     assert!(file.configs.contains_key("app_cfg"));
