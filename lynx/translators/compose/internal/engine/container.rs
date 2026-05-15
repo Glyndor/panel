@@ -42,7 +42,7 @@ impl Engine {
             .as_deref()
             .ok_or_else(|| ComposeError::NoImageOrBuild(service_name.into()))?;
 
-        let env = build_env(service, &self.base_dir);
+        let env = build_env(service, &self.base_dir)?;
 
         let binds = build_binds(service, &self.base_dir);
         let secret_binds = self.build_secret_binds(service, file)?;
@@ -268,20 +268,14 @@ impl Engine {
 // Container config helpers
 // ---------------------------------------------------------------------------
 
-fn build_env(service: &Service, base_dir: &Path) -> Vec<String> {
+fn build_env(service: &Service, base_dir: &Path) -> Result<Vec<String>> {
     let entries = service.env_file.to_entries();
     let env_file_vars = if !entries.is_empty() {
-        match env_file::load_env_file_entries(&entries, base_dir) {
-            Ok(vars) => vars,
-            Err(e) => {
-                warn!("failed to load env_file: {e}");
-                HashMap::new()
-            }
-        }
+        env_file::load_env_file_entries(&entries, base_dir)?
     } else {
         HashMap::new()
     };
-    env_file::merge_env(service.environment.to_map(), env_file_vars)
+    Ok(env_file::merge_env(service.environment.to_map(), env_file_vars))
 }
 
 

@@ -361,7 +361,10 @@ fn is_ignored(path: &str, patterns: &[String]) -> bool {
             if path.starts_with(pattern.as_str()) {
                 return true;
             }
-        } else if path == pattern || path.starts_with(&format!("{pattern}/")) {
+        } else if path == pattern.as_str()
+            || (path.starts_with(pattern.as_str())
+                && path.as_bytes().get(pattern.len()) == Some(&b'/'))
+        {
             return true;
         }
     }

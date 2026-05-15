@@ -331,7 +331,10 @@ fn is_ignored(path: &str, patterns: &[String]) -> bool {
             if path.starts_with(pat.as_str()) {
                 return true;
             }
-        } else if path == pat || path.starts_with(&format!("{pat}/")) {
+        } else if path == pat.as_str()
+            || (path.starts_with(pat.as_str())
+                && path.as_bytes().get(pat.len()) == Some(&b'/'))
+        {
             return true;
         }
     }
@@ -349,7 +352,11 @@ fn is_included(path: &str, patterns: &[String]) -> bool {
             if path.starts_with(pat.as_str()) {
                 return true;
             }
-        } else if path == pat || path.ends_with(&format!("/{pat}")) {
+        } else if path == pat.as_str()
+            || (path.len() > pat.len() + 1
+                && path.as_bytes()[path.len() - pat.len() - 1] == b'/'
+                && path.ends_with(pat.as_str()))
+        {
             return true;
         }
     }

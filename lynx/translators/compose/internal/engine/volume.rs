@@ -328,6 +328,16 @@ impl Engine {
         use std::io::Write;
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 
+        // Reject names that could escape the temp dir (path traversal).
+        if std::path::Path::new(name)
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(ComposeError::Unsupported(format!(
+                "{kind} name must not contain path separators or '..': {name}"
+            )));
+        }
+
         let dir = std::env::temp_dir()
             .join(format!("lynx-compose-{}", self.project))
             .join(kind);
