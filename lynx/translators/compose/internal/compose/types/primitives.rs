@@ -1,3 +1,11 @@
+//! Primitive compose field types shared across multiple service keys.
+//!
+//! [`Command`] — shell string or exec list for `command:`/`entrypoint:`.
+//! [`StringOrList`] — single string or list of strings (used in `dns:`, `cap_add:`, etc.).
+//! [`Labels`] — list or map form for `labels:`.
+//! [`LoggingConfig`] — `logging:` driver and options.
+//! [`Sysctls`] — list or map form for `sysctls:`.
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -91,6 +99,7 @@ impl Labels {
     }
 }
 
+/// `logging:` configuration — driver name and driver-specific options.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct LoggingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +108,7 @@ pub struct LoggingConfig {
     pub options: HashMap<String, String>,
 }
 
+/// Kernel parameters — list (`["net.ipv4.ip_forward=1"]`) or map form.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(untagged)]
 pub enum Sysctls {

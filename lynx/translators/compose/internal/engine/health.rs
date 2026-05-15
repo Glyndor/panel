@@ -1,3 +1,10 @@
+//! Health and completion polling for service dependency ordering.
+//!
+//! [`Engine::wait_healthy`] polls until the container reports `healthy` (used when
+//! a dependent service declares `condition: service_healthy`).
+//! [`Engine::wait_completed`] polls until the container exits with code 0 (used for
+//! `condition: service_completed_successfully`).
+
 use crate::compose::types::Service;
 use crate::error::{ComposeError, Result};
 
@@ -5,6 +12,8 @@ use super::Engine;
 
 impl Engine {
     /// Poll a container until its health status is `healthy` or timeout.
+    ///
+    /// Uses `healthcheck.retries` (default 30) with a 2 s interval between probes.
     pub(super) async fn wait_healthy(
         &self,
         container_name: &str,
@@ -34,6 +43,9 @@ impl Engine {
     }
 
     /// Poll a container until it exits with status 0.
+    ///
+    /// Tries for up to 600 seconds (1 s interval). Errors if the container
+    /// exits with a non-zero code or if the deadline is exceeded.
     pub(super) async fn wait_completed(&self, container_name: &str) -> Result<()> {
         for _ in 0..600 {
             let info = self.docker.inspect_container(container_name, None).await?;

@@ -1,3 +1,8 @@
+//! Environment variable and env-file types for the `environment:` and `env_file:` service fields.
+//!
+//! [`EnvVars`] accepts list or map form. [`EnvFile`] accepts a single path, a list of paths,
+//! or a list of long-form [`EnvFileEntry`] objects with optional `required:` and `format:` fields.
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

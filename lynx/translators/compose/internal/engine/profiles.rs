@@ -1,3 +1,5 @@
+//! Profile filtering — determines which services run given the active profile set.
+
 use std::collections::HashSet;
 
 use crate::compose::types::Service;
