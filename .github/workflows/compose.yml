@@ -1,0 +1,61 @@
+name: lynx-compose
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "lynx/translators/compose/**"
+      - "lynx/Cargo.toml"
+      - ".github/workflows/compose.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "lynx/translators/compose/**"
+      - "lynx/Cargo.toml"
+      - ".github/workflows/compose.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: Check & Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: fmt
+        run: cargo fmt --package lynx-compose -- --check
+
+      - name: clippy
+        run: cargo clippy --package lynx-compose -- -D warnings
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: test
+        run: cargo test --package lynx-compose
