@@ -14,12 +14,11 @@ path = "internal/lib.rs"
 [dependencies]
 tokio = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-serde_yaml = "0.9"
+serde_yaml = { package = "yaml_serde", version = "0.10" }
 bollard = "0.17"
 clap = { version = "4", features = ["derive", "env"] }
 indexmap = { version = "2", features = ["serde"] }

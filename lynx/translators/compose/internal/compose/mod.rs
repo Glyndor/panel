@@ -162,7 +162,48 @@ pub(crate) fn parse_file_inner_with_env(
 
 fn deserialize_with_merge(content: &str) -> Result<ComposeFile> {
     let mut value: serde_yaml::Value = serde_yaml::from_str(content)?;
-    value.apply_merge().ok();
+    apply_merge_keys(&mut value);
     let file: ComposeFile = serde_yaml::from_value(value)?;
     Ok(file)
+}
+
+/// Recursively resolve YAML merge keys (`<<: *anchor`) in a `Value` tree.
+///
+/// yaml_serde does not expose `apply_merge()` — this replaces it.
+/// Merge semantics: keys from the anchor fill in only where the child has no value.
+fn apply_merge_keys(value: &mut serde_yaml::Value) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            for v in mapping.values_mut() {
+                apply_merge_keys(v);
+            }
+            let merge_key = serde_yaml::Value::String("<<".to_string());
+            if let Some(merge_val) = mapping.remove(&merge_key) {
+                let bases: Vec<serde_yaml::Mapping> = match merge_val {
+                    serde_yaml::Value::Mapping(m) => vec![m],
+                    serde_yaml::Value::Sequence(seq) => seq
+                        .into_iter()
+                        .filter_map(|v| match v {
+                            serde_yaml::Value::Mapping(m) => Some(m),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => vec![],
+                };
+                for base in bases {
+                    for (k, v) in base {
+                        if !mapping.contains_key(&k) {
+                            mapping.insert(k, v);
+                        }
+                    }
+                }
+            }
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for v in seq.iter_mut() {
+                apply_merge_keys(v);
+            }
+        }
+        _ => {}
+    }
 }
