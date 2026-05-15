@@ -1,3 +1,9 @@
+//! Build, include, and extends configuration types.
+//!
+//! [`BuildConfig`] represents the `build:` key — either a bare context string
+//! or a full long-form config. [`IncludeConfig`] and [`ExtendsConfig`] handle
+//! the `include:` and `extends:` top-level / per-service directives respectively.
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -67,6 +73,7 @@ impl ExtendsConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 pub enum BuildConfig {
     Context(String),
     Config {

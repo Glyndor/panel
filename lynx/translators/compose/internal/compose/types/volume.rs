@@ -1,3 +1,10 @@
+//! Volume, secret, and config mount types.
+//!
+//! [`VolumeMount`] covers the `volumes:` list on a service (short and long forms).
+//! [`VolumeConfig`] describes top-level named volume definitions.
+//! [`ServiceSecretRef`] and [`ServiceConfigRef`] are the per-service `secrets:` /
+//! `configs:` attachment points (short = just the name, long = full options).
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -65,6 +72,7 @@ pub struct TmpfsOptions {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 pub enum VolumeMount {
     Short(String),
     Long {

@@ -1,3 +1,12 @@
+//! Volume and secret/config mount helpers.
+//!
+//! [`Engine::create_volumes`] pre-creates named volumes before containers start.
+//! [`build_binds`] and [`build_mounts`] convert `volumes:` entries to bollard's
+//! bind-string and Mount-API formats respectively (tmpfs and volumes with
+//! subpath/labels require the Mount API; simple bind/volume mounts use strings).
+//! [`Engine::build_secret_binds`] and [`Engine::build_config_binds`] materialise
+//! inline secrets/configs to a restricted temp directory and return bind strings.
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -129,7 +138,7 @@ pub(crate) fn build_binds(service: &Service, base_dir: &Path) -> Vec<String> {
 }
 
 fn needs_mount_api(volume: &Option<VolumeOptions>) -> bool {
-    volume.as_ref().map_or(false, |v| {
+    volume.as_ref().is_some_and(|v| {
         v.subpath.is_some() || !v.labels.is_empty() || v.driver_config.is_some()
     })
 }
@@ -316,28 +325,56 @@ impl Engine {
         uid: Option<&str>,
         gid: Option<&str>,
     ) -> Result<std::path::PathBuf> {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+
         let dir = std::env::temp_dir()
             .join(format!("lynx-compose-{}", self.project))
             .join(kind);
-        std::fs::create_dir_all(&dir).map_err(ComposeError::Io)?;
+
+        // Create dir with 0o700 so only the owning user can list/enter it.
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .map_err(ComposeError::Io)?;
+
         let path = dir.join(name);
-        std::fs::write(&path, content).map_err(ComposeError::Io)?;
+
+        // Create file with 0o600 atomically — no world-readable window before chmod.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(ComposeError::Io)?;
+        file.write_all(content).map_err(ComposeError::Io)?;
+        drop(file);
+
         if let Some(m) = mode {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(m))
                 .map_err(ComposeError::Io)?;
         }
-        // Best-effort chown — succeeds in rootful Podman, silently ignored in rootless.
-        let uid_val: libc::uid_t =
-            uid.and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
-        let gid_val: libc::gid_t =
-            gid.and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
+
+        // Best-effort chown — succeeds in rootful Podman, no-op in rootless.
+        let uid_val: libc::uid_t = uid.and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
+        let gid_val: libc::gid_t = gid.and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
         if uid_val != u32::MAX || gid_val != u32::MAX {
             use std::ffi::CString;
-            if let Ok(p) = CString::new(path.to_string_lossy().as_bytes()) {
-                unsafe { libc::chown(p.as_ptr(), uid_val, gid_val); }
+            use std::os::unix::ffi::OsStrExt;
+            if let Ok(p) = CString::new(path.as_os_str().as_bytes()) {
+                let rc = unsafe { libc::chown(p.as_ptr(), uid_val, gid_val) };
+                if rc != 0 {
+                    tracing::warn!(
+                        "chown failed for {}: {}",
+                        path.display(),
+                        std::io::Error::last_os_error()
+                    );
+                }
             }
         }
+
         Ok(path)
     }
 

@@ -1,3 +1,10 @@
+//! Development watch configuration types for the `develop:` service key.
+//!
+//! [`DevelopConfig`] holds a list of [`WatchRule`]s that drive the file-watch
+//! engine. Each rule specifies a host path to monitor, an [`WatchAction`] to
+//! take on change (sync, rebuild, restart, or sync+exec), and optional
+//! ignore/include glob filters.
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

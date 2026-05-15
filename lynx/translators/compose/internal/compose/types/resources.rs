@@ -1,3 +1,9 @@
+//! Resource limit and device types shared across service and deploy configuration.
+//!
+//! [`UlimitConfig`] maps to the `ulimits:` map — either a single value (soft==hard)
+//! or an explicit soft/hard pair. [`BlkioConfig`] covers block I/O weight and rate
+//! limits. [`GpuSpec`] handles the `gpus:` shorthand (`"all"` or a count).
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

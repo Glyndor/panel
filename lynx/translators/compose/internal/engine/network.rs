@@ -1,3 +1,11 @@
+//! Network creation and service attachment.
+//!
+//! [`Engine::create_networks`] creates all non-external networks declared in
+//! the compose file before any containers start. [`Engine::connect_extra_networks`]
+//! attaches a running container to any additional networks beyond its primary
+//! one (Docker API creates containers connected to only one network; extras need
+//! a separate `ConnectNetwork` call).
+
 use std::collections::HashMap;
 
 use bollard::models::{EndpointIpamConfig, EndpointSettings, Ipam, IpamConfig as BollardIpamConfig};

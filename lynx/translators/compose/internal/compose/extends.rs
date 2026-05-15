@@ -1,3 +1,13 @@
+//! `extends:` directive — inheritance and field merging between service definitions.
+//!
+//! Services can extend another service within the same file or from an external
+//! compose file referenced by path. Resolution is recursive (chains are supported)
+//! and cycle detection uses a visited set to error early.
+//!
+//! Merge semantics: scalar fields from the child win; collection fields
+//! (env vars, labels, vectors) are merged with the child taking precedence on
+//! overlapping keys. See [`merge_service`] for full field-by-field rules.
+
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -106,6 +116,17 @@ fn resolve_one_extends(
     let base_name = extends.service().to_string();
 
     let base_service = if let Some(file_path) = extends.file() {
+        let fp = std::path::Path::new(file_path);
+        if fp.is_absolute() {
+            return Err(ComposeError::Extends(format!(
+                "service '{name}' extends.file must be relative, got absolute path: {file_path}"
+            )));
+        }
+        if fp.components().any(|c| c == std::path::Component::ParentDir) {
+            return Err(ComposeError::Extends(format!(
+                "service '{name}' extends.file must not traverse parent directories: {file_path}"
+            )));
+        }
         let abs = base_dir.join(file_path);
         let abs = abs.canonicalize().unwrap_or(abs);
         let dir = abs

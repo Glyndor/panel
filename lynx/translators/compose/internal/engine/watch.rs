@@ -1,3 +1,14 @@
+//! File-watch engine for `develop: watch:` rules.
+//!
+//! [`Engine::watch`] sets up an `inotify`/`kqueue` watcher via `notify`, then
+//! dispatches each change event to the matching [`WatchRule`]. Debouncing
+//! collapses rapid bursts into a single action. Actions:
+//! - `sync` — tar the changed file and upload it into the container
+//! - `rebuild` — stop container, rebuild image, restart
+//! - `restart` — stop and start the container without rebuilding
+//! - `sync+restart` — sync first, then restart
+//! - `sync+exec` — sync, then run the rule's `exec` command inside the container
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -21,6 +32,7 @@ use super::Engine;
 // Rule tracking
 // ---------------------------------------------------------------------------
 
+/// Pre-resolved watch rule: service identity + rule + absolute host path for fast matching.
 struct RuleEntry {
     service_name: String,
     container_name: String,
@@ -107,11 +119,8 @@ impl Engine {
             // Drain events within debounce window.
             let mut paths = event.paths;
             let deadline = tokio::time::Instant::now() + debounce;
-            loop {
-                match tokio::time::timeout_at(deadline, rx.recv()).await {
-                    Ok(Some(Ok(e))) => paths.extend(e.paths),
-                    _ => break,
-                }
+            while let Ok(Some(Ok(e))) = tokio::time::timeout_at(deadline, rx.recv()).await {
+                paths.extend(e.paths);
             }
 
             // Dispatch each changed path.

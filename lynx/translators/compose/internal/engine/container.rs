@@ -1,3 +1,11 @@
+//! Container creation, configuration, and lifecycle management.
+//!
+//! [`Engine::create_and_start`] is the main entry point: it assembles the full
+//! bollard `Config` from a [`Service`] definition (env vars, mounts, ports,
+//! resource limits, networking) and starts the container. Helper functions
+//! (`build_env`, `build_mounts`, `resolve_resources`, etc.) each own one
+//! slice of the config to keep the mapping manageable.
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -342,6 +350,7 @@ fn build_healthcheck(hc: &HealthCheck) -> HealthConfig {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn resolve_resources(
     service: &Service,
 ) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) {

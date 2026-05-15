@@ -1,3 +1,9 @@
+//! Network configuration types for both top-level networks and per-service attachments.
+//!
+//! [`NetworkConfig`] describes a named network in the `networks:` top-level block.
+//! [`ServiceNetworks`] is the per-service attachment — either a bare list of names
+//! or a map with [`ServiceNetworkConfig`] options (aliases, IP, priority, etc.).
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

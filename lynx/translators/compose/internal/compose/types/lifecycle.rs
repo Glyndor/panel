@@ -1,3 +1,11 @@
+//! Lifecycle and dependency types: `depends_on:`, `healthcheck:`, `restart:`, and lifecycle hooks.
+//!
+//! [`DependsOn`] models the service dependency graph — either a simple name list
+//! or a map with per-dependency [`ServiceCondition`] semantics. [`HealthCheck`]
+//! covers the inline healthcheck definition. [`RestartPolicy`] parses the
+//! `restart:` string field. [`LifecycleHook`] is used for `post_start:` and
+//! `pre_stop:` hook entries.
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -88,10 +96,7 @@ impl HealthCheck {
         if self.disable.unwrap_or(false) {
             return true;
         }
-        match &self.test {
-            Some(Command::Exec(v)) if v.len() == 1 && v[0].eq_ignore_ascii_case("NONE") => true,
-            _ => false,
-        }
+        matches!(&self.test, Some(Command::Exec(v)) if v.len() == 1 && v[0].eq_ignore_ascii_case("NONE"))
     }
 }
 
@@ -126,7 +131,7 @@ impl<'de> Deserialize<'de> for RestartPolicy {
             "no" => Ok(RestartPolicy::No),
             "always" => Ok(RestartPolicy::Always),
             "unless-stopped" => Ok(RestartPolicy::UnlessStopped),
-            s if s == "on-failure" => Ok(RestartPolicy::OnFailure { max_attempts: None }),
+            "on-failure" => Ok(RestartPolicy::OnFailure { max_attempts: None }),
             s if s.starts_with("on-failure:") => {
                 let n = s["on-failure:".len()..]
                     .parse::<u32>()

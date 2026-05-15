@@ -38,7 +38,11 @@ pub fn parse_memory(s: &str) -> Option<i64> {
         _ => return None,
     };
 
-    Some((num * multiplier as f64) as i64)
+    let bytes = num * multiplier as f64;
+    if bytes > i64::MAX as f64 {
+        return None;
+    }
+    Some(bytes as i64)
 }
 
 /// Parse a CPU count string like `"0.5"`, `"1"`, `"2.5"` into nano-CPUs

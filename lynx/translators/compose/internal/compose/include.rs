@@ -1,3 +1,9 @@
+//! `include:` directive — merging externally included compose files.
+//!
+//! Included files are merged into the parent: services, volumes, networks,
+//! secrets, and configs from the included file are added only if the key does
+//! not already exist in the parent (parent wins on conflict).
+
 use super::types::ComposeFile;
 
 /// Merge `other` into `target`.

@@ -1,3 +1,10 @@
+//! Image build and pull operations.
+//!
+//! [`Engine::pull_image`] fetches a pre-built image from a registry.
+//! [`Engine::build_service`] compiles a build context tar, passes it to the
+//! Podman/Docker API, and applies any extra tags. Inline Dockerfiles and
+//! multi-stage `--target` trimming are handled before the tar is assembled.
+
 use std::path::Path;
 
 use bollard::image::{BuildImageOptions, CreateImageOptions, TagImageOptions};
@@ -73,13 +80,12 @@ impl Engine {
         };
 
         let arg_map = build.args().to_map();
-        let env: std::collections::HashMap<String, String> = std::env::vars().collect();
         let mut build_args: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for (k, v) in arg_map {
             let value = match v {
                 Some(val) => val,
-                None => env.get(&k).cloned().unwrap_or_default(),
+                None => std::env::var(&k).unwrap_or_default(),
             };
             build_args.insert(k, value);
         }

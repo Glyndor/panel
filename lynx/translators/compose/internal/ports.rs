@@ -35,6 +35,7 @@ pub fn parse_ports(ports: &[PortMapping]) -> Result<Vec<ParsedPort>> {
 ///
 /// Returns `(port_bindings, exposed_ports)`.  Port 0 is encoded as an empty
 /// host_port string per the Docker API convention for "auto-assign".
+#[allow(clippy::type_complexity)]
 pub fn to_bollard(
     ports: &[ParsedPort],
 ) -> (
@@ -88,10 +89,15 @@ fn parse_one(mapping: &PortMapping) -> Result<Vec<ParsedPort>> {
         } => {
             let proto = protocol.clone().unwrap_or_else(|| "tcp".into());
             let hip = host_ip.clone().unwrap_or_default();
-            let host_port = published.as_ref().map(|p| match p {
-                StringOrU16::Number(n) => *n,
-                StringOrU16::String(s) => s.parse::<u16>().unwrap_or(*target),
-            });
+            let host_port = published
+                .as_ref()
+                .map(|p| match p {
+                    StringOrU16::Number(n) => Ok(*n),
+                    StringOrU16::String(s) => s.parse::<u16>().map_err(|_| {
+                        ComposeError::InvalidPort(format!("invalid published port: {s}"))
+                    }),
+                })
+                .transpose()?;
             Ok(vec![ParsedPort {
                 container_port: *target,
                 protocol: proto,
@@ -159,7 +165,7 @@ fn parse_short(s: &str) -> Result<Vec<ParsedPort>> {
             }
             Ok(host_ports
                 .into_iter()
-                .zip(container_ports.into_iter())
+                .zip(container_ports)
                 .map(|(hp, cp)| ParsedPort {
                     container_port: cp,
                     protocol: proto.clone(),
@@ -190,7 +196,7 @@ fn parse_with_ip(ip: &str, after: &str, proto: &str, full: &str) -> Result<Vec<P
         }
         Ok(host_ports
             .into_iter()
-            .zip(container_ports.into_iter())
+            .zip(container_ports)
             .map(|(hp, cp)| ParsedPort {
                 container_port: cp,
                 protocol: proto.to_string(),
@@ -220,6 +226,8 @@ fn split_last_colon(s: &str) -> (&str, &str) {
     }
 }
 
+const MAX_PORT_RANGE: usize = 1024;
+
 /// Expand `start-end` or a single port string.
 fn expand_port_range(s: &str) -> Result<Vec<u16>> {
     let s = s.trim();
@@ -233,6 +241,12 @@ fn expand_port_range(s: &str) -> Result<Vec<u16>> {
         if start > end {
             return Err(ComposeError::InvalidPort(format!(
                 "start > end in range: {s}"
+            )));
+        }
+        let count = (end as usize) - (start as usize) + 1;
+        if count > MAX_PORT_RANGE {
+            return Err(ComposeError::InvalidPort(format!(
+                "port range too large ({count} ports, max {MAX_PORT_RANGE}): {s}"
             )));
         }
         Ok((start..=end).collect())

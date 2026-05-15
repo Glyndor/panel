@@ -1,3 +1,9 @@
+//! [`Service`] struct — the central type representing a single compose service.
+//!
+//! Fields map 1-to-1 to the Docker Compose specification. Optional fields use
+//! `Option<T>` so that absent keys are distinguishable from explicit nulls
+//! during `extends:` merging.
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

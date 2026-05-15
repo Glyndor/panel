@@ -1,3 +1,10 @@
+//! Deployment configuration types for the `deploy:` service key.
+//!
+//! These types map to the Docker Swarm / Compose deploy spec and are used by
+//! the engine to set resource limits, replica counts, restart policies, and
+//! placement constraints. Most fields are optional; absent fields inherit the
+//! container runtime defaults.
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};

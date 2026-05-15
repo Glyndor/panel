@@ -34,6 +34,17 @@ pub fn parse_file(path: &Path) -> Result<ComposeFile> {
             _ => (vec![], None),
         };
         for rel in inc.paths() {
+            let rel_path = std::path::Path::new(&rel);
+            if rel_path.is_absolute() {
+                return Err(ComposeError::Include(format!(
+                    "include path must be relative, got absolute path: {rel}"
+                )));
+            }
+            if rel_path.components().any(|c| c == std::path::Component::ParentDir) {
+                return Err(ComposeError::Include(format!(
+                    "include path must not traverse parent directories: {rel}"
+                )));
+            }
             let inc_path = dir.join(&rel);
             let inc_dir = project_dir_override.clone().unwrap_or_else(|| {
                 inc_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| dir.clone())

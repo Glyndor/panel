@@ -1,3 +1,8 @@
+//! Error types for the lynx-compose library.
+//!
+//! All fallible operations return [`Result<T>`], which is an alias for
+//! `std::result::Result<T, ComposeError>`.
+
 use thiserror::Error;
 
 /// All errors produced by lynx-compose.
