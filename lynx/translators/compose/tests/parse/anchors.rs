@@ -1,4 +1,6 @@
 use lynx_compose::parse_str;
+use lynx_compose::parse_file;
+use std::io::Write;
 
 #[test]
 fn yaml_anchor_and_alias() {
@@ -49,4 +51,81 @@ services:
     let env = file.services["app"].environment.to_map();
     assert_eq!(env.get("NODE_ENV").and_then(|v| v.clone()).as_deref(), Some("production"));
     assert_eq!(env.get("PORT").and_then(|v| v.clone()).as_deref(), Some("3000"));
+}
+
+#[test]
+fn yaml_merge_key_sequence_of_anchors() {
+    let yaml = r#"
+x-a: &a
+  restart: always
+x-b: &b
+  environment:
+    FROM_B: "yes"
+
+services:
+  app:
+    image: alpine
+    <<: [*a, *b]
+"#;
+    let file = parse_str(yaml).unwrap();
+    assert_eq!(
+        file.services["app"].restart.as_ref().map(|r| format!("{r:?}")),
+        Some("Always".to_string())
+    );
+    assert!(file.services["app"]
+        .environment
+        .to_map()
+        .contains_key("FROM_B"));
+}
+
+#[test]
+fn include_absolute_path_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("docker-compose.yml");
+    writeln!(
+        std::fs::File::create(&main).unwrap(),
+        "{}",
+        "include:\n  - /etc/passwd\nservices:\n  app:\n    image: alpine"
+    )
+    .unwrap();
+    assert!(parse_file(&main).is_err());
+}
+
+#[test]
+fn include_parent_traversal_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("docker-compose.yml");
+    writeln!(
+        std::fs::File::create(&main).unwrap(),
+        "{}",
+        "include:\n  - ../../secret.yml\nservices:\n  app:\n    image: alpine"
+    )
+    .unwrap();
+    assert!(parse_file(&main).is_err());
+}
+
+#[test]
+fn extends_file_absolute_path_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("docker-compose.yml");
+    writeln!(
+        std::fs::File::create(&main).unwrap(),
+        "{}",
+        "services:\n  app:\n    extends:\n      service: base\n      file: /etc/shadow"
+    )
+    .unwrap();
+    assert!(parse_file(&main).is_err());
+}
+
+#[test]
+fn extends_file_parent_traversal_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("docker-compose.yml");
+    writeln!(
+        std::fs::File::create(&main).unwrap(),
+        "{}",
+        "services:\n  app:\n    extends:\n      service: base\n      file: ../../other.yml"
+    )
+    .unwrap();
+    assert!(parse_file(&main).is_err());
 }

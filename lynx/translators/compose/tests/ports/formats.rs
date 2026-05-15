@@ -77,3 +77,30 @@ fn range_with_udp() {
     assert_eq!(ports.len(), 11);
     assert!(ports.iter().all(|p| p.protocol == "udp"));
 }
+
+#[test]
+fn range_too_large_rejected() {
+    assert!(parse_ports(&[short("1-1025")]).is_err());
+    assert!(parse_ports(&[short("1-65535")]).is_err());
+}
+
+#[test]
+fn range_at_limit_accepted() {
+    let ports = parse_ports(&[short("1-1024")]).unwrap();
+    assert_eq!(ports.len(), 1024);
+}
+
+#[test]
+fn long_form_invalid_published_string_rejected() {
+    use lynx_compose::compose::types::StringOrU16;
+    let mapping = lynx_compose::compose::types::PortMapping::Long {
+        target: 80,
+        published: Some(StringOrU16::String("invalid".to_string())),
+        protocol: None,
+        host_ip: None,
+        mode: None,
+        app_protocol: None,
+        name: None,
+    };
+    assert!(parse_ports(&[mapping]).is_err());
+}

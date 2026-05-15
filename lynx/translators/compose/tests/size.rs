@@ -46,6 +46,13 @@ fn memory_invalid() {
 }
 
 #[test]
+fn memory_overflow_returns_none() {
+    // Values that overflow i64::MAX must return None, not wrap around.
+    assert!(parse_memory("99999999t").is_none());
+    assert!(parse_memory("9999999999g").is_none());
+}
+
+#[test]
 fn cpus_fractional() {
     assert_eq!(parse_cpus("0.5"), Some(500_000_000));
     assert_eq!(parse_cpus("1"), Some(1_000_000_000));
