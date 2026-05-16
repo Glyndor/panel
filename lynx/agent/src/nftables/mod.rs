@@ -21,10 +21,16 @@ pub struct OrgNetwork {
 
 /// Apply the full lynx-agent nftables ruleset atomically.
 /// Replaces the entire table on every call — never incremental.
-pub fn apply(ruleset: &Ruleset) -> Result<()> {
+/// Returns the rendered ruleset string so callers can store it for restore.
+pub fn apply(ruleset: &Ruleset) -> Result<String> {
     let nft = render_ruleset(ruleset);
     run_nft(&nft).context("nftables apply")?;
-    Ok(())
+    Ok(nft)
+}
+
+/// Re-apply a previously rendered ruleset string directly (used for restore).
+pub fn apply_raw(nft: &str) -> Result<()> {
+    run_nft(nft).context("nftables apply_raw")
 }
 
 /// Compute checksum of the live lynx-agent table for divergence detection.

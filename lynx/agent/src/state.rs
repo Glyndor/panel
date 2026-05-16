@@ -10,6 +10,8 @@ pub struct AppState {
     pub lockdown: Arc<AtomicBool>,
     /// Last known-good nftables checksum after apply(). None = no ruleset applied yet.
     pub nft_checksum: Arc<Mutex<Option<String>>>,
+    /// Rendered nft ruleset from last successful apply() — used for restore.
+    pub nft_last_ruleset: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -23,5 +25,13 @@ impl AppState {
 
     pub fn expected_nft_checksum(&self) -> Option<String> {
         self.nft_checksum.lock().unwrap().clone()
+    }
+
+    pub fn set_nft_last_ruleset(&self, ruleset: String) {
+        *self.nft_last_ruleset.lock().unwrap() = Some(ruleset);
+    }
+
+    pub fn nft_last_ruleset(&self) -> Option<String> {
+        self.nft_last_ruleset.lock().unwrap().clone()
     }
 }

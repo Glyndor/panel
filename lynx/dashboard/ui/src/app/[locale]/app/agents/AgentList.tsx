@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { NftablesAlert } from "./NftablesAlert";
 
 type Agent = {
 	id: string;
@@ -11,6 +12,11 @@ type Agent = {
 	version: string | null;
 	last_heartbeat: string | null;
 };
+
+interface NftStatus {
+	diverged: boolean;
+	detail?: string | null;
+}
 
 async function fetchAgents(token: string): Promise<Agent[]> {
 	if (!token) return [];
@@ -23,6 +29,19 @@ async function fetchAgents(token: string): Promise<Agent[]> {
 		return res.json();
 	} catch {
 		return [];
+	}
+}
+
+async function fetchNftStatus(token: string, agentId: string): Promise<NftStatus> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/agents/${agentId}/nftables-status`, {
+			headers: { Authorization: `Bearer ${token}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return { diverged: false };
+		return res.json();
+	} catch {
+		return { diverged: false };
 	}
 }
 
@@ -50,8 +69,19 @@ export async function AgentList({
 	token: string;
 	locale: string;
 }) {
-	const agents = await fetchAgents(token);
-	const t = await getTranslations({ locale, namespace: "app.agents" });
+	const [agents, t] = await Promise.all([
+		fetchAgents(token),
+		getTranslations({ locale, namespace: "app.agents" }),
+	]);
+
+	// Fetch nftables divergence status for online agents in parallel
+	const nftStatuses = await Promise.all(
+		agents.map((a) =>
+			a.status === "online"
+				? fetchNftStatus(token, a.id)
+				: Promise.resolve({ diverged: false } as NftStatus),
+		),
+	);
 
 	if (agents.length === 0) {
 		return (
@@ -68,41 +98,58 @@ export async function AgentList({
 
 	return (
 		<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-			{agents.map((agent) => (
-				<Card key={agent.id}>
-					<CardHeader className="pb-2">
-						<div className="flex items-center justify-between gap-2">
-							<CardTitle className="text-base truncate">
-								{agent.name}
-							</CardTitle>
-							<Badge variant={STATUS_BADGE[agent.status]}>
-								{t(`status.${agent.status}`)}
-							</Badge>
-						</div>
-					</CardHeader>
-					<CardContent className="space-y-1 text-sm text-muted-foreground">
-						<p>
-							<span className="font-medium text-foreground">
-								{t("wgIp")}
-							</span>{" "}
-							{agent.wg_ip}
-						</p>
-						<p>
-							<span className="font-medium text-foreground">
-								{t("version")}
-							</span>{" "}
-							{agent.version ?? "—"}
-						</p>
-						<p>
-							<span className="font-medium text-foreground">
-								{t("lastHeartbeat")}
-							</span>{" "}
-							{formatHeartbeat(agent.last_heartbeat)}
-						</p>
-						<p className="truncate text-xs opacity-60">{agent.id}</p>
-					</CardContent>
-				</Card>
-			))}
+			{agents.map((agent, i) => {
+				const nft: NftStatus = nftStatuses[i] ?? { diverged: false };
+				return (
+					<Card key={agent.id}>
+						<CardHeader className="pb-2">
+							<div className="flex items-center justify-between gap-2">
+								<CardTitle className="text-base truncate">
+									{agent.name}
+								</CardTitle>
+								<Badge variant={STATUS_BADGE[agent.status]}>
+									{t(`status.${agent.status}`)}
+								</Badge>
+							</div>
+						</CardHeader>
+						<CardContent className="space-y-1 text-sm text-muted-foreground">
+							<p>
+								<span className="font-medium text-foreground">
+									{t("wgIp")}
+								</span>{" "}
+								{agent.wg_ip}
+							</p>
+							<p>
+								<span className="font-medium text-foreground">
+									{t("version")}
+								</span>{" "}
+								{agent.version ?? "—"}
+							</p>
+							<p>
+								<span className="font-medium text-foreground">
+									{t("lastHeartbeat")}
+								</span>{" "}
+								{formatHeartbeat(agent.last_heartbeat)}
+							</p>
+							<p className="truncate text-xs opacity-60">{agent.id}</p>
+							{nft.diverged && (
+								<NftablesAlert
+									agentId={agent.id}
+									detail={nft.detail ?? null}
+									labels={{
+										title: t("nftDiverged"),
+										restore: t("nftRestore"),
+										accept: t("nftAccept"),
+										restoreSuccess: t("nftRestoreSuccess"),
+										acceptSuccess: t("nftAcceptSuccess"),
+										error: t("nftError"),
+									}}
+								/>
+							)}
+						</CardContent>
+					</Card>
+				);
+			})}
 		</div>
 	);
 }

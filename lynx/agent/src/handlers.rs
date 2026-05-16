@@ -95,7 +95,9 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
     );
 
     let result: std::result::Result<Value, AgentError> = match cmd_type.as_str() {
-        "nftables.apply" => handle_nftables_apply(&cmd),
+        "nftables.apply" => handle_nftables_apply(state, &cmd),
+        "nftables.restore" => handle_nftables_restore(state, &cmd),
+        "nftables.accept" => handle_nftables_accept(state, &cmd),
         "container.list" => handle_container_list(&cmd),
         "tenant.ensure" => handle_tenant_ensure(&cmd),
         "container.deploy" => handle_container_deploy(&cmd),
@@ -144,7 +146,7 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
 // Individual command handlers (sync — no I/O blocking path)
 // --------------------------------------------------------------------------
 
-fn handle_nftables_apply(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+fn handle_nftables_apply(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
         return Err(AgentError::Forbidden("nftables.apply requires write permission"));
     }
@@ -160,8 +162,45 @@ fn handle_nftables_apply(cmd: &VerifiedCommand) -> std::result::Result<Value, Ag
         org_networks: vec![],
     };
 
-    nftables::apply(&ruleset).map_err(anyhow::Error::from)?;
+    let rendered = nftables::apply(&ruleset).map_err(anyhow::Error::from)?;
+    let checksum = nftables::checksum_of(&ruleset);
+    state.set_nft_checksum(checksum);
+    state.set_nft_last_ruleset(rendered);
     Ok(json!({ "ok": true }))
+}
+
+fn handle_nftables_restore(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("nftables.restore requires write permission"));
+    }
+
+    let ruleset = state
+        .nft_last_ruleset()
+        .ok_or_else(|| AgentError::BadRequest("no ruleset has been applied yet"))?;
+
+    nftables::apply_raw(&ruleset).map_err(anyhow::Error::from)?;
+
+    // Recompute and update checksum from the restored ruleset
+    let checksum = nftables::current_checksum().map_err(anyhow::Error::from)?;
+    state.set_nft_checksum(checksum);
+
+    Ok(json!({ "ok": true, "action": "restored" }))
+}
+
+fn handle_nftables_accept(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("nftables.accept requires write permission"));
+    }
+
+    let current = nftables::current_checksum().map_err(anyhow::Error::from)?;
+    state.set_nft_checksum(current.clone());
+
+    // Also store current live state as the "last ruleset" so future divergence
+    // checks compare against the accepted state. We store an empty marker since
+    // we don't have the original text — restore would not be meaningful here.
+    state.set_nft_last_ruleset(String::new());
+
+    Ok(json!({ "ok": true, "action": "accepted", "checksum": &current[..16] }))
 }
 
 fn handle_container_list(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {

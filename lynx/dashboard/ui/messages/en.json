@@ -122,6 +122,12 @@
       "done": "Done",
       "noAgents": "No agents connected",
       "noAgentsDesc": "Run the agent install script on a VPS to connect it here.",
+      "nftDiverged": "nftables ruleset modified outside Lynx",
+      "nftRestore": "Restore Lynx rules",
+      "nftAccept": "Accept changes",
+      "nftRestoreSuccess": "nftables ruleset restored.",
+      "nftAcceptSuccess": "Manual changes accepted.",
+      "nftError": "Failed to resolve nftables divergence.",
       "version": "Version:",
       "lastHeartbeat": "Last heartbeat:",
       "status": {

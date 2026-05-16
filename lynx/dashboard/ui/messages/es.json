@@ -122,6 +122,12 @@
       "done": "Hecho",
       "noAgents": "No hay agentes conectados",
       "noAgentsDesc": "Ejecuta el script de instalación del agente en un VPS para conectarlo.",
+      "nftDiverged": "Ruleset de nftables modificado fuera de Lynx",
+      "nftRestore": "Restaurar reglas Lynx",
+      "nftAccept": "Aceptar cambios",
+      "nftRestoreSuccess": "Ruleset de nftables restaurado.",
+      "nftAcceptSuccess": "Cambios manuales aceptados.",
+      "nftError": "Error al resolver divergencia de nftables.",
       "version": "Versión:",
       "lastHeartbeat": "Último latido:",
       "status": {

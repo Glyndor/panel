@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
         lockdown: lockdown.clone(),
         nft_checksum: Arc::new(std::sync::Mutex::new(None)),
+        nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
     };
 
     // Audit log sync task

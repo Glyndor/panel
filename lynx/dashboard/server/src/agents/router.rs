@@ -13,6 +13,8 @@ pub fn router() -> Router<AppState> {
         .route("/{id}", get(handlers::get_agent).delete(handlers::remove_agent))
         .route("/{id}/heartbeat", post(handlers::relay_heartbeat))
         .route("/{id}/cmd", post(handlers::send_command))
+        .route("/{id}/nftables-status", get(handlers::nftables_status))
+        .route("/{id}/nftables-resolve", post(handlers::nftables_resolve))
 }
 
 /// Routes that agents call directly (own sync token, not user JWT)
