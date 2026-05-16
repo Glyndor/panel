@@ -44,6 +44,10 @@ pub async fn rotate_keys(
         rotate_wireguard_psks(&state, user.user_id).await?;
     }
 
+    if matches!(req.scope.as_str(), "certificates" | "all") {
+        rotate_agent_certs(&state).await?;
+    }
+
     // Log rotation event
     let log_id = Uuid::now_v7();
     sqlx::query!(
@@ -549,4 +553,37 @@ pub async fn list_update_log(
         .collect();
 
     Ok(Json(result))
+}
+
+/// Re-issue CA-signed certificates for all registered agents.
+/// Sends a `cert.update` command to online agents so they can verify commands
+/// from the new cert going forward.
+async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
+    use base64ct::{Base64UrlUnpadded, Encoding};
+    use crate::crypto::pki;
+
+    let agents = sqlx::query!("SELECT id FROM agents")
+        .fetch_all(&state.db)
+        .await?;
+
+    let ca_public_key = Base64UrlUnpadded::encode_string(&state.config.ca_public_bytes);
+
+    for agent in &agents {
+        let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
+            .map_err(|e| AppError::Internal(e))?;
+
+        sqlx::query!(
+            "UPDATE agents SET cert_payload = $1, cert_signature = $2, cert_expires_at = NOW() + INTERVAL '90 days' WHERE id = $3",
+            cert.payload,
+            cert.signature,
+            agent.id,
+        )
+        .execute(&state.db)
+        .await?;
+
+        tracing::debug!(agent_id = %agent.id, "cert re-issued");
+    }
+
+    tracing::info!(count = agents.len(), ca_pubkey = %ca_public_key, "agent certs rotated");
+    Ok(())
 }

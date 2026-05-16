@@ -16,6 +16,10 @@ pub struct Config {
     pub jwt_enc_private_bytes: Zeroizing<[u8; 32]>,
     /// X25519 public key (32 bytes)
     pub jwt_enc_public_bytes: [u8; 32],
+    /// CA Ed25519 seed (32 bytes) — signs agent certificates
+    pub ca_private_seed: Zeroizing<[u8; 32]>,
+    /// CA Ed25519 public key (32 bytes) — distributed to agents for verification
+    pub ca_public_bytes: [u8; 32],
 }
 
 impl Config {
@@ -25,6 +29,7 @@ impl Config {
         let pepper = load_secret("PEPPER", "PEPPER_FILE")?;
         let (jwt_sign_private_seed, jwt_sign_public_bytes) = load_or_gen_ed25519()?;
         let (jwt_enc_private_bytes, jwt_enc_public_bytes) = load_or_gen_x25519()?;
+        let (ca_private_seed, ca_public_bytes) = load_or_gen_ca_ed25519()?;
 
         let database_url = load_secret("DATABASE_URL", "DATABASE_URL_FILE")
             .map(|s| s.as_str().to_owned())
@@ -43,6 +48,8 @@ impl Config {
             jwt_sign_public_bytes,
             jwt_enc_private_bytes,
             jwt_enc_public_bytes,
+            ca_private_seed,
+            ca_public_bytes,
         })
     }
 }
@@ -116,4 +123,29 @@ fn load_or_gen_x25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {
     let public = x25519_dalek::PublicKey::from(&secret);
 
     Ok((Zeroizing::new(priv_bytes), public.to_bytes()))
+}
+
+fn load_or_gen_ca_ed25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {
+    if let (Ok(p), Ok(q)) = (
+        load_secret("CA_PRIVATE_KEY", "CA_PRIVATE_KEY_FILE"),
+        load_secret("CA_PUBLIC_KEY", "CA_PUBLIC_KEY_FILE"),
+    ) {
+        let seed: [u8; 32] = Base64::decode_vec(p.trim())
+            .context("CA_PRIVATE_KEY base64")?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("CA_PRIVATE_KEY must be 32 bytes"))?;
+        let pub_bytes: [u8; 32] = Base64::decode_vec(q.trim())
+            .context("CA_PUBLIC_KEY base64")?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("CA_PUBLIC_KEY must be 32 bytes"))?;
+        return Ok((Zeroizing::new(seed), pub_bytes));
+    }
+
+    tracing::warn!("CA keypair not configured — using ephemeral CA (dev only, agents will reject certs on restart)");
+
+    let mut seed = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut seed);
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let pub_bytes = signing_key.verifying_key().to_bytes();
+    Ok((Zeroizing::new(seed), pub_bytes))
 }

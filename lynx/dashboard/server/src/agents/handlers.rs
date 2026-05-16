@@ -81,6 +81,23 @@ pub async fn register_agent(
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
     }
 
+    // Issue CA-signed certificate for this agent
+    let cert = crate::crypto::pki::issue_cert(&state.config.ca_private_seed, agent.id)
+        .map_err(anyhow::Error::from)?;
+
+    // Store cert payload + signature in DB (nullable — keep for re-issue on rotation)
+    sqlx::query!(
+        "UPDATE agents SET cert_payload = $1, cert_signature = $2, cert_expires_at = NOW() + INTERVAL '90 days' WHERE id = $3",
+        cert.payload,
+        cert.signature,
+        agent.id,
+    )
+    .execute(&state.db)
+    .await?;
+
+    use base64ct::Encoding as _;
+    let ca_public_key = base64ct::Base64UrlUnpadded::encode_string(&state.config.ca_public_bytes);
+
     let event_id = uuid::Uuid::now_v7();
     sqlx::query!(
         "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, $3, $4)",
@@ -94,7 +111,7 @@ pub async fn register_agent(
 
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(RegisterAgentResponse { agent, sync_token }),
+        Json(RegisterAgentResponse { agent, sync_token, cert, ca_public_key }),
     ))
 }
 

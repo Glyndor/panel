@@ -1,5 +1,6 @@
 mod audit;
 mod auth;
+mod cert;
 mod config;
 mod error;
 mod handlers;

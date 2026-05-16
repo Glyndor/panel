@@ -43,12 +43,16 @@ pub struct AgentSummary {
 }
 
 /// Returned after successful agent registration.
-/// `sync_token` is shown once — agent must store it for audit-sync auth.
+/// `sync_token` and `cert` are shown once.
 #[derive(Debug, Serialize)]
 pub struct RegisterAgentResponse {
     #[serde(flatten)]
     pub agent: Agent,
     pub sync_token: String,
+    /// CA-signed certificate for this agent (SignedCert JSON as string)
+    pub cert: crate::crypto::pki::SignedCert,
+    /// CA public key bytes (base64url) — agent uses this to verify future certs
+    pub ca_public_key: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
