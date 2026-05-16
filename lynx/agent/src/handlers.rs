@@ -110,6 +110,7 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "wg.rotate_psk" => handle_wg_rotate_psk(&cmd),
         "wg.data_plane.setup" => handle_wg_data_plane_setup(&cmd),
         "wg.data_plane.teardown" => handle_wg_data_plane_teardown(&cmd),
+        "dashboard.migrate" => handle_dashboard_migrate(state, &cmd).await,
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))
@@ -421,6 +422,42 @@ async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value,
     });
 
     Ok(json!({ "ok": true, "message": "update initiated" }))
+}
+
+async fn handle_dashboard_migrate(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("dashboard.migrate requires write permission"));
+    }
+
+    let target_url = require_str(&cmd.command, "target_url")?;
+
+    // Confirm to the new dashboard that we've received the migration command.
+    // We call /migration/agent-confirm on VPS-B with our sync token.
+    let sync_token = match state.config.sync_token.as_deref() {
+        Some(t) => t.to_string(),
+        None => return Err(AgentError::BadRequest("no sync token configured")),
+    };
+    let agent_id = state.config.agent_id;
+
+    tokio::spawn(async move {
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+        else {
+            return;
+        };
+
+        let _ = client
+            .post(&format!("{target_url}/migration/agent-confirm"))
+            .header("Authorization", format!("Bearer {sync_token}"))
+            .json(&serde_json::json!({ "agent_id": agent_id }))
+            .send()
+            .await;
+
+        tracing::info!("notified VPS-B of migration confirmation");
+    });
+
+    Ok(json!({ "ok": true, "message": "migration acknowledgment sent" }))
 }
 
 fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {

@@ -8,6 +8,8 @@ import { RotateButton } from "./RotateButton";
 import { BrandingForm } from "./BrandingForm";
 import { UpdateSection } from "./UpdateSection";
 import { DomainSection } from "./DomainSection";
+import { MigrationSection } from "./MigrationSection";
+import { getMigrationStatus } from "./migrationActions";
 
 interface Branding {
 	company_name: string;
@@ -80,7 +82,10 @@ export default async function SettingsPage({
 		fetchBranding(),
 	]);
 	const token = jar.get("access_token")?.value ?? "";
-	const domainCfg = await fetchDomainConfig(token);
+	const [domainCfg, migrationState] = await Promise.all([
+		fetchDomainConfig(token),
+		getMigrationStatus(),
+	]);
 
 	return (
 		<div className="flex flex-col p-6 gap-8 max-w-3xl">
@@ -193,6 +198,51 @@ export default async function SettingsPage({
 					/>
 				</div>
 			</section>
+
+			{migrationState && (
+				<section className="flex flex-col gap-3">
+					<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+						{t("migration")}
+					</h2>
+					<div className="rounded-lg border p-4">
+						<MigrationSection
+							initial={migrationState}
+							labels={{
+								title: t("migration"),
+								desc: t("migrationDesc"),
+								sourceTitle: t("migrationSourceTitle"),
+								sourceDesc: t("migrationSourceDesc"),
+								targetUrl: t("migrationTargetUrl"),
+								token: t("migrationToken"),
+								startMigration: t("migrationStart"),
+								targetTitle: t("migrationTargetTitle"),
+								targetDesc: t("migrationTargetDesc"),
+								prepareBtn: t("migrationPrepare"),
+								preparedToken: t("migrationPreparedToken"),
+								copyToken: t("migrationCopyToken"),
+								abortBtn: t("migrationAbort"),
+								confirmShutdown: t("migrationConfirmShutdown"),
+								confirmShutdownMsg: t("migrationConfirmShutdownMsg"),
+								statusIdle: t("migrationStatusIdle"),
+								statusPreparing: t("migrationStatusPreparing"),
+								statusTransferring: t("migrationStatusTransferring"),
+								statusNotifying: t("migrationStatusNotifying"),
+								statusWaiting: t("migrationStatusWaiting"),
+								statusCompleted: t("migrationStatusCompleted"),
+								statusAborted: t("migrationStatusAborted"),
+								statusError: t("migrationStatusError"),
+								agentsProgress: t("migrationAgentsProgress"),
+								error: t("migrationStatusError"),
+								prepareError: t("migrationPrepareError"),
+								startError: t("migrationStartError"),
+								abortSuccess: t("migrationAbortSuccess"),
+								abortError: t("migrationAbortError"),
+								shutdownError: t("migrationShutdownError"),
+							}}
+						/>
+					</div>
+				</section>
+			)}
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
