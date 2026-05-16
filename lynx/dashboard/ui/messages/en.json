@@ -61,6 +61,20 @@
       "slug": "Slug:",
       "members": "Members:"
     },
+    "settings": {
+      "title": "Settings",
+      "security": "Security",
+      "rotateKeys": "Rotate JWT Keys",
+      "rotateKeysDesc": "Invalidates all active sessions. Everyone must sign in again.",
+      "rotateKeysBtn": "Rotate & sign out",
+      "rotateKeysConfirm": "This will invalidate all active sessions, including yours. Continue?",
+      "sessions": "Active Sessions",
+      "noSessions": "No active sessions found.",
+      "lastUsed": "Last used:",
+      "revoke": "Revoke",
+      "revokeSuccess": "Session revoked.",
+      "revokeError": "Failed to revoke session."
+    },
     "agents": {
       "title": "Agents",
       "noAgents": "No agents connected",

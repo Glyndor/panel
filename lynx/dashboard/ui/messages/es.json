@@ -61,6 +61,20 @@
       "slug": "Slug:",
       "members": "Miembros:"
     },
+    "settings": {
+      "title": "Ajustes",
+      "security": "Seguridad",
+      "rotateKeys": "Rotar claves JWT",
+      "rotateKeysDesc": "Invalida todas las sesiones activas. Todos deben iniciar sesión de nuevo.",
+      "rotateKeysBtn": "Rotar y cerrar sesión",
+      "rotateKeysConfirm": "Esto invalidará todas las sesiones activas, incluida la tuya. ¿Continuar?",
+      "sessions": "Sesiones activas",
+      "noSessions": "No se encontraron sesiones activas.",
+      "lastUsed": "Último uso:",
+      "revoke": "Revocar",
+      "revokeSuccess": "Sesión revocada.",
+      "revokeError": "Error al revocar la sesión."
+    },
     "agents": {
       "title": "Agentes",
       "noAgents": "No hay agentes conectados",
