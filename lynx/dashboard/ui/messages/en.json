@@ -53,6 +53,19 @@
       "title": "Overview",
       "noAgents": "No agents connected",
       "noAgentsDesc": "Connect a VPS agent to start managing your infrastructure."
+    },
+    "agents": {
+      "title": "Agents",
+      "noAgents": "No agents connected",
+      "noAgentsDesc": "Run the agent install script on a VPS to connect it here.",
+      "wgIp": "WireGuard IP:",
+      "version": "Version:",
+      "lastHeartbeat": "Last heartbeat:",
+      "status": {
+        "online": "Online",
+        "lockdown": "Lockdown",
+        "offline": "Offline"
+      }
     }
   },
   "branding": {
