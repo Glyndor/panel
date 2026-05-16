@@ -69,7 +69,23 @@
       "removeMemberSuccess": "Member removed.",
       "removeMemberError": "Failed to remove member.",
       "noMembers": "No members yet.",
-      "orgId": "ID:"
+      "orgId": "ID:",
+      "projects": "Projects",
+      "noProjects": "No projects yet."
+    },
+    "projects": {
+      "orgs": "Organizations",
+      "org": "Organization",
+      "slug": "Slug:",
+      "verticalScale": "Vertical Scaling",
+      "verticalScaleDesc": "Update CPU and memory limits for a container in this project. The container will be updated live without restart when possible.",
+      "containerName": "Container name",
+      "cpus": "CPUs",
+      "memoryMb": "Memory (MB)",
+      "apply": "Apply limits",
+      "applySuccess": "Container limits updated.",
+      "applyError": "Failed to update container limits.",
+      "projectId": "Project ID:"
     },
     "settings": {
       "title": "Settings",

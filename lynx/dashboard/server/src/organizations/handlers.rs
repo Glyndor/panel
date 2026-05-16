@@ -1,11 +1,15 @@
-use super::{CreateOrgRequest, InviteMemberRequest, OrgMember, Organization, OrgWithMemberCount};
-use crate::{auth::middleware::AuthUser, error::AppError, state::AppState};
+use super::{
+    CreateOrgRequest, InviteMemberRequest, OrgMember, Organization, OrgWithMemberCount, Project,
+    UpdateResourcesRequest,
+};
+use crate::{auth::middleware::AuthUser, crypto::cmd::sign_command, error::AppError, state::AppState};
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 // --------------------------------------------------------------------------
@@ -274,4 +278,149 @@ pub async fn remove_member(
     .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// --------------------------------------------------------------------------
+// GET /organizations/:id/projects — list projects caller can see (member of org)
+// --------------------------------------------------------------------------
+
+pub async fn list_projects(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(org_id): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let is_member = sqlx::query_scalar!(
+        "SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2",
+        org_id,
+        user.user_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .is_some();
+
+    if !is_member {
+        return Err(AppError::NotFound);
+    }
+
+    let projects = sqlx::query_as!(
+        Project,
+        "SELECT id, organization_id, agent_id, name, slug, created_at FROM projects WHERE organization_id = $1 ORDER BY created_at ASC",
+        org_id
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(projects))
+}
+
+// --------------------------------------------------------------------------
+// GET /organizations/:id/projects/:proj_id
+// --------------------------------------------------------------------------
+
+pub async fn get_project(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path((org_id, proj_id)): Path<(Uuid, Uuid)>,
+) -> Result<impl IntoResponse, AppError> {
+    let is_member = sqlx::query_scalar!(
+        "SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2",
+        org_id,
+        user.user_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .is_some();
+
+    if !is_member {
+        return Err(AppError::NotFound);
+    }
+
+    let project = sqlx::query_as!(
+        Project,
+        "SELECT id, organization_id, agent_id, name, slug, created_at FROM projects WHERE id = $1 AND organization_id = $2",
+        proj_id,
+        org_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    Ok(Json(project))
+}
+
+// --------------------------------------------------------------------------
+// PUT /organizations/:id/projects/:proj_id/resources
+// Signs and relays a container.update command to the target agent.
+// --------------------------------------------------------------------------
+
+pub async fn update_container_resources(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path((org_id, proj_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<UpdateResourcesRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let role = sqlx::query_scalar!(
+        "SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2",
+        org_id,
+        user.user_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    if role == "viewer" {
+        return Err(AppError::Forbidden);
+    }
+
+    let project = sqlx::query!(
+        "SELECT agent_id FROM projects WHERE id = $1 AND organization_id = $2",
+        proj_id,
+        org_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let agent = sqlx::query!(
+        "SELECT wg_ip, api_port, status FROM agents WHERE id = $1",
+        project.agent_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    if agent.status == "lockdown" || agent.status == "offline" {
+        return Err(AppError::AgentUnavailable);
+    }
+
+    let command = json!({
+        "type": "container.update",
+        "tenant_id": org_id.to_string(),
+        "name": req.container_name,
+        "cpus": req.cpus,
+        "memory_mb": req.memory_mb,
+    });
+
+    let signed = sign_command(&state.config, project.agent_id, user.user_id, "write", &command)?;
+
+    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+    let tok = &*state.config.internal_token;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {tok}"))
+        .json(&signed)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|_| AppError::BadGateway)?;
+
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().await.unwrap_or(json!({}));
+
+    Ok((
+        axum::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(axum::http::StatusCode::BAD_GATEWAY),
+        Json(body),
+    ))
 }

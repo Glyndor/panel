@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 import { InviteDialog } from "./InviteDialog";
 import { RemoveMemberButton } from "./RemoveMemberButton";
 
@@ -21,6 +22,14 @@ interface Member {
 	joined_at: string;
 }
 
+interface Project {
+	id: string;
+	name: string;
+	slug: string;
+	agent_id: string;
+	created_at: string;
+}
+
 async function fetchOrg(token: string, id: string): Promise<Org | null> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/organizations/${id}`, {
@@ -37,6 +46,19 @@ async function fetchOrg(token: string, id: string): Promise<Org | null> {
 async function fetchMembers(token: string, id: string): Promise<Member[]> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/organizations/${id}/members`, {
+			headers: { Authorization: `Bearer ${token}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return [];
+		return res.json();
+	} catch {
+		return [];
+	}
+}
+
+async function fetchProjects(token: string, id: string): Promise<Project[]> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/organizations/${id}/projects`, {
 			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
 		});
@@ -66,9 +88,10 @@ export default async function OrgDetailPage({
 	]);
 	const tok = jar.get("access_token")?.value ?? "";
 
-	const [org, members] = await Promise.all([
+	const [org, members, projects] = await Promise.all([
 		fetchOrg(tok, id),
 		fetchMembers(tok, id),
+		fetchProjects(tok, id),
 	]);
 
 	if (!org) notFound();
@@ -136,8 +159,35 @@ export default async function OrgDetailPage({
 				</div>
 			</section>
 
+			<section className="flex flex-col gap-3">
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+					{t("projects")} ({projects.length})
+				</h2>
+				{projects.length === 0 ? (
+					<p className="text-sm text-muted-foreground">{t("noProjects")}</p>
+				) : (
+					<div className="rounded-lg border divide-y">
+						{projects.map((p) => (
+							<Link
+								key={p.id}
+								href={`/${locale}/app/organizations/${id}/projects/${p.id}`}
+								className="flex items-center justify-between px-4 py-3 gap-3 hover:bg-muted/50 transition-colors"
+							>
+								<div className="min-w-0">
+									<p className="text-sm font-medium truncate">{p.name}</p>
+									<p className="text-xs text-muted-foreground">{p.slug}</p>
+								</div>
+								<Badge variant="outline" className="shrink-0 font-mono text-xs">
+									{p.agent_id.slice(0, 8)}
+								</Badge>
+							</Link>
+						))}
+					</div>
+				)}
+			</section>
+
 			<p className="text-xs text-muted-foreground opacity-60">
-				{t("orgId")}{" "}{id}
+				{t("orgId")} {id}
 			</p>
 		</div>
 	);

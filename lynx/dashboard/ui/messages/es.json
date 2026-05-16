@@ -69,7 +69,23 @@
       "removeMemberSuccess": "Miembro eliminado.",
       "removeMemberError": "Error al eliminar miembro.",
       "noMembers": "Sin miembros aún.",
-      "orgId": "ID:"
+      "orgId": "ID:",
+      "projects": "Proyectos",
+      "noProjects": "Sin proyectos aún."
+    },
+    "projects": {
+      "orgs": "Organizaciones",
+      "org": "Organización",
+      "slug": "Slug:",
+      "verticalScale": "Escalado vertical",
+      "verticalScaleDesc": "Actualiza los límites de CPU y memoria de un contenedor en este proyecto. El contenedor se actualiza en vivo sin reinicio cuando es posible.",
+      "containerName": "Nombre del contenedor",
+      "cpus": "CPUs",
+      "memoryMb": "Memoria (MB)",
+      "apply": "Aplicar límites",
+      "applySuccess": "Límites del contenedor actualizados.",
+      "applyError": "Error al actualizar los límites del contenedor.",
+      "projectId": "ID del proyecto:"
     },
     "settings": {
       "title": "Ajustes",
