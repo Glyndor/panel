@@ -1,3 +1,4 @@
+mod admin;
 mod agents;
 mod auth;
 mod config;
@@ -57,6 +58,9 @@ async fn main() -> anyhow::Result<()> {
         .route_layer(auth_layer.clone());
 
     let orgs_router = organizations::router::router()
+        .route_layer(auth_layer.clone());
+
+    let admin_router = admin::router::router()
         .route_layer(auth_layer);
 
     let app = Router::new()
@@ -65,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         .nest("/agents", agents_router)
         .nest("/agents", agents::router::agent_router())
         .nest("/organizations", orgs_router)
+        .nest("/admin", admin_router)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;

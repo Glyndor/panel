@@ -8,6 +8,7 @@ mod nftables;
 mod podman;
 mod state;
 mod sync;
+mod update;
 
 use anyhow::Context;
 use axum::{

@@ -6,6 +6,7 @@ use crate::{
     nftables,
     podman,
     state::AppState,
+    update,
 };
 use axum::{
     extract::{State, WebSocketUpgrade},
@@ -97,6 +98,13 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "nftables.apply" => handle_nftables_apply(&cmd),
         "container.list" => handle_container_list(&cmd),
         "tenant.ensure" => handle_tenant_ensure(&cmd),
+        "container.deploy" => handle_container_deploy(&cmd),
+        "container.start" => handle_container_start(&cmd),
+        "container.stop" => handle_container_stop(&cmd),
+        "container.remove" => handle_container_remove(&cmd),
+        "container.restart" => handle_container_restart(&cmd),
+        "container.update" => handle_container_update(&cmd),
+        "update.self" => handle_update_self(&cmd).await,
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))
@@ -225,6 +233,106 @@ pub async fn metrics_ws(
             }
         })
         .into_response())
+}
+
+// ---------------------------------------------------------------------------
+// Container management handlers
+// ---------------------------------------------------------------------------
+
+fn handle_container_deploy(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("container.deploy requires write permission"));
+    }
+    let tenant_id = require_str(&cmd.command, "tenant_id")?;
+    let project_id = require_str(&cmd.command, "project_id")?;
+    let compose_yaml = require_str(&cmd.command, "compose_yaml")?;
+
+    podman::compose_deploy(podman::DeployOptions {
+        tenant_id: &tenant_id,
+        project_id: &project_id,
+        compose_yaml: &compose_yaml,
+    })
+    .map_err(anyhow::Error::from)?;
+
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_container_start(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("container.start requires write permission"));
+    }
+    let tenant_id = require_str(&cmd.command, "tenant_id")?;
+    let name = require_str(&cmd.command, "name")?;
+    podman::container_start(&tenant_id, &name).map_err(anyhow::Error::from)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_container_stop(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("container.stop requires write permission"));
+    }
+    let tenant_id = require_str(&cmd.command, "tenant_id")?;
+    let name = require_str(&cmd.command, "name")?;
+    podman::container_stop(&tenant_id, &name).map_err(anyhow::Error::from)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_container_remove(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission != PermissionLevel::Destructive {
+        return Err(AgentError::Forbidden("container.remove requires destructive permission"));
+    }
+    let tenant_id = require_str(&cmd.command, "tenant_id")?;
+    let name = require_str(&cmd.command, "name")?;
+    let force = cmd.command.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+    podman::container_remove(&tenant_id, &name, force).map_err(anyhow::Error::from)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_container_restart(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("container.restart requires write permission"));
+    }
+    let tenant_id = require_str(&cmd.command, "tenant_id")?;
+    let name = require_str(&cmd.command, "name")?;
+    podman::container_restart(&tenant_id, &name).map_err(anyhow::Error::from)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_container_update(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("container.update requires write permission"));
+    }
+    let tenant_id = require_str(&cmd.command, "tenant_id")?;
+    let name = require_str(&cmd.command, "name")?;
+    let cpus = cmd.command.get("cpus").and_then(|v| v.as_f64());
+    let memory_mb = cmd.command.get("memory_mb").and_then(|v| v.as_u64());
+    podman::container_update(&tenant_id, &name, cpus, memory_mb).map_err(anyhow::Error::from)?;
+    Ok(json!({ "ok": true }))
+}
+
+async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("update.self requires write permission"));
+    }
+    let version = require_str(&cmd.command, "version")?;
+    let download_url = require_str(&cmd.command, "download_url")?;
+    let sig_url = require_str(&cmd.command, "sig_url")?;
+
+    // Spawn update in background — binary swap requires process restart.
+    tokio::spawn(async move {
+        if let Err(e) = update::perform_update(&version, &download_url, &sig_url).await {
+            tracing::error!(version, "update failed: {e:#}");
+        }
+    });
+
+    Ok(json!({ "ok": true, "message": "update initiated" }))
+}
+
+fn require_str(cmd: &Value, key: &'static str) -> std::result::Result<String, AgentError> {
+    cmd.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or(AgentError::BadRequest(key))
 }
 
 fn sanitize_error(e: &AgentError) -> String {
