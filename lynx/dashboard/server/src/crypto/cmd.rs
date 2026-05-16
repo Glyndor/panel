@@ -1,6 +1,6 @@
 use crate::config::Config;
 use anyhow::Result;
-use base64ct::{Base64Url, Encoding};
+use base64ct::{Base64UrlUnpadded, Encoding};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -34,11 +34,11 @@ pub fn sign_command(
     });
 
     let payload_bytes = serde_json::to_vec(&payload_json)?;
-    let payload_b64 = Base64Url::encode_string(&payload_bytes);
+    let payload_b64 = Base64UrlUnpadded::encode_string(&payload_bytes);
 
     let signing_key = SigningKey::from_bytes(&*config.jwt_sign_private_seed);
     let signature = signing_key.sign(&payload_bytes);
-    let sig_b64 = Base64Url::encode_string(&signature.to_bytes());
+    let sig_b64 = Base64UrlUnpadded::encode_string(&signature.to_bytes());
 
     Ok(SignedCommand {
         payload: payload_b64,
