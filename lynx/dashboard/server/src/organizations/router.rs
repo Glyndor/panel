@@ -23,4 +23,12 @@ pub fn router() -> Router<AppState> {
             "/{id}/projects/{proj_id}/containers/{name}/{action}",
             post(handlers::container_action),
         )
+        .route(
+            "/{id}/projects/{proj_id}/scale/horizontal",
+            get(handlers::list_horizontal_scale).post(handlers::horizontal_scale),
+        )
+        .route(
+            "/{id}/projects/{proj_id}/scale/horizontal/{tunnel_id}",
+            delete(handlers::teardown_horizontal_scale),
+        )
 }

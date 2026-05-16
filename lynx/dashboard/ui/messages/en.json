@@ -111,7 +111,21 @@
       "cName": "Container name",
       "cImage": "Image",
       "cPorts": "Ports (comma-separated)",
-      "cEnv": "Env vars (comma-separated)"
+      "cEnv": "Env vars (comma-separated)",
+      "horizontalScale": "Horizontal Scaling",
+      "horizontalScaleDesc": "Deploy replicas on another agent over a direct WireGuard data-plane tunnel. Traffic stays agent-to-agent — never routed through the dashboard.",
+      "addTunnel": "Add tunnel",
+      "addTunnelTitle": "Scale to another agent",
+      "tunnelTargetAgent": "Target agent",
+      "tunnelImage": "Container image",
+      "tunnelReplicas": "Replica count",
+      "tunnelConfirm": "Establish tunnel & deploy",
+      "tunnelSuccess": "Tunnel established and replicas deployed.",
+      "tunnelError": "Failed to establish tunnel.",
+      "tunnelTeardownSuccess": "Tunnel torn down.",
+      "tunnelTeardownError": "Failed to tear down tunnel.",
+      "noTunnels": "No active tunnels.",
+      "tunnelReplicaCount": "Replicas"
     },
     "settings": {
       "title": "Settings",

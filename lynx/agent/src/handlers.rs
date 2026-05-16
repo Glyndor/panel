@@ -108,6 +108,8 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "container.update" => handle_container_update(&cmd),
         "update.self" => handle_update_self(&cmd).await,
         "wg.rotate_psk" => handle_wg_rotate_psk(&cmd),
+        "wg.data_plane.setup" => handle_wg_data_plane_setup(&cmd),
+        "wg.data_plane.teardown" => handle_wg_data_plane_teardown(&cmd),
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))
@@ -419,6 +421,108 @@ async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value,
     });
 
     Ok(json!({ "ok": true, "message": "update initiated" }))
+}
+
+fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("wg.data_plane.setup requires write permission"));
+    }
+
+    // Derive interface name from tunnel_id (first 8 hex chars)
+    let tunnel_id = require_str(&cmd.command, "tunnel_id")?;
+    let iface_suffix = tunnel_id.replace('-', "");
+    let iface_suffix = &iface_suffix[..iface_suffix.len().min(8)];
+    let interface = format!("wg-lynx-dp-{iface_suffix}");
+
+    let local_privkey = require_str(&cmd.command, "private_key")?;
+    // local_ip arrives as "10.200.x.y/30" — strip the prefix for AllowedIPs peer entry
+    let local_ip_cidr = require_str(&cmd.command, "local_ip")?;
+    let peer_pubkey = require_str(&cmd.command, "peer_pubkey")?;
+    let psk = require_str(&cmd.command, "psk")?;
+    let wg_port = cmd
+        .command
+        .get("wg_port")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(51821) as u16;
+
+    // peer_endpoint is optional — responder (agent_b) may not know initiator's real IP yet
+    let peer_endpoint = cmd
+        .command
+        .get("peer_endpoint")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Determine AllowedIPs for the peer: the /30 subnet covers both sides
+    let peer_allowed = {
+        let parts: Vec<&str> = local_ip_cidr.splitn(2, '/').collect();
+        let base = parts[0];
+        // peer is the other host in the /30 — just allow the whole subnet
+        let subnet: Vec<&str> = base.rsplitn(2, '.').collect();
+        if subnet.len() == 2 {
+            format!("{}.0/30", subnet[1])
+        } else {
+            local_ip_cidr.clone()
+        }
+    };
+
+    // Write WireGuard config file for the data-plane interface
+    let config_path = format!("/etc/wireguard/{interface}.conf");
+    let endpoint_line = peer_endpoint
+        .map(|ep| format!("Endpoint = {ep}\n"))
+        .unwrap_or_default();
+
+    let config = format!(
+        "[Interface]\nPrivateKey = {local_privkey}\nAddress = {local_ip_cidr}\nListenPort = {wg_port}\n\n[Peer]\nPublicKey = {peer_pubkey}\nPresharedKey = {psk}\nAllowedIPs = {peer_allowed}\n{endpoint_line}"
+    );
+
+    use std::io::Write;
+    let mut f = std::fs::File::create(&config_path)
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("write wg config {config_path}: {e}")))?;
+    f.write_all(config.as_bytes())
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("write wg config content: {e}")))?;
+
+    // Bring up the interface
+    let status = std::process::Command::new("wg-quick")
+        .args(["up", &interface])
+        .status()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg-quick up: {e}")))?;
+
+    if !status.success() {
+        // Interface may already be up — try `wg syncconf` instead
+        let status2 = std::process::Command::new("wg")
+            .args(["syncconf", &interface, &config_path])
+            .status()
+            .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg syncconf: {e}")))?;
+        if !status2.success() {
+            return Err(AgentError::Internal(anyhow::anyhow!(
+                "wg-quick up and wg syncconf both failed for {interface}"
+            )));
+        }
+    }
+
+    tracing::info!("data-plane WireGuard interface {interface} configured");
+    Ok(json!({ "ok": true, "interface": interface }))
+}
+
+fn handle_wg_data_plane_teardown(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("wg.data_plane.teardown requires write permission"));
+    }
+
+    let tunnel_id = require_str(&cmd.command, "tunnel_id")?;
+    let iface_suffix = tunnel_id.replace('-', "");
+    let iface_suffix = &iface_suffix[..iface_suffix.len().min(8)];
+    let interface = format!("wg-lynx-dp-{iface_suffix}");
+    let config_path = format!("/etc/wireguard/{interface}.conf");
+
+    let _ = std::process::Command::new("wg-quick")
+        .args(["down", &interface])
+        .status();
+
+    let _ = std::fs::remove_file(&config_path);
+
+    tracing::info!("data-plane WireGuard interface {interface} torn down");
+    Ok(json!({ "ok": true, "interface": interface }))
 }
 
 fn require_str(cmd: &Value, key: &'static str) -> std::result::Result<String, AgentError> {

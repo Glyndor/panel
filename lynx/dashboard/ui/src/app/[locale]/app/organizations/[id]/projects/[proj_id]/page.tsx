@@ -7,6 +7,7 @@ import { ChevronRight } from "lucide-react";
 import { ResourceForm } from "./ResourceForm";
 import { ContainerCard } from "./ContainerCard";
 import { DeployForm } from "./DeployForm";
+import { HorizontalScaleSection } from "./HorizontalScaleSection";
 
 interface Project {
 	id: string;
@@ -24,6 +25,22 @@ interface Container {
 	State: string;
 }
 
+interface Agent {
+	id: string;
+	name: string;
+	wg_ip: string;
+	status: string;
+}
+
+interface Tunnel {
+	id: string;
+	agent_b_id: string;
+	agent_a_wg_ip: string;
+	agent_b_wg_ip: string;
+	replica_count: number;
+	status: string;
+}
+
 async function fetchProject(
 	token: string,
 	orgId: string,
@@ -38,6 +55,36 @@ async function fetchProject(
 		return res.json();
 	} catch {
 		return null;
+	}
+}
+
+async function fetchAgents(token: string): Promise<Agent[]> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/agents`, {
+			headers: { Authorization: `Bearer ${token}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return [];
+		return res.json();
+	} catch {
+		return [];
+	}
+}
+
+async function fetchTunnels(
+	token: string,
+	orgId: string,
+	projId: string,
+): Promise<Tunnel[]> {
+	try {
+		const res = await fetch(
+			`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/scale/horizontal`,
+			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+		);
+		if (!res.ok) return [];
+		return res.json();
+	} catch {
+		return [];
 	}
 }
 
@@ -71,9 +118,11 @@ export default async function ProjectDetailPage({
 	]);
 	const tok = jar.get("access_token")?.value ?? "";
 
-	const [project, containers] = await Promise.all([
+	const [project, containers, tunnels, agents] = await Promise.all([
 		fetchProject(tok, orgId, projId),
 		fetchContainers(tok, orgId, projId),
+		fetchTunnels(tok, orgId, projId),
+		fetchAgents(tok),
 	]);
 
 	if (!project) notFound();
@@ -157,6 +206,31 @@ export default async function ProjectDetailPage({
 					/>
 				</div>
 			</section>
+
+			<HorizontalScaleSection
+				orgId={orgId}
+				projId={projId}
+				tunnels={tunnels}
+				agents={agents.filter((a) => a.id !== project.agent_id)}
+				labels={{
+					title: t("horizontalScale"),
+					desc: t("horizontalScaleDesc"),
+					addBtn: t("addTunnel"),
+					dialogTitle: t("addTunnelTitle"),
+					targetAgent: t("tunnelTargetAgent"),
+					image: t("tunnelImage"),
+					replicas: t("tunnelReplicas"),
+					confirm: t("tunnelConfirm"),
+					success: t("tunnelSuccess"),
+					error: t("tunnelError"),
+					teardownSuccess: t("tunnelTeardownSuccess"),
+					teardownError: t("tunnelTeardownError"),
+					noTunnels: t("noTunnels"),
+					agentB: t("tunnelTargetAgent"),
+					replicaCount: t("tunnelReplicaCount"),
+					status: "Status",
+				}}
+			/>
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">

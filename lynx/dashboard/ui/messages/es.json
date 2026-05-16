@@ -111,7 +111,21 @@
       "cName": "Nombre del contenedor",
       "cImage": "Imagen",
       "cPorts": "Puertos (separados por coma)",
-      "cEnv": "Variables de entorno (separadas por coma)"
+      "cEnv": "Variables de entorno (separadas por coma)",
+      "horizontalScale": "Escalado horizontal",
+      "horizontalScaleDesc": "Despliega réplicas en otro agente mediante un tunnel WireGuard directo de plano de datos. El tráfico va directo entre agentes, nunca pasa por el dashboard.",
+      "addTunnel": "Añadir tunnel",
+      "addTunnelTitle": "Escalar a otro agente",
+      "tunnelTargetAgent": "Agente destino",
+      "tunnelImage": "Imagen del contenedor",
+      "tunnelReplicas": "Número de réplicas",
+      "tunnelConfirm": "Establecer tunnel y desplegar",
+      "tunnelSuccess": "Tunnel establecido y réplicas desplegadas.",
+      "tunnelError": "Error al establecer el tunnel.",
+      "tunnelTeardownSuccess": "Tunnel eliminado.",
+      "tunnelTeardownError": "Error al eliminar el tunnel.",
+      "noTunnels": "Sin tunnels activos.",
+      "tunnelReplicaCount": "Réplicas"
     },
     "settings": {
       "title": "Ajustes",

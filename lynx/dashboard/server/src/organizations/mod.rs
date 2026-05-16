@@ -85,3 +85,29 @@ pub struct ContainerActionPath {
     pub name: String,
     pub action: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct HorizontalScaleRequest {
+    /// Agent to deploy replicas on (Agent-B)
+    pub target_agent_id: Uuid,
+    /// Container image to run as replica
+    pub image: String,
+    /// Number of replicas to run on Agent-B
+    pub replica_count: u32,
+    /// Data-plane WireGuard port on both agents (default 51821)
+    pub wg_port: Option<u16>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DataPlaneTunnel {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub agent_a_id: Uuid,
+    pub agent_b_id: Uuid,
+    pub agent_a_wg_ip: String,
+    pub agent_b_wg_ip: String,
+    pub wg_port: i32,
+    pub replica_count: i32,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
