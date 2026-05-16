@@ -1,10 +1,11 @@
-import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
+import { BACKEND_URL } from "@/lib/api";
 import "../globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -13,11 +14,47 @@ const geistMono = Geist_Mono({
 	subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-	title: "Lynx",
-	description: "Distributed infrastructure orchestration",
-	robots: "noindex, nofollow",
+interface Branding {
+	company_name: string;
+	logo_url: string | null;
+	primary_color: string;
+	secondary_color: string;
+	accent_color: string;
+}
+
+const BRANDING_DEFAULTS: Branding = {
+	company_name: "Lynx",
+	logo_url: null,
+	primary_color: "#0f172a",
+	secondary_color: "#38bdf8",
+	accent_color: "#6366f1",
 };
+
+async function fetchBranding(): Promise<Branding> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/branding`, {
+			next: { revalidate: 60 },
+		});
+		if (!res.ok) return BRANDING_DEFAULTS;
+		return (await res.json()) as Branding;
+	} catch {
+		return BRANDING_DEFAULTS;
+	}
+}
+
+export async function generateMetadata({
+	params,
+}: {
+	params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+	await params;
+	const branding = await fetchBranding();
+	return {
+		title: branding.company_name,
+		description: "Distributed infrastructure orchestration",
+		robots: "noindex, nofollow",
+	};
+}
 
 export default async function LocaleLayout({
 	children,
@@ -32,11 +69,21 @@ export default async function LocaleLayout({
 		notFound();
 	}
 
-	const messages = await getMessages();
+	const [messages, branding] = await Promise.all([
+		getMessages(),
+		fetchBranding(),
+	]);
+
+	const brandVars = {
+		"--brand-primary": branding.primary_color,
+		"--brand-secondary": branding.secondary_color,
+		"--brand-accent": branding.accent_color,
+	} as React.CSSProperties;
 
 	return (
 		<html
 			lang={locale}
+			style={brandVars}
 			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
 		>
 			<body className="min-h-full flex flex-col bg-background text-foreground">

@@ -71,7 +71,16 @@
       "lastUsed": "Last used:",
       "revoke": "Revoke",
       "revokeSuccess": "Session revoked.",
-      "revokeError": "Failed to revoke session."
+      "revokeError": "Failed to revoke session.",
+      "branding": "White-label Branding",
+      "brandingCompanyName": "Company Name",
+      "brandingLogoUrl": "Logo URL",
+      "brandingPrimaryColor": "Primary",
+      "brandingSecondaryColor": "Secondary",
+      "brandingAccentColor": "Accent",
+      "brandingSave": "Save branding",
+      "brandingSaved": "Branding updated.",
+      "brandingError": "Failed to update branding."
     },
     "agents": {
       "title": "Agents",

@@ -71,7 +71,16 @@
       "lastUsed": "Último uso:",
       "revoke": "Revocar",
       "revokeSuccess": "Sesión revocada.",
-      "revokeError": "Error al revocar la sesión."
+      "revokeError": "Error al revocar la sesión.",
+      "branding": "Marca blanca",
+      "brandingCompanyName": "Nombre de empresa",
+      "brandingLogoUrl": "URL del logotipo",
+      "brandingPrimaryColor": "Primario",
+      "brandingSecondaryColor": "Secundario",
+      "brandingAccentColor": "Acento",
+      "brandingSave": "Guardar marca",
+      "brandingSaved": "Marca actualizada.",
+      "brandingError": "Error al actualizar la marca."
     },
     "agents": {
       "title": "Agentes",

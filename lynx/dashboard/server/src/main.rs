@@ -1,6 +1,7 @@
 mod admin;
 mod agents;
 mod auth;
+mod branding;
 mod config;
 mod crypto;
 mod error;
@@ -65,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/branding", get(branding::handlers::get_branding))
         .nest("/auth", auth::router::router())
         .nest("/agents", agents_router)
         .nest("/agents", agents::router::agent_router())

@@ -1,7 +1,7 @@
 use super::handlers;
 use crate::state::AppState;
 use axum::{
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 
@@ -14,4 +14,5 @@ pub fn router() -> Router<AppState> {
         .route("/update-check", get(handlers::update_check))
         .route("/trigger-update", post(handlers::trigger_update))
         .route("/update-log", get(handlers::list_update_log))
+        .route("/branding", put(crate::branding::handlers::update_branding))
 }

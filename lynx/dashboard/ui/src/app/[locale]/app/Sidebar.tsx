@@ -14,9 +14,9 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { logoutAction } from "./logout-action";
 
-type Props = { locale: string };
+type Props = { locale: string; companyName: string; logoUrl: string | null };
 
-export function Sidebar({ locale }: Props) {
+export function Sidebar({ locale, companyName, logoUrl }: Props) {
 	const t = useTranslations("app.nav");
 	const pathname = usePathname();
 	const [, startTransition] = useTransition();
@@ -46,8 +46,18 @@ export function Sidebar({ locale }: Props) {
 
 	return (
 		<aside className="flex h-full w-60 shrink-0 flex-col border-r bg-background">
-			<div className="flex h-14 items-center border-b px-5">
-				<span className="text-base font-semibold tracking-tight">Lynx</span>
+			<div className="flex h-14 items-center border-b px-5 gap-2">
+				{logoUrl ? (
+					// eslint-disable-next-line @next/next/no-img-element
+					<img src={logoUrl} alt={companyName} className="h-7 w-auto object-contain" />
+				) : (
+					<span
+						className="text-base font-semibold tracking-tight"
+						style={{ color: "var(--brand-secondary)" }}
+					>
+						{companyName}
+					</span>
+				)}
 			</div>
 
 			<nav className="flex flex-col gap-0.5 p-2 flex-1">
