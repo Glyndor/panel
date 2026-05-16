@@ -19,6 +19,8 @@ pub enum AppError {
     Conflict(&'static str),
     #[error("not found")]
     NotFound,
+    #[error("forbidden")]
+    Forbidden,
     #[error("bad request: {0}")]
     BadRequest(&'static str),
     #[error("bad gateway")]
@@ -44,6 +46,7 @@ impl IntoResponse for AppError {
             AppError::Validation(_) => (StatusCode::UNPROCESSABLE_ENTITY, "validation_error"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::BadGateway => (StatusCode::BAD_GATEWAY, "bad_gateway"),
             AppError::AgentUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "agent_unavailable"),

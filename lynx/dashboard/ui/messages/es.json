@@ -57,7 +57,19 @@
       "noOrgs": "Sin organizaciones aún",
       "noOrgsDesc": "Crea una organización para empezar a gestionar proyectos y contenedores.",
       "slug": "Slug:",
-      "members": "Miembros:"
+      "members": "Miembros:",
+      "invite": "Invitar miembro",
+      "inviteTitle": "Invitar un miembro",
+      "inviteUsername": "Usuario",
+      "inviteRole": "Rol",
+      "inviteSubmit": "Enviar invitación",
+      "inviteSuccess": "Miembro invitado.",
+      "inviteError": "Error al invitar miembro.",
+      "removeMember": "Eliminar",
+      "removeMemberSuccess": "Miembro eliminado.",
+      "removeMemberError": "Error al eliminar miembro.",
+      "noMembers": "Sin miembros aún.",
+      "orgId": "ID:"
     },
     "settings": {
       "title": "Ajustes",

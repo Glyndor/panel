@@ -57,7 +57,19 @@
       "noOrgs": "No organizations yet",
       "noOrgsDesc": "Create an organization to start managing projects and containers.",
       "slug": "Slug:",
-      "members": "Members:"
+      "members": "Members:",
+      "invite": "Invite member",
+      "inviteTitle": "Invite a member",
+      "inviteUsername": "Username",
+      "inviteRole": "Role",
+      "inviteSubmit": "Send invite",
+      "inviteSuccess": "Member invited.",
+      "inviteError": "Failed to invite member.",
+      "removeMember": "Remove",
+      "removeMemberSuccess": "Member removed.",
+      "removeMemberError": "Failed to remove member.",
+      "noMembers": "No members yet.",
+      "orgId": "ID:"
     },
     "settings": {
       "title": "Settings",

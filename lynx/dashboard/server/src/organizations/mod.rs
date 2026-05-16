@@ -29,3 +29,17 @@ pub struct OrgWithMemberCount {
     pub created_at: DateTime<Utc>,
     pub member_count: i64,
 }
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct OrgMember {
+    pub user_id: Uuid,
+    pub username: String,
+    pub role: String,
+    pub joined_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InviteMemberRequest {
+    pub username: String,
+    pub role: Option<String>,
+}
