@@ -54,6 +54,13 @@
       "noAgents": "No agents connected",
       "noAgentsDesc": "Connect a VPS agent to start managing your infrastructure."
     },
+    "organizations": {
+      "title": "Organizations",
+      "noOrgs": "No organizations yet",
+      "noOrgsDesc": "Create an organization to start managing projects and containers.",
+      "slug": "Slug:",
+      "members": "Members:"
+    },
     "agents": {
       "title": "Agents",
       "noAgents": "No agents connected",

@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod crypto;
 mod error;
+mod organizations;
 mod state;
 
 use anyhow::Context;
@@ -47,16 +48,23 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
     };
 
+    let auth_layer = middleware::from_fn_with_state(
+        state.clone(),
+        auth::middleware::require_auth,
+    );
+
     let agents_router = agents::router::router()
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::middleware::require_auth,
-        ));
+        .route_layer(auth_layer.clone());
+
+    let orgs_router = organizations::router::router()
+        .route_layer(auth_layer);
 
     let app = Router::new()
         .route("/health", get(health))
         .nest("/auth", auth::router::router())
         .nest("/agents", agents_router)
+        .nest("/agents", agents::router::agent_router())
+        .nest("/organizations", orgs_router)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
