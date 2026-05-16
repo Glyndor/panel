@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::net::IpAddr;
 
-const WG_IFACE: &str = "wg-lynx-dashboard";
+const WG_IFACE: &str = "wg-lynx-dash";
 const PSK_SECRET_NAME: &str = "lynx-dashboard-local-agent-psk";
 const PSK_PATH: &str = "/run/secrets/lynx-dashboard-local-agent-psk";
 

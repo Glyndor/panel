@@ -157,7 +157,7 @@ async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(
         let psk_update = std::process::Command::new("wg")
             .args([
                 "set",
-                "wg-lynx-dashboard",
+                "wg-lynx-dash",
                 "peer",
                 &agent.wg_pubkey,
                 "preshared-key",
