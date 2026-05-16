@@ -63,6 +63,8 @@ async fn main() -> anyhow::Result<()> {
 
     let migration_router = migration::router::router().route_layer(auth_layer);
 
+    tokio::spawn(agents::heartbeat::run_scheduler(state.clone()));
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/branding", get(branding::handlers::get_branding))

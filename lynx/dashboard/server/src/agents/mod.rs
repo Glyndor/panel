@@ -1,4 +1,5 @@
 pub mod handlers;
+pub mod heartbeat;
 pub mod router;
 pub mod wg;
 
