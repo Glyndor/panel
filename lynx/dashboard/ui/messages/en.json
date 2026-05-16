@@ -51,6 +51,9 @@
     },
     "organizations": {
       "title": "Organizations",
+      "create": "New Organization",
+      "slugConflict": "Slug already taken. Choose a different name.",
+      "createError": "Failed to create organization.",
       "noOrgs": "No organizations yet",
       "noOrgsDesc": "Create an organization to start managing projects and containers.",
       "slug": "Slug:",
