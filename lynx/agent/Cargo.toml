@@ -15,4 +15,26 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+
+# database
+sqlx = { workspace = true }
+
+# crypto — command authorization & audit log
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+hex = "0.4"
+base64ct = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+rand = { workspace = true }
+
+# time
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# system interaction
+nix = { version = "0.29", features = ["process", "signal", "fs"] }
+
 lynx-compose = { path = "../translators/compose" }

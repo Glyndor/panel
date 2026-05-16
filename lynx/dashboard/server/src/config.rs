@@ -26,9 +26,16 @@ impl Config {
         let (jwt_sign_private_seed, jwt_sign_public_bytes) = load_or_gen_ed25519()?;
         let (jwt_enc_private_bytes, jwt_enc_public_bytes) = load_or_gen_x25519()?;
 
+        let database_url = load_secret("DATABASE_URL", "DATABASE_URL_FILE")
+            .map(|s| s.as_str().to_owned())
+            .context("DATABASE_URL or DATABASE_URL_FILE required")?;
+        let redis_url = load_secret("REDIS_URL", "REDIS_URL_FILE")
+            .map(|s| s.as_str().to_owned())
+            .context("REDIS_URL or REDIS_URL_FILE required")?;
+
         Ok(Config {
-            database_url: std::env::var("DATABASE_URL").context("DATABASE_URL required")?,
-            redis_url: std::env::var("REDIS_URL").context("REDIS_URL required")?,
+            database_url,
+            redis_url,
             internal_token,
             kek,
             pepper,

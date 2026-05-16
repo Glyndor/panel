@@ -1,32 +1,40 @@
 services:
   frontend:
+    container_name: lynx-dashboard-frontend
     build:
       context: ./ui
       dockerfile: Dockerfile
       target: runner
     ports:
-      - "3000:3000"
+      - "19443:3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://backend:8080
+      - BACKEND_URL=http://lynx-dashboard-backend:8080
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - lynx-dashboard
+      - lynx-dashboard-app
 
   backend:
+    container_name: lynx-dashboard-backend
     build:
       context: ./server
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-lynx}:${POSTGRES_PASSWORD:-lynx}@postgres:5432/${POSTGRES_DB:-lynx_dashboard}
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL_FILE=/run/secrets/lynx-dashboard-database-url
+      - REDIS_URL_FILE=/run/secrets/lynx-dashboard-redis-url
+      - INTERNAL_API_TOKEN_FILE=/run/secrets/lynx-dashboard-api-token
+      - KEK_FILE=/run/secrets/lynx-dashboard-kek
+      - PEPPER_FILE=/run/secrets/lynx-dashboard-pepper
       - RUST_LOG=${RUST_LOG:-info}
-      - INTERNAL_API_TOKEN_FILE=/run/secrets/internal_api_token
     secrets:
-      - internal_api_token
+      - lynx-dashboard-database-url
+      - lynx-dashboard-redis-url
+      - lynx-dashboard-api-token
+      - lynx-dashboard-kek
+      - lynx-dashboard-pepper
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,47 +45,80 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
     networks:
-      - lynx-dashboard
+      - lynx-dashboard-db
+      - lynx-dashboard-cache
+      - lynx-dashboard-app
 
   postgres:
+    container_name: lynx-dashboard-postgres
     image: docker.io/library/postgres:18
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-lynx}
-      - POSTGRES_DB=${POSTGRES_DB:-lynx_dashboard}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-lynx}
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=lynx_dashboard
+      - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
+    secrets:
+      - lynx-dashboard-pg-root
+      - lynx-dashboard-pg-pass
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./server/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lynx} -d ${POSTGRES_DB:-lynx_dashboard}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
     networks:
-      - lynx-dashboard
+      - lynx-dashboard-db
 
   redis:
+    container_name: lynx-dashboard-redis
     image: docker.io/library/redis:8-alpine
-    command: redis-server --save "" --appendonly no
+    command:
+      - sh
+      - -c
+      - 'redis-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
+    secrets:
+      - lynx-dashboard-redis-pass
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        - CMD-SHELL
+        - 'redis-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
     networks:
-      - lynx-dashboard
+      - lynx-dashboard-cache
 
 volumes:
   postgres_data:
 
 networks:
-  lynx-dashboard:
-    driver: bridge
+  lynx-dashboard-db:
+    external: true
+  lynx-dashboard-cache:
+    external: true
+  lynx-dashboard-app:
+    external: true
 
 secrets:
-  internal_api_token:
-    file: ./secrets/internal_api_token.txt
+  lynx-dashboard-pg-root:
+    external: true
+  lynx-dashboard-pg-pass:
+    external: true
+  lynx-dashboard-redis-pass:
+    external: true
+  lynx-dashboard-database-url:
+    external: true
+  lynx-dashboard-redis-url:
+    external: true
+  lynx-dashboard-api-token:
+    external: true
+  lynx-dashboard-kek:
+    external: true
+  lynx-dashboard-pepper:
+    external: true
