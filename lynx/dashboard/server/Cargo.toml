@@ -39,6 +39,9 @@ base64ct = { workspace = true }
 ed25519-dalek = { workspace = true }
 x25519-dalek = { workspace = true }
 
+# HTTP client (command relay to agents)
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+
 # types
 uuid = { workspace = true }
 chrono = { workspace = true }

@@ -17,8 +17,22 @@ pub enum AppError {
     Validation(String),
     #[error("conflict: {0}")]
     Conflict(&'static str),
+    #[error("not found")]
+    NotFound,
+    #[error("bad request: {0}")]
+    BadRequest(&'static str),
+    #[error("bad gateway")]
+    BadGateway,
+    #[error("agent unavailable")]
+    AgentUnavailable,
     #[error("internal")]
     Internal(#[from] anyhow::Error),
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(e: sqlx::Error) -> Self {
+        AppError::Internal(anyhow::Error::from(e))
+    }
 }
 
 impl IntoResponse for AppError {
@@ -29,6 +43,10 @@ impl IntoResponse for AppError {
             AppError::RateLimited { .. } => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),
             AppError::Validation(_) => (StatusCode::UNPROCESSABLE_ENTITY, "validation_error"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::BadGateway => (StatusCode::BAD_GATEWAY, "bad_gateway"),
+            AppError::AgentUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "agent_unavailable"),
             AppError::Internal(e) => {
                 tracing::error!("internal: {e:#}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
@@ -39,7 +57,7 @@ impl IntoResponse for AppError {
 
         match &self {
             AppError::Validation(msg) => body["detail"] = json!(msg),
-            AppError::Conflict(msg) => body["detail"] = json!(msg),
+            AppError::Conflict(msg) | AppError::BadRequest(msg) => body["detail"] = json!(msg),
             AppError::RateLimited { retry_after } => body["retry_after"] = json!(retry_after),
             _ => {}
         }
