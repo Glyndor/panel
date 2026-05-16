@@ -1,0 +1,44 @@
+[package]
+name = "lynx-dashboard-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "lynx-dashboard-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# database
+sqlx = { workspace = true }
+
+# cache
+redis = { workspace = true }
+
+# auth
+argon2 = { workspace = true }
+josekit = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+
+# crypto primitives
+rand = { workspace = true }
+sha2 = { workspace = true }
+aes-gcm = { workspace = true }
+base64ct = { workspace = true }
+ed25519-dalek = { workspace = true }
+x25519-dalek = { workspace = true }
+
+# types
+uuid = { workspace = true }
+chrono = { workspace = true }

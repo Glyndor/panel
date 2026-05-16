@@ -1,0 +1,49 @@
+[workspace]
+members = [
+    "agent",
+    "translators/compose",
+    "dashboard/server",
+]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "set-header", "limit"] }
+
+# database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
+
+# cache
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# auth
+argon2 = "0.5"
+josekit = "0.10"
+subtle = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+# crypto primitives
+rand = "0.8"
+sha2 = "0.10"
+aes-gcm = "0.10"
+base64ct = { version = "1", features = ["alloc"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "zeroize"] }
+x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
+
+# types
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

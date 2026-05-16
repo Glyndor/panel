@@ -1,0 +1,83 @@
+services:
+  frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+      target: runner
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-lynx}:${POSTGRES_PASSWORD:-lynx}@postgres:5432/${POSTGRES_DB:-lynx_dashboard}
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=${RUST_LOG:-info}
+      - INTERNAL_API_TOKEN_FILE=/run/secrets/internal_api_token
+    secrets:
+      - internal_api_token
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard
+
+  postgres:
+    image: docker.io/library/postgres:18
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-lynx}
+      - POSTGRES_DB=${POSTGRES_DB:-lynx_dashboard}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-lynx}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lynx} -d ${POSTGRES_DB:-lynx_dashboard}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard
+
+  redis:
+    image: docker.io/library/redis:8-alpine
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard
+
+volumes:
+  postgres_data:
+
+networks:
+  lynx-dashboard:
+    driver: bridge
+
+secrets:
+  internal_api_token:
+    file: ./secrets/internal_api_token.txt

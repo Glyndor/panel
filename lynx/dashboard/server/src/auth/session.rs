@@ -1,0 +1,137 @@
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use rand::rngs::OsRng;
+use redis::{aio::ConnectionManager, AsyncCommands};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+pub struct NewSession {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub ip: String,
+    pub user_agent: Option<String>,
+    pub refresh_token_raw: Vec<u8>,
+    pub refresh_token_hash: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+pub struct SessionRecord {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub refresh_token_hash: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+pub fn gen_refresh_token() -> Vec<u8> {
+    let mut buf = vec![0u8; 32];
+    rand::RngCore::fill_bytes(&mut OsRng, &mut buf);
+    buf
+}
+
+pub async fn create(db: &PgPool, s: &NewSession) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO sessions (id, user_id, ip, user_agent, refresh_token_hash, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+        s.id,
+        s.user_id,
+        s.ip,
+        s.user_agent,
+        s.refresh_token_hash,
+        s.expires_at,
+    )
+    .execute(db)
+    .await
+    .context("insert session")?;
+    Ok(())
+}
+
+pub async fn find_by_refresh_hash(db: &PgPool, hash: &str) -> Result<Option<SessionRecord>> {
+    sqlx::query_as!(
+        SessionRecord,
+        r#"
+        SELECT id, user_id, refresh_token_hash, expires_at
+        FROM sessions
+        WHERE refresh_token_hash = $1
+          AND expires_at > NOW()
+        "#,
+        hash
+    )
+    .fetch_optional(db)
+    .await
+    .context("find session by refresh hash")
+}
+
+pub async fn rotate_refresh(
+    db: &PgPool,
+    session_id: Uuid,
+    old_hash: &str,
+    new_hash: &str,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE sessions
+        SET refresh_token_hash = $1, last_used_at = NOW()
+        WHERE id = $2 AND refresh_token_hash = $3
+        "#,
+        new_hash,
+        session_id,
+        old_hash,
+    )
+    .execute(db)
+    .await
+    .context("rotate refresh token")?;
+    Ok(())
+}
+
+pub async fn delete_by_session_id(db: &PgPool, session_id: Uuid) -> Result<()> {
+    sqlx::query!("DELETE FROM sessions WHERE id = $1", session_id)
+        .execute(db)
+        .await
+        .context("delete session")?;
+    Ok(())
+}
+
+pub async fn log_event(db: &PgPool, session_id: Uuid, reason: &str) -> Result<()> {
+    let id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO session_logs (id, session_id, reason) VALUES ($1, $2, $3)",
+        id,
+        session_id,
+        reason,
+    )
+    .execute(db)
+    .await
+    .context("insert session log")?;
+    Ok(())
+}
+
+pub async fn store_access_jti(
+    redis: &mut ConnectionManager,
+    jti: Uuid,
+    session_id: Uuid,
+) -> Result<()> {
+    let key = format!("access:{jti}");
+    let _: () = redis
+        .set_ex(key, session_id.to_string(), 900u64)
+        .await
+        .context("store access jti")?;
+    Ok(())
+}
+
+pub async fn revoke_access_jti(redis: &mut ConnectionManager, jti: Uuid) -> Result<()> {
+    let _: () = redis
+        .del(format!("access:{jti}"))
+        .await
+        .context("revoke access jti")?;
+    Ok(())
+}
+
+pub async fn check_jti_valid(redis: &mut ConnectionManager, jti: Uuid) -> Result<bool> {
+    let exists: bool = redis
+        .exists(format!("access:{jti}"))
+        .await
+        .context("check jti")?;
+    Ok(exists)
+}

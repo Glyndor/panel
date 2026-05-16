@@ -1,0 +1,62 @@
+{
+  "auth": {
+    "login": {
+      "title": "Iniciar sesión en Lynx",
+      "subtitle": "Orquestación de infraestructura distribuida",
+      "username": "Usuario",
+      "password": "Contraseña",
+      "submit": "Iniciar sesión",
+      "submitting": "Iniciando sesión...",
+      "noAccount": "¿No tienes cuenta?",
+      "register": "Crear cuenta",
+      "invalidCredentials": "Usuario o contraseña inválidos",
+      "rateLimited": "Demasiados intentos. Vuelve a intentarlo en {minutes} minutos.",
+      "serverError": "Algo salió mal. Por favor inténtalo de nuevo."
+    },
+    "register": {
+      "title": "Crear tu cuenta",
+      "subtitle": "Empieza a orquestar tu infraestructura",
+      "username": "Usuario",
+      "email": "Correo electrónico",
+      "password": "Contraseña",
+      "submit": "Crear cuenta",
+      "submitting": "Creando cuenta...",
+      "hasAccount": "¿Ya tienes cuenta?",
+      "login": "Iniciar sesión",
+      "usernameTaken": "Nombre de usuario ya en uso",
+      "emailTaken": "Correo electrónico ya registrado",
+      "serverError": "Algo salió mal. Por favor inténtalo de nuevo.",
+      "validation": {
+        "usernameMin": "El usuario debe tener al menos 3 caracteres",
+        "usernameMax": "El usuario no puede superar 32 caracteres",
+        "usernameChars": "Solo se permiten letras minúsculas, números, - y _",
+        "usernameEdge": "No puede comenzar ni terminar con - o _",
+        "usernameReserved": "Este nombre de usuario está reservado",
+        "emailInvalid": "Introduce una dirección de correo válida",
+        "passwordMin": "La contraseña debe tener al menos 12 caracteres",
+        "passwordMax": "La contraseña no puede superar 30 caracteres",
+        "passwordUppercase": "Debe contener al menos una letra mayúscula",
+        "passwordLowercase": "Debe contener al menos una letra minúscula",
+        "passwordNumber": "Debe contener al menos un número",
+        "passwordSpecial": "Debe contener al menos un carácter especial"
+      }
+    }
+  },
+  "app": {
+    "nav": {
+      "overview": "Resumen",
+      "agents": "Agentes",
+      "organizations": "Organizaciones",
+      "settings": "Ajustes"
+    },
+    "overview": {
+      "title": "Resumen",
+      "noAgents": "No hay agentes conectados",
+      "noAgentsDesc": "Conecta un VPS agente para empezar a gestionar tu infraestructura."
+    }
+  },
+  "branding": {
+    "madeWith": "Hecho con amor por",
+    "author": "Jaroc"
+  }
+}

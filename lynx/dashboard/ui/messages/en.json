@@ -1,0 +1,62 @@
+{
+  "auth": {
+    "login": {
+      "title": "Sign in to Lynx",
+      "subtitle": "Distributed infrastructure orchestration",
+      "username": "Username",
+      "password": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in...",
+      "noAccount": "Don't have an account?",
+      "register": "Create account",
+      "invalidCredentials": "Invalid username or password",
+      "rateLimited": "Too many attempts. Try again in {minutes} minutes.",
+      "serverError": "Something went wrong. Please try again."
+    },
+    "register": {
+      "title": "Create your account",
+      "subtitle": "Start orchestrating your infrastructure",
+      "username": "Username",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Create account",
+      "submitting": "Creating account...",
+      "hasAccount": "Already have an account?",
+      "login": "Sign in",
+      "usernameTaken": "Username already taken",
+      "emailTaken": "Email already registered",
+      "serverError": "Something went wrong. Please try again.",
+      "validation": {
+        "usernameMin": "Username must be at least 3 characters",
+        "usernameMax": "Username cannot exceed 32 characters",
+        "usernameChars": "Only lowercase letters, numbers, - and _ allowed",
+        "usernameEdge": "Cannot start or end with - or _",
+        "usernameReserved": "This username is reserved",
+        "emailInvalid": "Enter a valid email address",
+        "passwordMin": "Password must be at least 12 characters",
+        "passwordMax": "Password cannot exceed 30 characters",
+        "passwordUppercase": "Must contain at least one uppercase letter",
+        "passwordLowercase": "Must contain at least one lowercase letter",
+        "passwordNumber": "Must contain at least one number",
+        "passwordSpecial": "Must contain at least one special character"
+      }
+    }
+  },
+  "app": {
+    "nav": {
+      "overview": "Overview",
+      "agents": "Agents",
+      "organizations": "Organizations",
+      "settings": "Settings"
+    },
+    "overview": {
+      "title": "Overview",
+      "noAgents": "No agents connected",
+      "noAgentsDesc": "Connect a VPS agent to start managing your infrastructure."
+    }
+  },
+  "branding": {
+    "madeWith": "Made with love by",
+    "author": "Jaroc"
+  }
+}
