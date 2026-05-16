@@ -1,6 +1,9 @@
 use crate::config::Config;
 use sqlx::PgPool;
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 #[derive(Clone)]
 pub struct AppState {

@@ -6,9 +6,7 @@ const CHECK_INTERVAL_SECS: u64 = 60;
 /// Background task: periodically compares live nftables checksum against
 /// the last-known-good checksum stored in AppState. On mismatch, alerts dashboard.
 pub async fn run_divergence_check(state: AppState) {
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_secs(CHECK_INTERVAL_SECS)
-    );
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(CHECK_INTERVAL_SECS));
     loop {
         interval.tick().await;
         check_once(&state).await;

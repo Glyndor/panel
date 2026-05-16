@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use base64ct::{Base64UrlUnpadded, Encoding};
 use chrono::{Duration, Utc};
-use ed25519_dalek::{Signature, SigningKey, Signer, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -57,13 +57,12 @@ pub fn verify_cert(
     cert: &SignedCert,
     expected_agent_id: Uuid,
 ) -> Result<AgentCert> {
-    let payload_bytes = Base64UrlUnpadded::decode_vec(&cert.payload)
-        .context("base64url decode payload")?;
-    let sig_bytes = Base64UrlUnpadded::decode_vec(&cert.signature)
-        .context("base64url decode signature")?;
+    let payload_bytes =
+        Base64UrlUnpadded::decode_vec(&cert.payload).context("base64url decode payload")?;
+    let sig_bytes =
+        Base64UrlUnpadded::decode_vec(&cert.signature).context("base64url decode signature")?;
 
-    let verifying_key = VerifyingKey::from_bytes(ca_public_bytes)
-        .context("parse CA public key")?;
+    let verifying_key = VerifyingKey::from_bytes(ca_public_bytes).context("parse CA public key")?;
 
     let sig_arr: [u8; 64] = sig_bytes
         .try_into()
@@ -74,8 +73,7 @@ pub fn verify_cert(
         .verify(&payload_bytes, &sig)
         .context("CA signature invalid")?;
 
-    let payload: AgentCert =
-        serde_json::from_slice(&payload_bytes).context("deserialize cert")?;
+    let payload: AgentCert = serde_json::from_slice(&payload_bytes).context("deserialize cert")?;
 
     if payload.agent_id != expected_agent_id {
         anyhow::bail!("cert agent_id mismatch");

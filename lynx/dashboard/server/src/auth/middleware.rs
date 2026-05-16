@@ -26,8 +26,8 @@ pub async fn require_auth(
         enc_public_bytes: state.config.jwt_enc_public_bytes,
     };
 
-    let claims = crypto::jwt::verify_access_token(&keys, token)
-        .map_err(|_| AppError::Unauthorized)?;
+    let claims =
+        crypto::jwt::verify_access_token(&keys, token).map_err(|_| AppError::Unauthorized)?;
 
     // Verify jti in Redis (not revoked)
     let mut redis = state.redis.clone();
@@ -47,12 +47,7 @@ pub async fn require_auth(
     if claims.ip_hash != expected_ip || claims.ua_hash != expected_ua {
         // Intercepted: revoke session
         let _ = crate::auth::session::revoke_access_jti(&mut redis, claims.jti).await;
-        let _ = crate::auth::session::log_event(
-            &state.db,
-            claims.session_id,
-            "intercepted",
-        )
-        .await;
+        let _ = crate::auth::session::log_event(&state.db, claims.session_id, "intercepted").await;
         return Err(AppError::Unauthorized);
     }
 

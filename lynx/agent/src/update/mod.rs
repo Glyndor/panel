@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::path::PathBuf;
 
 /// Download new binary, verify Ed25519 signature, atomic swap, then exec into new process.
@@ -36,8 +36,7 @@ pub async fn perform_update(version: &str, download_url: &str, sig_url: &str) ->
     let current_exe = std::env::current_exe().context("resolve current exe")?;
     let tmp_path = tmp_path(&current_exe);
 
-    std::fs::write(&tmp_path, &binary_bytes)
-        .with_context(|| format!("write to {tmp_path:?}"))?;
+    std::fs::write(&tmp_path, &binary_bytes).with_context(|| format!("write to {tmp_path:?}"))?;
 
     // Make it executable
     #[cfg(unix)]
@@ -86,8 +85,7 @@ async fn download_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> 
 
 fn verify_signature(binary: &[u8], sig_bytes: &[u8]) -> Result<()> {
     let key_bytes = load_verify_key()?;
-    let key = VerifyingKey::from_bytes(&key_bytes)
-        .context("parse DASHBOARD_VERIFY_KEY")?;
+    let key = VerifyingKey::from_bytes(&key_bytes).context("parse DASHBOARD_VERIFY_KEY")?;
 
     let sig_arr: [u8; 64] = sig_bytes
         .try_into()
@@ -106,8 +104,7 @@ fn load_verify_key() -> Result<[u8; 32]> {
         std::fs::read_to_string(&path)
             .with_context(|| format!("read DASHBOARD_VERIFY_KEY_FILE={path}"))?
     } else {
-        std::env::var("DASHBOARD_VERIFY_KEY")
-            .context("DASHBOARD_VERIFY_KEY not configured")?
+        std::env::var("DASHBOARD_VERIFY_KEY").context("DASHBOARD_VERIFY_KEY not configured")?
     };
 
     let bytes = Base64::decode_vec(raw.trim()).context("base64 decode DASHBOARD_VERIFY_KEY")?;

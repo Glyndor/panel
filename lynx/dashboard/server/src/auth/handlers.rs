@@ -175,10 +175,7 @@ pub async fn login(
     }))
 }
 
-pub async fn logout(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<StatusCode> {
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<StatusCode> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -220,8 +217,8 @@ pub async fn refresh(
     let ip = extract_ip(&headers);
     let ua = extract_ua(&headers);
 
-    let token_bytes = Base64UrlUnpadded::decode_vec(&body.refresh_token)
-        .map_err(|_| AppError::Unauthorized)?;
+    let token_bytes =
+        Base64UrlUnpadded::decode_vec(&body.refresh_token).map_err(|_| AppError::Unauthorized)?;
     let token_hash = hash::token_hash(&token_bytes, &state.config.pepper);
 
     let record = session::find_by_refresh_hash(&state.db, &token_hash)
@@ -290,10 +287,7 @@ fn extract_ua(headers: &HeaderMap) -> String {
 // GET /auth/me — return current user's username (auth-protected via JWT)
 // --------------------------------------------------------------------------
 
-pub async fn me(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<impl IntoResponse> {
+pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -311,15 +305,14 @@ pub async fn me(
         return Err(AppError::Unauthorized);
     }
 
-    let user = sqlx::query!(
-        "SELECT username FROM users WHERE id = $1",
-        claims.sub
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::Unauthorized)?;
+    let user = sqlx::query!("SELECT username FROM users WHERE id = $1", claims.sub)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
 
-    Ok(Json(serde_json::json!({ "id": claims.sub, "username": user.username })))
+    Ok(Json(
+        serde_json::json!({ "id": claims.sub, "username": user.username }),
+    ))
 }
 
 // --------------------------------------------------------------------------
@@ -383,23 +376,17 @@ pub async fn change_password(
     .await?;
 
     // Invalidate ALL sessions for this user — password_changed reason
-    let sessions = sqlx::query_scalar!(
-        "SELECT id FROM sessions WHERE user_id = $1",
-        user.id
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let sessions = sqlx::query_scalar!("SELECT id FROM sessions WHERE user_id = $1", user.id)
+        .fetch_all(&state.db)
+        .await?;
 
     for session_id in &sessions {
         let _ = session::log_event(&state.db, *session_id, "password_changed").await;
     }
 
-    sqlx::query!(
-        "DELETE FROM sessions WHERE user_id = $1",
-        user.id
-    )
-    .execute(&state.db)
-    .await?;
+    sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user.id)
+        .execute(&state.db)
+        .await?;
 
     // Revoke current access token in Redis
     session::revoke_access_jti(&mut redis, claims.jti)

@@ -16,7 +16,9 @@ pub struct SystemMetrics {
 
 /// Continuously sample and yield metrics. Called from WS handler.
 pub async fn stream_metrics(
-    mut send: impl FnMut(SystemMetrics) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
+    mut send: impl FnMut(
+        SystemMetrics,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
 ) -> Result<()> {
     loop {
         let metrics = sample().await?;

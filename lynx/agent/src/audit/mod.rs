@@ -39,13 +39,12 @@ pub async fn append(db: &PgPool, entry: AuditEntry<'_>) -> Result<()> {
     let result_str = entry.result.as_str();
 
     // Get last entry hash for chain
-    let prev_hash: String = sqlx::query_scalar!(
-        "SELECT entry_hash FROM audit_log ORDER BY created_at DESC LIMIT 1"
-    )
-    .fetch_optional(db)
-    .await
-    .context("fetch prev audit hash")?
-    .unwrap_or_else(|| "genesis".to_string());
+    let prev_hash: String =
+        sqlx::query_scalar!("SELECT entry_hash FROM audit_log ORDER BY created_at DESC LIMIT 1")
+            .fetch_optional(db)
+            .await
+            .context("fetch prev audit hash")?
+            .unwrap_or_else(|| "genesis".to_string());
 
     // Compute this entry's hash
     let mut hasher = Sha256::new();

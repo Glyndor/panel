@@ -1,19 +1,12 @@
 use super::{BrandingRow, UpdateBrandingRequest};
 use crate::{error::AppError, state::AppState};
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 
 // --------------------------------------------------------------------------
 // GET /branding — public, no auth required
 // --------------------------------------------------------------------------
 
-pub async fn get_branding(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
+pub async fn get_branding(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let row = sqlx::query_as!(
         BrandingRow,
         "SELECT company_name, logo_url, primary_color, secondary_color, accent_color, updated_at FROM white_label WHERE id = 1"
@@ -48,9 +41,9 @@ pub async fn update_branding(
     ] {
         if let Some(v) = val {
             if !v.starts_with('#') || v.len() != 7 {
-                return Err(AppError::Validation(
-                    format!("{field}: must be a 7-char hex color like #0f172a"),
-                ));
+                return Err(AppError::Validation(format!(
+                    "{field}: must be a 7-char hex color like #0f172a"
+                )));
             }
         }
     }

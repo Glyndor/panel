@@ -59,8 +59,8 @@ pub fn issue_access_token(
     let signer = EdDSA
         .signer_from_jwk(&signer_jwk)
         .context("create Ed25519 signer")?;
-    let inner_jws = jws::serialize_compact(&payload_bytes, &jws_header, &signer)
-        .context("JWS sign")?;
+    let inner_jws =
+        jws::serialize_compact(&payload_bytes, &jws_header, &signer).context("JWS sign")?;
 
     // Encrypt (JWE — ECDH-ES+A256KW / X25519 / A256GCM)
     let mut jwe_header = JweHeader::new();
@@ -82,8 +82,7 @@ pub fn verify_access_token(keys: &JwtKeys, token: &str) -> Result<AccessClaims> 
     let decrypter = ECDH_ES_A256KW
         .decrypter_from_jwk(&private_jwk)
         .context("create X25519 decrypter")?;
-    let (inner_bytes, _) =
-        jwe::deserialize_compact(token, &decrypter).context("JWE decrypt")?;
+    let (inner_bytes, _) = jwe::deserialize_compact(token, &decrypter).context("JWE decrypt")?;
 
     // Verify (JWS)
     let verifier_jwk = ed25519_public_jwk(&keys.sign_public_bytes)?;
@@ -104,7 +103,13 @@ pub fn verify_access_token(keys: &JwtKeys, token: &str) -> Result<AccessClaims> 
     let ip_hash = parse_str(&claims, "ip_hash")?.to_string();
     let ua_hash = parse_str(&claims, "ua_hash")?.to_string();
 
-    Ok(AccessClaims { sub, jti, session_id, ip_hash, ua_hash })
+    Ok(AccessClaims {
+        sub,
+        jti,
+        session_id,
+        ip_hash,
+        ua_hash,
+    })
 }
 
 fn validate_claims(c: &serde_json::Value) -> Result<()> {
@@ -125,12 +130,16 @@ fn validate_claims(c: &serde_json::Value) -> Result<()> {
 }
 
 fn parse_uuid(c: &serde_json::Value, key: &str) -> Result<Uuid> {
-    let s = c[key].as_str().with_context(|| format!("missing claim: {key}"))?;
+    let s = c[key]
+        .as_str()
+        .with_context(|| format!("missing claim: {key}"))?;
     Uuid::parse_str(s).with_context(|| format!("{key} not a UUID"))
 }
 
 fn parse_str<'a>(c: &'a serde_json::Value, key: &str) -> Result<&'a str> {
-    c[key].as_str().with_context(|| format!("missing claim: {key}"))
+    c[key]
+        .as_str()
+        .with_context(|| format!("missing claim: {key}"))
 }
 
 fn unix_now() -> u64 {

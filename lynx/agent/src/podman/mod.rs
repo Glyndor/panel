@@ -49,10 +49,7 @@ pub fn podman_as_tenant(tenant_id: &str, args: &[&str]) -> Result<std::process::
 
 /// Create an isolated Podman network for an organization.
 pub fn ensure_org_network(tenant_id: &str, network_name: &str) -> Result<()> {
-    let out = podman_as_tenant(
-        tenant_id,
-        &["network", "exists", network_name],
-    )?;
+    let out = podman_as_tenant(tenant_id, &["network", "exists", network_name])?;
 
     if !out.status.success() {
         let out = podman_as_tenant(
@@ -71,16 +68,10 @@ pub fn ensure_org_network(tenant_id: &str, network_name: &str) -> Result<()> {
 
 /// List running containers for a tenant.
 pub fn list_containers(tenant_id: &str) -> Result<Vec<ContainerInfo>> {
-    let out = podman_as_tenant(
-        tenant_id,
-        &["ps", "--format", "json", "--no-trunc"],
-    )?;
+    let out = podman_as_tenant(tenant_id, &["ps", "--format", "json", "--no-trunc"])?;
 
     if !out.status.success() {
-        anyhow::bail!(
-            "podman ps failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("podman ps failed: {}", String::from_utf8_lossy(&out.stderr));
     }
 
     let containers: Vec<serde_json::Value> =
@@ -91,11 +82,7 @@ pub fn list_containers(tenant_id: &str) -> Result<Vec<ContainerInfo>> {
         .filter_map(|c| {
             Some(ContainerInfo {
                 id: c["Id"].as_str()?.to_string(),
-                name: c["Names"]
-                    .as_array()?
-                    .first()?
-                    .as_str()?
-                    .to_string(),
+                name: c["Names"].as_array()?.first()?.as_str()?.to_string(),
                 status: c["Status"].as_str()?.to_string(),
                 image: c["Image"].as_str()?.to_string(),
             })
@@ -128,8 +115,7 @@ pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
         .with_context(|| format!("create project dir {project_dir}"))?;
 
     let compose_path = format!("{project_dir}/compose.yml");
-    std::fs::write(&compose_path, opts.compose_yaml)
-        .context("write compose.yml")?;
+    std::fs::write(&compose_path, opts.compose_yaml).context("write compose.yml")?;
 
     // Chown the project dir tree to the tenant user so they can read it.
     let uid = tenant_uid(opts.tenant_id)?;
@@ -138,7 +124,10 @@ pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
         .status()
         .context("chown project dir")?;
 
-    let out = run_as_tenant(opts.tenant_id, &["compose", "-f", &compose_path, "up", "-d"])?;
+    let out = run_as_tenant(
+        opts.tenant_id,
+        &["compose", "-f", &compose_path, "up", "-d"],
+    )?;
     if !out.status.success() {
         anyhow::bail!(
             "podman compose up failed: {}",
@@ -154,7 +143,10 @@ pub fn compose_down(tenant_id: &str, project_id: &str) -> Result<()> {
     if !std::path::Path::new(&compose_path).exists() {
         return Ok(());
     }
-    let out = run_as_tenant(tenant_id, &["compose", "-f", &compose_path, "down", "--remove-orphans"])?;
+    let out = run_as_tenant(
+        tenant_id,
+        &["compose", "-f", &compose_path, "down", "--remove-orphans"],
+    )?;
     if !out.status.success() {
         anyhow::bail!(
             "podman compose down failed: {}",
@@ -194,10 +186,7 @@ pub fn container_remove(tenant_id: &str, name: &str, force: bool) -> Result<()> 
     args.push(name);
     let out = run_as_tenant(tenant_id, &args)?;
     if !out.status.success() {
-        anyhow::bail!(
-            "podman rm failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("podman rm failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(())
 }

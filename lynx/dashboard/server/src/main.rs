@@ -40,8 +40,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("run migrations")?;
 
-    let redis = redis::Client::open(config.redis_url.as_str())
-        .context("open Redis client")?;
+    let redis = redis::Client::open(config.redis_url.as_str()).context("open Redis client")?;
     let redis_manager = redis::aio::ConnectionManager::new(redis)
         .await
         .context("connect to Redis")?;
@@ -52,25 +51,17 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
     };
 
-    let auth_layer = middleware::from_fn_with_state(
-        state.clone(),
-        auth::middleware::require_auth,
-    );
+    let auth_layer = middleware::from_fn_with_state(state.clone(), auth::middleware::require_auth);
 
-    let agents_router = agents::router::router()
-        .route_layer(auth_layer.clone());
+    let agents_router = agents::router::router().route_layer(auth_layer.clone());
 
-    let orgs_router = organizations::router::router()
-        .route_layer(auth_layer.clone());
+    let orgs_router = organizations::router::router().route_layer(auth_layer.clone());
 
-    let admin_router = admin::router::router()
-        .route_layer(auth_layer.clone());
+    let admin_router = admin::router::router().route_layer(auth_layer.clone());
 
-    let domain_router = domain::router::router()
-        .route_layer(auth_layer.clone());
+    let domain_router = domain::router::router().route_layer(auth_layer.clone());
 
-    let migration_router = migration::router::router()
-        .route_layer(auth_layer);
+    let migration_router = migration::router::router().route_layer(auth_layer);
 
     let app = Router::new()
         .route("/health", get(health))

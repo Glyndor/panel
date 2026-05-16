@@ -50,11 +50,9 @@ pub async fn run_sync_task(state: AppState) {
 }
 
 async fn sync_batch(db: &PgPool, url: &str, token: &str) -> anyhow::Result<()> {
-    let last_synced = sqlx::query_scalar!(
-        "SELECT last_synced_at FROM sync_state WHERE id = 1"
-    )
-    .fetch_one(db)
-    .await?;
+    let last_synced = sqlx::query_scalar!("SELECT last_synced_at FROM sync_state WHERE id = 1")
+        .fetch_one(db)
+        .await?;
 
     let entries = sqlx::query_as!(
         AuditEntry,
@@ -91,7 +89,11 @@ async fn sync_batch(db: &PgPool, url: &str, token: &str) -> anyhow::Result<()> {
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("dashboard returned {}: {}", status, &body[..body.len().min(200)]);
+        anyhow::bail!(
+            "dashboard returned {}: {}",
+            status,
+            &body[..body.len().min(200)]
+        );
     }
 
     sqlx::query!(

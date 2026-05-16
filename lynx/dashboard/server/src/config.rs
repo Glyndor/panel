@@ -56,8 +56,8 @@ impl Config {
 
 fn load_secret(env: &str, file_env: &str) -> Result<Zeroizing<String>> {
     if let Ok(path) = std::env::var(file_env) {
-        let val = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {file_env}={path}"))?;
+        let val =
+            std::fs::read_to_string(&path).with_context(|| format!("read {file_env}={path}"))?;
         return Ok(Zeroizing::new(val.trim().to_string()));
     }
     let val = std::env::var(env).with_context(|| format!("{env} or {file_env} required"))?;

@@ -37,13 +37,12 @@ pub fn load_ca_public_key() -> Option<[u8; 32]> {
 
 /// Verify a cert from the dashboard. Returns Ok if valid and not expired.
 pub fn verify(cert: &SignedCert, ca_public: &[u8; 32], expected_agent_id: Uuid) -> Result<()> {
-    let payload_bytes = Base64UrlUnpadded::decode_vec(&cert.payload)
-        .context("base64url decode payload")?;
-    let sig_bytes = Base64UrlUnpadded::decode_vec(&cert.signature)
-        .context("base64url decode signature")?;
+    let payload_bytes =
+        Base64UrlUnpadded::decode_vec(&cert.payload).context("base64url decode payload")?;
+    let sig_bytes =
+        Base64UrlUnpadded::decode_vec(&cert.signature).context("base64url decode signature")?;
 
-    let verifying_key =
-        VerifyingKey::from_bytes(ca_public).context("parse CA public key")?;
+    let verifying_key = VerifyingKey::from_bytes(ca_public).context("parse CA public key")?;
 
     let sig_arr: [u8; 64] = sig_bytes
         .try_into()
@@ -54,8 +53,7 @@ pub fn verify(cert: &SignedCert, ca_public: &[u8; 32], expected_agent_id: Uuid) 
         .verify(&payload_bytes, &sig)
         .context("CA signature invalid")?;
 
-    let payload: AgentCert =
-        serde_json::from_slice(&payload_bytes).context("deserialize cert")?;
+    let payload: AgentCert = serde_json::from_slice(&payload_bytes).context("deserialize cert")?;
 
     if payload.agent_id != expected_agent_id {
         anyhow::bail!("cert agent_id mismatch");

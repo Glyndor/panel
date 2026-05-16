@@ -18,13 +18,10 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let database_url =
-            std::env::var("DATABASE_URL").context("DATABASE_URL required")?;
+        let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL required")?;
 
-        let agent_id_str =
-            std::env::var("AGENT_ID").context("AGENT_ID required")?;
-        let agent_id =
-            uuid::Uuid::parse_str(&agent_id_str).context("AGENT_ID must be UUID v7")?;
+        let agent_id_str = std::env::var("AGENT_ID").context("AGENT_ID required")?;
+        let agent_id = uuid::Uuid::parse_str(&agent_id_str).context("AGENT_ID must be UUID v7")?;
 
         let dashboard_verify_key = load_key32_or_dev("DASHBOARD_VERIFY_KEY")?;
         let internal_token = load_secret("INTERNAL_TOKEN")?;
@@ -48,8 +45,8 @@ impl Config {
 fn load_secret(env: &str) -> Result<Zeroizing<String>> {
     let file_env = format!("{env}_FILE");
     if let Ok(path) = std::env::var(&file_env) {
-        let val = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {file_env}={path}"))?;
+        let val =
+            std::fs::read_to_string(&path).with_context(|| format!("read {file_env}={path}"))?;
         return Ok(Zeroizing::new(val.trim().to_string()));
     }
     let val = std::env::var(env).with_context(|| format!("{env} required"))?;

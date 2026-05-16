@@ -10,7 +10,7 @@ use uuid::Uuid;
 pub const MAX_TIMESTAMP_SKEW_SECS: i64 = 30;
 
 /// Permission level required for a command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionLevel {
     Read,
@@ -55,14 +55,14 @@ pub async fn verify_command(
     own_agent_id: Uuid,
 ) -> Result<VerifiedCommand> {
     // 1. Decode payload bytes + signature
-    let payload_bytes = Base64UrlUnpadded::decode_vec(&signed.payload)
-        .context("payload: invalid base64url")?;
-    let sig_bytes = Base64UrlUnpadded::decode_vec(&signed.signature)
-        .context("signature: invalid base64url")?;
+    let payload_bytes =
+        Base64UrlUnpadded::decode_vec(&signed.payload).context("payload: invalid base64url")?;
+    let sig_bytes =
+        Base64UrlUnpadded::decode_vec(&signed.signature).context("signature: invalid base64url")?;
 
     // 2. Verify Ed25519 signature (constant-time)
-    let verifying_key = VerifyingKey::from_bytes(verify_key_bytes)
-        .context("invalid dashboard verify key")?;
+    let verifying_key =
+        VerifyingKey::from_bytes(verify_key_bytes).context("invalid dashboard verify key")?;
     let sig_arr: [u8; 64] = sig_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("signature must be 64 bytes"))?;
@@ -102,12 +102,10 @@ pub async fn verify_command(
 /// Returns Ok(()) if nonce is fresh, inserts it. Returns Err if already seen.
 async fn check_and_consume_nonce(db: &PgPool, nonce: &str) -> Result<()> {
     // Also purge expired nonces (>60s old) opportunistically
-    sqlx::query!(
-        "DELETE FROM used_nonces WHERE created_at < NOW() - INTERVAL '60 seconds'"
-    )
-    .execute(db)
-    .await
-    .context("purge expired nonces")?;
+    sqlx::query!("DELETE FROM used_nonces WHERE created_at < NOW() - INTERVAL '60 seconds'")
+        .execute(db)
+        .await
+        .context("purge expired nonces")?;
 
     let inserted = sqlx::query_scalar!(
         r#"

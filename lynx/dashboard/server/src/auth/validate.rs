@@ -1,14 +1,24 @@
 use crate::error::{AppError, Result};
 
 const RESERVED_USERNAMES: &[&str] = &[
-    "admin", "root", "system", "lynx", "support", "api", "null", "undefined",
+    "admin",
+    "root",
+    "system",
+    "lynx",
+    "support",
+    "api",
+    "null",
+    "undefined",
 ];
 
 pub fn username(s: &str) -> Result<()> {
     if s.len() < 3 || s.len() > 32 {
         return Err(AppError::Validation("username: 3–32 characters".into()));
     }
-    if !s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') {
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    {
         return Err(AppError::Validation(
             "username: only lowercase letters, digits, - and _".into(),
         ));

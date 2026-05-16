@@ -129,11 +129,10 @@ async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
 /// 2. Update the dashboard WireGuard peer to use the new PSK.
 /// 3. Send a signed `wg.rotate_psk` command so the agent reconfigures itself.
 async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(), AppError> {
-    let agents = sqlx::query!(
-        "SELECT id, wg_pubkey, wg_ip, api_port FROM agents WHERE status = 'online'"
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let agents =
+        sqlx::query!("SELECT id, wg_pubkey, wg_ip, api_port FROM agents WHERE status = 'online'")
+            .fetch_all(&state.db)
+            .await?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -142,9 +141,7 @@ async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(
 
     for agent in &agents {
         // Generate new PSK
-        let psk_out = std::process::Command::new("wg")
-            .arg("genpsk")
-            .output();
+        let psk_out = std::process::Command::new("wg").arg("genpsk").output();
 
         let new_psk = match psk_out {
             Ok(out) if out.status.success() => {
@@ -158,8 +155,14 @@ async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(
 
         // Update dashboard-side WireGuard peer with new PSK (best-effort)
         let psk_update = std::process::Command::new("wg")
-            .args(["set", "wg-lynx-dashboard", "peer", &agent.wg_pubkey,
-                   "preshared-key", "/dev/stdin"])
+            .args([
+                "set",
+                "wg-lynx-dashboard",
+                "peer",
+                &agent.wg_pubkey,
+                "preshared-key",
+                "/dev/stdin",
+            ])
             .stdin(std::process::Stdio::piped())
             .spawn()
             .and_then(|mut child| {
@@ -180,20 +183,17 @@ async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(
             "new_psk": new_psk,
         });
 
-        let signed = cmd::sign_command(
-            &state.config,
-            agent.id,
-            triggered_by,
-            "write",
-            &command,
-        )
-        .map_err(|e| AppError::Internal(e))?;
+        let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
+            .map_err(|e| AppError::Internal(e))?;
 
         let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
         let _ = client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", &*state.config.internal_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", &*state.config.internal_token),
+            )
             .json(&signed)
             .send()
             .await;
@@ -225,13 +225,15 @@ pub async fn list_rotation_log(
 
     let result: Vec<_> = logs
         .into_iter()
-        .map(|r| serde_json::json!({
-            "id": r.id,
-            "triggered_by": r.triggered_by,
-            "reason": r.reason,
-            "scope": r.scope,
-            "created_at": r.created_at,
-        }))
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "triggered_by": r.triggered_by,
+                "reason": r.reason,
+                "scope": r.scope,
+                "created_at": r.created_at,
+            })
+        })
         .collect();
 
     Ok(Json(result))
@@ -259,14 +261,16 @@ pub async fn list_sessions(
 
     let result: Vec<_> = sessions
         .into_iter()
-        .map(|s| serde_json::json!({
-            "id": s.id,
-            "ip": s.ip,
-            "user_agent": s.user_agent,
-            "created_at": s.created_at,
-            "last_used_at": s.last_used_at,
-            "expires_at": s.expires_at,
-        }))
+        .map(|s| {
+            serde_json::json!({
+                "id": s.id,
+                "ip": s.ip,
+                "user_agent": s.user_agent,
+                "created_at": s.created_at,
+                "last_used_at": s.last_used_at,
+                "expires_at": s.expires_at,
+            })
+        })
         .collect();
 
     Ok(Json(result))
@@ -297,10 +301,7 @@ pub async fn revoke_session(
     }
 
     // Best-effort Redis cleanup (JTI may have already expired)
-    let _: () = redis
-        .del(format!("jti:{}", session_id))
-        .await
-        .unwrap_or(());
+    let _: () = redis.del(format!("jti:{}", session_id)).await.unwrap_or(());
 
     sqlx::query!(
         "INSERT INTO session_logs (id, session_id, reason) VALUES ($1, $2, $3)",
@@ -415,17 +416,23 @@ pub async fn trigger_update(
         .fetch_all(&state.db)
         .await?
         .into_iter()
-        .map(|r| AgentTarget { id: r.id, wg_ip: r.wg_ip, api_port: r.api_port })
+        .map(|r| AgentTarget {
+            id: r.id,
+            wg_ip: r.wg_ip,
+            api_port: r.api_port,
+        })
         .collect()
     } else {
-        sqlx::query!(
-            "SELECT id, wg_ip, api_port FROM agents WHERE status = 'online'"
-        )
-        .fetch_all(&state.db)
-        .await?
-        .into_iter()
-        .map(|r| AgentTarget { id: r.id, wg_ip: r.wg_ip, api_port: r.api_port })
-        .collect()
+        sqlx::query!("SELECT id, wg_ip, api_port FROM agents WHERE status = 'online'")
+            .fetch_all(&state.db)
+            .await?
+            .into_iter()
+            .map(|r| AgentTarget {
+                id: r.id,
+                wg_ip: r.wg_ip,
+                api_port: r.api_port,
+            })
+            .collect()
     };
 
     let mut sent = 0usize;
@@ -453,24 +460,18 @@ pub async fn trigger_update(
             "sig_url": sig_url,
         });
 
-        let signed = cmd::sign_command(
-            &state.config,
-            agent.id,
-            user.user_id,
-            "write",
-            &command,
-        )
-        .map_err(|e| AppError::Internal(e))?;
+        let signed = cmd::sign_command(&state.config, agent.id, user.user_id, "write", &command)
+            .map_err(|e| AppError::Internal(e))?;
 
-        let url = format!(
-            "http://{}:{}/cmd",
-            agent.wg_ip, agent.api_port
-        );
+        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
         let log_id = Uuid::now_v7();
         let send_result = client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", &*state.config.internal_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", &*state.config.internal_token),
+            )
             .json(&signed)
             .send()
             .await;
@@ -510,6 +511,11 @@ pub async fn trigger_update(
         "update triggered"
     );
 
+    // Rotate certs expiring within 14 days as part of the update flow.
+    if let Err(e) = rotate_expiring_certs(&state, 14).await {
+        tracing::warn!("cert expiry check during update failed: {e}");
+    }
+
     Ok(Json(serde_json::json!({
         "ok": true,
         "version": req.version,
@@ -539,34 +545,41 @@ pub async fn list_update_log(
 
     let result: Vec<_> = logs
         .into_iter()
-        .map(|r| serde_json::json!({
-            "id": r.id,
-            "triggered_by": r.triggered_by,
-            "version": r.version,
-            "channel": r.channel,
-            "scope": r.scope,
-            "agent_id": r.agent_id,
-            "status": r.status,
-            "error": r.error,
-            "created_at": r.created_at,
-        }))
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "triggered_by": r.triggered_by,
+                "version": r.version,
+                "channel": r.channel,
+                "scope": r.scope,
+                "agent_id": r.agent_id,
+                "status": r.status,
+                "error": r.error,
+                "created_at": r.created_at,
+            })
+        })
         .collect();
 
     Ok(Json(result))
 }
 
 /// Re-issue CA-signed certificates for all registered agents.
-/// Sends a `cert.update` command to online agents so they can verify commands
-/// from the new cert going forward.
+///
+/// Updates the DB for every agent, then pushes a `cert.update` command to online agents
+/// so they persist the new cert immediately without waiting for a restart.
 async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
-    use base64ct::{Base64UrlUnpadded, Encoding};
     use crate::crypto::pki;
 
-    let agents = sqlx::query!("SELECT id FROM agents")
+    let triggered_by = Uuid::nil(); // system-triggered; nil sentinel for audit
+
+    let agents = sqlx::query!("SELECT id, wg_ip, api_port, status FROM agents")
         .fetch_all(&state.db)
         .await?;
 
-    let ca_public_key = Base64UrlUnpadded::encode_string(&state.config.ca_public_bytes);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
     for agent in &agents {
         let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
@@ -581,9 +594,124 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
         .execute(&state.db)
         .await?;
 
-        tracing::debug!(agent_id = %agent.id, "cert re-issued");
+        tracing::debug!(agent_id = %agent.id, "cert re-issued in DB");
+
+        // Push new cert to online agents immediately so it takes effect without a restart.
+        if agent.status == "online" {
+            let command = serde_json::json!({
+                "type": "cert.update",
+                "payload": cert.payload,
+                "signature": cert.signature,
+            });
+
+            let signed =
+                cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
+                    .map_err(|e| AppError::Internal(e))?;
+
+            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let result = client
+                .post(&url)
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", &*state.config.internal_token),
+                )
+                .json(&signed)
+                .send()
+                .await;
+
+            match result {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!(agent_id = %agent.id, "cert pushed to online agent")
+                }
+                Ok(r) => {
+                    tracing::warn!(agent_id = %agent.id, status = %r.status(), "cert push returned non-2xx")
+                }
+                Err(e) => tracing::warn!(agent_id = %agent.id, "cert push failed: {e}"),
+            }
+        }
     }
 
-    tracing::info!(count = agents.len(), ca_pubkey = %ca_public_key, "agent certs rotated");
+    tracing::info!(count = agents.len(), "agent certs rotated");
+    Ok(())
+}
+
+/// Check all online agents and rotate certs expiring within `threshold_days`.
+/// Called automatically during the update trigger flow.
+pub async fn rotate_expiring_certs(state: &AppState, threshold_days: i64) -> Result<(), AppError> {
+    use crate::crypto::pki;
+
+    let triggered_by = Uuid::nil();
+
+    let agents = sqlx::query!(
+        r#"
+        SELECT id, wg_ip, api_port
+        FROM agents
+        WHERE status = 'online'
+          AND (cert_expires_at IS NULL OR cert_expires_at < NOW() + ($1 || ' days')::INTERVAL)
+        "#,
+        threshold_days.to_string(),
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    if agents.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        count = agents.len(),
+        threshold_days,
+        "rotating expiring agent certs"
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+
+    for agent in &agents {
+        let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
+            .map_err(|e| AppError::Internal(e))?;
+
+        sqlx::query!(
+            "UPDATE agents SET cert_payload = $1, cert_signature = $2, cert_expires_at = NOW() + INTERVAL '90 days' WHERE id = $3",
+            cert.payload,
+            cert.signature,
+            agent.id,
+        )
+        .execute(&state.db)
+        .await?;
+
+        let command = serde_json::json!({
+            "type": "cert.update",
+            "payload": cert.payload,
+            "signature": cert.signature,
+        });
+
+        let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
+            .map_err(|e| AppError::Internal(e))?;
+
+        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let result = client
+            .post(&url)
+            .header(
+                "Authorization",
+                format!("Bearer {}", &*state.config.internal_token),
+            )
+            .json(&signed)
+            .send()
+            .await;
+
+        match result {
+            Ok(r) if r.status().is_success() => {
+                tracing::info!(agent_id = %agent.id, "expiring cert rotated and pushed")
+            }
+            Ok(r) => {
+                tracing::warn!(agent_id = %agent.id, status = %r.status(), "cert push returned non-2xx")
+            }
+            Err(e) => tracing::warn!(agent_id = %agent.id, "cert push failed: {e}"),
+        }
+    }
+
     Ok(())
 }

@@ -1,5 +1,10 @@
-use super::{Agent, AgentSummary, AuditSyncEntry, RegisterAgentRequest, RegisterAgentResponse, wg};
-use crate::{auth::middleware::AuthUser, crypto::{cmd::sign_command, hash::sha256_hex}, error::AppError, state::AppState};
+use super::{wg, Agent, AgentSummary, AuditSyncEntry, RegisterAgentRequest, RegisterAgentResponse};
+use crate::{
+    auth::middleware::AuthUser,
+    crypto::{cmd::sign_command, hash::sha256_hex},
+    error::AppError,
+    state::AppState,
+};
 use axum::{
     extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
@@ -56,7 +61,8 @@ pub async fn register_agent(
     let wg_ip = wg::next_available_ip(&state.db).await?;
 
     // Generate sync token (returned once — agent must store it)
-    let sync_token = format!("{}", uuid::Uuid::now_v7()).replace('-', "") + &format!("{}", uuid::Uuid::now_v7()).replace('-', "");
+    let sync_token = format!("{}", uuid::Uuid::now_v7()).replace('-', "")
+        + &format!("{}", uuid::Uuid::now_v7()).replace('-', "");
     let sync_token_hash = sha256_hex(sync_token.as_bytes());
 
     let agent = sqlx::query_as!(
@@ -112,7 +118,12 @@ pub async fn register_agent(
 
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(RegisterAgentResponse { agent, sync_token, cert, ca_public_key }),
+        Json(RegisterAgentResponse {
+            agent,
+            sync_token,
+            cert,
+            ca_public_key,
+        }),
     ))
 }
 
@@ -124,13 +135,10 @@ pub async fn remove_agent(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let agent = sqlx::query!(
-        "SELECT wg_pubkey FROM agents WHERE id = $1",
-        id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let agent = sqlx::query!("SELECT wg_pubkey FROM agents WHERE id = $1", id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
 
     // Remove WireGuard peer (best-effort)
     if let Err(e) = wg::remove_peer(&agent.wg_pubkey) {
@@ -160,11 +168,7 @@ pub async fn relay_heartbeat(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let url = format!(
-        "http://{}:{}/heartbeat",
-        agent.wg_ip,
-        agent.api_port
-    );
+    let url = format!("http://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
 
     let token = &*state.config.internal_token;
     let client = reqwest::Client::new();
@@ -199,12 +203,9 @@ pub async fn relay_heartbeat(
             Err(AppError::BadGateway)
         }
         Err(_) => {
-            sqlx::query!(
-                "UPDATE agents SET status='offline' WHERE id=$1",
-                id
-            )
-            .execute(&state.db)
-            .await?;
+            sqlx::query!("UPDATE agents SET status='offline' WHERE id=$1", id)
+                .execute(&state.db)
+                .await?;
             Err(AppError::BadGateway)
         }
     }
@@ -247,11 +248,7 @@ pub async fn send_command(
 
     let signed = sign_command(&state.config, id, cmd_user_id, &permission, &payload)?;
 
-    let url = format!(
-        "http://{}:{}/cmd",
-        agent.wg_ip,
-        agent.api_port
-    );
+    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
     let token = &*state.config.internal_token;
     let client = reqwest::Client::new();
@@ -292,20 +289,15 @@ pub async fn receive_event(
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
 
-    let stored_hash = sqlx::query_scalar!(
-        "SELECT sync_token_hash FROM agents WHERE id = $1",
-        id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .flatten()
-    .ok_or(AppError::NotFound)?;
+    let stored_hash = sqlx::query_scalar!("SELECT sync_token_hash FROM agents WHERE id = $1", id)
+        .fetch_optional(&state.db)
+        .await?
+        .flatten()
+        .ok_or(AppError::NotFound)?;
 
     let provided_hash = sha256_hex(token.as_bytes());
-    let ok: bool = subtle::ConstantTimeEq::ct_eq(
-        provided_hash.as_bytes(),
-        stored_hash.as_bytes(),
-    ).into();
+    let ok: bool =
+        subtle::ConstantTimeEq::ct_eq(provided_hash.as_bytes(), stored_hash.as_bytes()).into();
     if !ok {
         return Err(AppError::Unauthorized);
     }
@@ -314,11 +306,19 @@ pub async fn receive_event(
         .get("event")
         .and_then(|v| v.as_str())
         .ok_or(AppError::BadRequest("event field required"))?;
-    let detail = body.get("detail").and_then(|v| v.as_str()).map(String::from);
+    let detail = body
+        .get("detail")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     let allowed_events = [
-        "connected", "disconnected", "lockdown", "heartbeat_lost",
-        "update_applied", "nftables_divergence", "bootstrap_completed",
+        "connected",
+        "disconnected",
+        "lockdown",
+        "heartbeat_lost",
+        "update_applied",
+        "nftables_divergence",
+        "bootstrap_completed",
     ];
     if !allowed_events.contains(&event) {
         return Err(AppError::BadRequest("unknown event type"));
@@ -358,20 +358,15 @@ pub async fn receive_audit_sync(
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
 
-    let stored_hash = sqlx::query_scalar!(
-        "SELECT sync_token_hash FROM agents WHERE id = $1",
-        id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .flatten()
-    .ok_or(AppError::NotFound)?;
+    let stored_hash = sqlx::query_scalar!("SELECT sync_token_hash FROM agents WHERE id = $1", id)
+        .fetch_optional(&state.db)
+        .await?
+        .flatten()
+        .ok_or(AppError::NotFound)?;
 
     let provided_hash = sha256_hex(token.as_bytes());
-    let ok: bool = subtle::ConstantTimeEq::ct_eq(
-        provided_hash.as_bytes(),
-        stored_hash.as_bytes(),
-    ).into();
+    let ok: bool =
+        subtle::ConstantTimeEq::ct_eq(provided_hash.as_bytes(), stored_hash.as_bytes()).into();
     if !ok {
         return Err(AppError::Unauthorized);
     }
@@ -451,13 +446,15 @@ pub async fn list_agent_events(
 
     let result: Vec<_> = events
         .into_iter()
-        .map(|e| serde_json::json!({
-            "id": e.id,
-            "agent_id": e.agent_id,
-            "event": e.event,
-            "detail": e.detail,
-            "created_at": e.created_at,
-        }))
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id,
+                "agent_id": e.agent_id,
+                "event": e.event,
+                "detail": e.detail,
+                "created_at": e.created_at,
+            })
+        })
         .collect();
 
     Ok(Json(result))
@@ -520,7 +517,9 @@ pub async fn nftables_resolve(
     Json(req): Json<NftablesResolveRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if req.action != "restore" && req.action != "accept" {
-        return Err(AppError::Validation("action must be restore or accept".into()));
+        return Err(AppError::Validation(
+            "action must be restore or accept".into(),
+        ));
     }
 
     let agent = sqlx::query!(
@@ -624,28 +623,29 @@ pub async fn list_audit_log(
     .fetch_all(&state.db)
     .await?;
 
-    let total: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM audit_log WHERE agent_id = $1",
-        id
-    )
-    .fetch_one(&state.db)
-    .await?
-    .unwrap_or(0);
+    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM audit_log WHERE agent_id = $1", id)
+        .fetch_one(&state.db)
+        .await?
+        .unwrap_or(0);
 
     let result: Vec<_> = entries
         .into_iter()
-        .map(|e| serde_json::json!({
-            "id": e.id,
-            "agent_id": e.agent_id,
-            "organization_id": e.organization_id,
-            "user_id": e.user_id,
-            "command_type": e.command_type,
-            "result": e.result,
-            "error": e.error,
-            "entry_hash": &e.entry_hash[..16],
-            "created_at": e.created_at,
-        }))
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id,
+                "agent_id": e.agent_id,
+                "organization_id": e.organization_id,
+                "user_id": e.user_id,
+                "command_type": e.command_type,
+                "result": e.result,
+                "error": e.error,
+                "entry_hash": &e.entry_hash[..16],
+                "created_at": e.created_at,
+            })
+        })
         .collect();
 
-    Ok(Json(json!({ "entries": result, "total": total, "limit": limit, "offset": offset })))
+    Ok(Json(
+        json!({ "entries": result, "total": total, "limit": limit, "offset": offset }),
+    ))
 }

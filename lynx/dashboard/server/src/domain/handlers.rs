@@ -44,7 +44,9 @@ pub async fn set_domain(
 
     // Basic email validation
     if !req.email.contains('@') || req.email.contains(' ') {
-        return Err(AppError::Validation("invalid email for Let's Encrypt".into()));
+        return Err(AppError::Validation(
+            "invalid email for Let's Encrypt".into(),
+        ));
     }
 
     sqlx::query!(
@@ -81,7 +83,10 @@ pub async fn set_domain(
         }
     });
 
-    Ok((StatusCode::ACCEPTED, Json(json!({ "status": "pending", "domain": domain }))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "status": "pending", "domain": domain })),
+    ))
 }
 
 // --------------------------------------------------------------------------
@@ -92,13 +97,13 @@ pub async fn verify_domain(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, AppError> {
-    let cfg = sqlx::query!(
-        "SELECT domain FROM domain_config WHERE id = 1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let cfg = sqlx::query!("SELECT domain FROM domain_config WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
 
-    let domain = cfg.domain.ok_or(AppError::Validation("no domain configured".into()))?;
+    let domain = cfg
+        .domain
+        .ok_or(AppError::Validation("no domain configured".into()))?;
 
     let dns_ok = check_dns(&domain).await;
 
@@ -117,11 +122,9 @@ pub async fn set_hsts(
     Extension(_user): Extension<AuthUser>,
     Json(req): Json<SetHstsRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let cfg = sqlx::query!(
-        "SELECT status, domain FROM domain_config WHERE id = 1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let cfg = sqlx::query!("SELECT status, domain FROM domain_config WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
 
     if cfg.status != "active" {
         return Err(AppError::Validation(
@@ -155,11 +158,9 @@ pub async fn close_port(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, AppError> {
-    let cfg = sqlx::query!(
-        "SELECT status FROM domain_config WHERE id = 1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let cfg = sqlx::query!("SELECT status FROM domain_config WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
 
     if cfg.status != "active" {
         return Err(AppError::Validation(
@@ -169,7 +170,15 @@ pub async fn close_port(
 
     // Remove port 19443 from nftables
     let output = std::process::Command::new("nft")
-        .args(["delete", "rule", "inet", "lynx-dashboard", "input", "handle", "19443"])
+        .args([
+            "delete",
+            "rule",
+            "inet",
+            "lynx-dashboard",
+            "input",
+            "handle",
+            "19443",
+        ])
         .output();
 
     match output {
@@ -186,7 +195,17 @@ pub async fn close_port(
             tracing::error!("nft delete rule failed: {stderr}");
             // Fall back to using nft with a drop rule
             let _ = std::process::Command::new("nft")
-                .args(["add", "rule", "inet", "lynx-dashboard", "input", "tcp", "dport", "19443", "drop"])
+                .args([
+                    "add",
+                    "rule",
+                    "inet",
+                    "lynx-dashboard",
+                    "input",
+                    "tcp",
+                    "dport",
+                    "19443",
+                    "drop",
+                ])
                 .status();
             sqlx::query!(
                 "UPDATE domain_config SET port_19443_open=false, updated_at=NOW() WHERE id=1"
@@ -195,7 +214,9 @@ pub async fn close_port(
             .await?;
             Ok(Json(json!({ "port_19443_open": false })))
         }
-        Err(e) => Err(AppError::Internal(anyhow::anyhow!("nft command failed: {e}"))),
+        Err(e) => Err(AppError::Internal(anyhow::anyhow!(
+            "nft command failed: {e}"
+        ))),
     }
 }
 
@@ -256,11 +277,14 @@ async fn obtain_lets_encrypt_cert(domain: &str, email: &str) -> anyhow::Result<(
         .args([
             "certonly",
             "--webroot",
-            "--webroot-path", "/var/lib/lynx/nginx/webroot",
+            "--webroot-path",
+            "/var/lib/lynx/nginx/webroot",
             "--non-interactive",
             "--agree-tos",
-            "--email", email,
-            "-d", domain,
+            "--email",
+            email,
+            "-d",
+            domain,
         ])
         .status()
         .await?;
@@ -276,7 +300,10 @@ async fn reload_nginx_config(domain: &str, hsts: bool) -> anyhow::Result<()> {
 
     std::fs::create_dir_all("/etc/lynx/nginx")?;
     std::fs::write("/etc/lynx/nginx/docker-compose.yml", &compose_yaml)?;
-    std::fs::write("/etc/lynx/nginx/nginx.conf", nginx_conf(domain, has_cert, hsts))?;
+    std::fs::write(
+        "/etc/lynx/nginx/nginx.conf",
+        nginx_conf(domain, has_cert, hsts),
+    )?;
 
     // Signal nginx to reload without restarting
     let _ = tokio::process::Command::new("podman")

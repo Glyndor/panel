@@ -1,0 +1,112 @@
+name: agent
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "lynx/agent/**"
+      - "lynx/translators/**"
+      - "lynx/Cargo.toml"
+      - "lynx/Cargo.lock"
+      - ".github/workflows/agent.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lynx/agent/**"
+      - "lynx/translators/**"
+      - "lynx/Cargo.toml"
+      - "lynx/Cargo.lock"
+      - ".github/workflows/agent.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          components: rustfmt
+
+      - name: fmt
+        run: cargo fmt --package lynx-agent -- --check
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: audit
+        run: cargo audit
+
+  check:
+    name: Check & Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lynx_ci
+          POSTGRES_PASSWORD: lynx_ci
+          POSTGRES_DB: lynx_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+      - name: Run agent migrations
+        run: sqlx migrate run --source agent/migrations
+
+      - name: check
+        run: cargo check --package lynx-agent
+
+      - name: clippy
+        run: cargo clippy --package lynx-agent -- -D warnings
+
+  # Integration tests require nftables + Podman — self-hosted runner only.
+  # Uncomment when self-hosted runner is configured.
+  # integration:
+  #   name: Integration tests
+  #   runs-on: [self-hosted, linux]
+  #   needs: check
+  #   steps:
+  #     - uses: actions/checkout@...
+  #     - name: test
+  #       run: cargo test --package lynx-agent -- --test-threads=1

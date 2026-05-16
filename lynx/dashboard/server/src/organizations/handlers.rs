@@ -1,9 +1,11 @@
 use super::{
     CreateOrgRequest, CreateProjectRequest, DataPlaneTunnel, DeployContainerRequest,
-    HorizontalScaleRequest, InviteMemberRequest, OrgMember, Organization, OrgWithMemberCount,
+    HorizontalScaleRequest, InviteMemberRequest, OrgMember, OrgWithMemberCount, Organization,
     Project, UpdateResourcesRequest,
 };
-use crate::{auth::middleware::AuthUser, crypto::cmd::sign_command, error::AppError, state::AppState};
+use crate::{
+    auth::middleware::AuthUser, crypto::cmd::sign_command, error::AppError, state::AppState,
+};
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
@@ -52,7 +54,9 @@ pub async fn create_org(
     let slug = req.slug.to_lowercase();
 
     if !slug.chars().all(|c| c.is_alphanumeric() || c == '-') || slug.is_empty() {
-        return Err(AppError::Validation("slug: only lowercase letters, numbers, and hyphens".into()));
+        return Err(AppError::Validation(
+            "slug: only lowercase letters, numbers, and hyphens".into(),
+        ));
     }
 
     let org_id = Uuid::now_v7();
@@ -207,7 +211,9 @@ pub async fn invite_member(
 
     let role = req.role.unwrap_or_else(|| "member".to_string());
     if !["owner", "admin", "member", "viewer"].contains(&role.as_str()) {
-        return Err(AppError::Validation("role: must be owner, admin, member, or viewer".into()));
+        return Err(AppError::Validation(
+            "role: must be owner, admin, member, or viewer".into(),
+        ));
     }
 
     let invitee_id = sqlx::query_scalar!(
@@ -267,7 +273,9 @@ pub async fn remove_member(
     .ok_or(AppError::NotFound)?;
 
     if target_role == "owner" {
-        return Err(AppError::Validation("cannot remove the organization owner".into()));
+        return Err(AppError::Validation(
+            "cannot remove the organization owner".into(),
+        ));
     }
 
     sqlx::query!(
@@ -374,17 +382,16 @@ pub async fn create_project(
 
     let slug = req.slug.to_lowercase();
     if !slug.chars().all(|c| c.is_alphanumeric() || c == '-') || slug.is_empty() {
-        return Err(AppError::Validation("slug: only lowercase letters, numbers, and hyphens".into()));
+        return Err(AppError::Validation(
+            "slug: only lowercase letters, numbers, and hyphens".into(),
+        ));
     }
 
     // Verify agent exists
-    let agent_exists = sqlx::query_scalar!(
-        "SELECT 1 FROM agents WHERE id = $1",
-        req.agent_id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .is_some();
+    let agent_exists = sqlx::query_scalar!("SELECT 1 FROM agents WHERE id = $1", req.agent_id)
+        .fetch_optional(&state.db)
+        .await?
+        .is_some();
 
     if !agent_exists {
         return Err(AppError::Validation("agent not found".into()));
@@ -470,7 +477,13 @@ pub async fn update_container_resources(
         "memory_mb": req.memory_mb,
     });
 
-    let signed = sign_command(&state.config, project.agent_id, user.user_id, "write", &command)?;
+    let signed = sign_command(
+        &state.config,
+        project.agent_id,
+        user.user_id,
+        "write",
+        &command,
+    )?;
 
     let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
     let tok = &*state.config.internal_token;
@@ -527,7 +540,13 @@ async fn relay_project_command(
         return Err(AppError::AgentUnavailable);
     }
 
-    let signed = sign_command(&state.config, project.agent_id, user_id, permission, &command)?;
+    let signed = sign_command(
+        &state.config,
+        project.agent_id,
+        user_id,
+        permission,
+        &command,
+    )?;
 
     let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
     let tok = &*state.config.internal_token;
@@ -646,7 +665,11 @@ pub async fn container_action(
         "stop" => "container.stop",
         "restart" => "container.restart",
         "remove" => "container.remove",
-        _ => return Err(AppError::BadRequest("action must be start, stop, restart, or remove")),
+        _ => {
+            return Err(AppError::BadRequest(
+                "action must be start, stop, restart, or remove",
+            ))
+        }
     };
 
     let command = json!({
@@ -744,7 +767,9 @@ pub async fn horizontal_scale(
     let agent_b_id = req.target_agent_id;
 
     if agent_a_id == agent_b_id {
-        return Err(AppError::Validation("target agent must differ from project's primary agent".into()));
+        return Err(AppError::Validation(
+            "target agent must differ from project's primary agent".into(),
+        ));
     }
 
     // Verify both agents exist and are online
@@ -771,12 +796,10 @@ pub async fn horizontal_scale(
     let wg_port = req.wg_port.unwrap_or(51821) as i32;
 
     // Allocate data-plane WireGuard IPs (simple scheme: 10.200.x.y per tunnel)
-    let tunnel_count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM data_plane_tunnels"
-    )
-    .fetch_one(&state.db)
-    .await?
-    .unwrap_or(0);
+    let tunnel_count = sqlx::query_scalar!("SELECT COUNT(*) FROM data_plane_tunnels")
+        .fetch_one(&state.db)
+        .await?
+        .unwrap_or(0);
 
     let subnet_idx = (tunnel_count % 254) + 1;
     let agent_a_dp_ip = format!("10.200.{}.1", subnet_idx);
@@ -798,8 +821,15 @@ pub async fn horizontal_scale(
             .stdout(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| AppError::Internal(anyhow::anyhow!("wg pubkey: {e}")))?;
-        child.stdin.take().unwrap().write_all(priv_key.as_bytes()).ok();
-        let out = child.wait_with_output().map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(priv_key.as_bytes())
+            .ok();
+        let out = child
+            .wait_with_output()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
     let gen_psk = || -> Result<String, AppError> {
@@ -893,7 +923,13 @@ pub async fn horizontal_scale(
             "ports": [],
             "env": [],
         });
-        let signed_replica = sign_command(&state.config, agent_b_id, user.user_id, "write", &replica_cmd)?;
+        let signed_replica = sign_command(
+            &state.config,
+            agent_b_id,
+            user.user_id,
+            "write",
+            &replica_cmd,
+        )?;
         http.post(&url_b)
             .header("Authorization", format!("Bearer {tok}"))
             .json(&signed_replica)
@@ -911,12 +947,15 @@ pub async fn horizontal_scale(
     .execute(&state.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(json!({
-        "tunnel_id": tunnel_id,
-        "agent_a_ip": agent_a_dp_ip,
-        "agent_b_ip": agent_b_dp_ip,
-        "replicas": req.replica_count,
-    }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "tunnel_id": tunnel_id,
+            "agent_a_ip": agent_a_dp_ip,
+            "agent_b_ip": agent_b_dp_ip,
+            "replicas": req.replica_count,
+        })),
+    ))
 }
 
 // --------------------------------------------------------------------------
@@ -969,8 +1008,10 @@ pub async fn teardown_horizontal_scale(
                     "type": "wg.data_plane.teardown",
                     "tunnel_id": tunnel_id.to_string(),
                 });
-                let signed = sign_command(&state.config, agent_id, user.user_id, "write", &teardown)?;
-                let _ = http.post(&format!("http://{}:{}/cmd", a.wg_ip, a.api_port))
+                let signed =
+                    sign_command(&state.config, agent_id, user.user_id, "write", &teardown)?;
+                let _ = http
+                    .post(&format!("http://{}:{}/cmd", a.wg_ip, a.api_port))
                     .header("Authorization", format!("Bearer {tok}"))
                     .json(&signed)
                     .timeout(std::time::Duration::from_secs(15))

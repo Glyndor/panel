@@ -12,7 +12,13 @@ pub async fn check_login(redis: &mut ConnectionManager, ip: &str) -> Result<()> 
 }
 
 pub async fn check_register(redis: &mut ConnectionManager, ip: &str) -> Result<()> {
-    check(redis, &format!("rl:register:{ip}"), REGISTER_LIMIT, REGISTER_WINDOW).await
+    check(
+        redis,
+        &format!("rl:register:{ip}"),
+        REGISTER_LIMIT,
+        REGISTER_WINDOW,
+    )
+    .await
 }
 
 async fn check(redis: &mut ConnectionManager, key: &str, limit: i64, window: i64) -> Result<()> {

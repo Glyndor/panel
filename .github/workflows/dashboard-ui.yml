@@ -1,0 +1,33 @@
+name: dashboard-ui
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "lynx/dashboard/ui/**"
+      - ".github/workflows/dashboard-ui.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lynx/dashboard/ui/**"
+      - ".github/workflows/dashboard-ui.yml"
+
+jobs:
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx/dashboard/ui
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: typecheck
+        run: bun run typecheck

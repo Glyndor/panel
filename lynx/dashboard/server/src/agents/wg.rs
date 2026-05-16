@@ -7,17 +7,23 @@ const PSK_PATH: &str = "/run/secrets/lynx-dashboard-local-agent-psk";
 
 /// Add an agent as a WireGuard peer. Requires CAP_NET_ADMIN.
 pub fn add_peer(pubkey: &str, allowed_ip: IpAddr) -> Result<()> {
-    let psk = std::fs::read_to_string(PSK_PATH)
-        .with_context(|| format!("read PSK from {PSK_PATH}"))?;
+    let psk =
+        std::fs::read_to_string(PSK_PATH).with_context(|| format!("read PSK from {PSK_PATH}"))?;
     let psk = psk.trim();
 
     let allowed = format!("{allowed_ip}/32");
 
     let status = std::process::Command::new("wg")
-        .args(["set", WG_IFACE,
-               "peer", pubkey,
-               "preshared-key", "/dev/stdin",
-               "allowed-ips", &allowed])
+        .args([
+            "set",
+            WG_IFACE,
+            "peer",
+            pubkey,
+            "preshared-key",
+            "/dev/stdin",
+            "allowed-ips",
+            &allowed,
+        ])
         .stdin(std::process::Stdio::piped())
         .spawn()
         .and_then(|mut child| {

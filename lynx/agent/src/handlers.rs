@@ -2,9 +2,7 @@ use crate::{
     audit::{self, AuditEntry, AuditResult},
     auth::{verify_bearer, verify_command, PermissionLevel, SignedCommand, VerifiedCommand},
     error::{AgentError, Result},
-    metrics,
-    nftables,
-    podman,
+    metrics, nftables, podman,
     state::AppState,
     update,
 };
@@ -111,6 +109,7 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "wg.data_plane.setup" => handle_wg_data_plane_setup(&cmd),
         "wg.data_plane.teardown" => handle_wg_data_plane_teardown(&cmd),
         "dashboard.migrate" => handle_dashboard_migrate(state, &cmd).await,
+        "cert.update" => handle_cert_update(state, &cmd).await,
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))
@@ -149,9 +148,14 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
 // Individual command handlers (sync — no I/O blocking path)
 // --------------------------------------------------------------------------
 
-fn handle_nftables_apply(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+fn handle_nftables_apply(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("nftables.apply requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.apply requires write permission",
+        ));
     }
 
     let wg_port = cmd
@@ -172,9 +176,14 @@ fn handle_nftables_apply(state: &AppState, cmd: &VerifiedCommand) -> std::result
     Ok(json!({ "ok": true }))
 }
 
-fn handle_nftables_restore(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+fn handle_nftables_restore(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("nftables.restore requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.restore requires write permission",
+        ));
     }
 
     let ruleset = state
@@ -190,9 +199,14 @@ fn handle_nftables_restore(state: &AppState, cmd: &VerifiedCommand) -> std::resu
     Ok(json!({ "ok": true, "action": "restored" }))
 }
 
-fn handle_nftables_accept(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+fn handle_nftables_accept(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("nftables.accept requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.accept requires write permission",
+        ));
     }
 
     let current = nftables::current_checksum().map_err(anyhow::Error::from)?;
@@ -220,7 +234,9 @@ fn handle_container_list(cmd: &VerifiedCommand) -> std::result::Result<Value, Ag
 
 fn handle_tenant_ensure(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("tenant.ensure requires write permission"));
+        return Err(AgentError::Forbidden(
+            "tenant.ensure requires write permission",
+        ));
     }
 
     let tenant_id = cmd
@@ -284,7 +300,9 @@ pub async fn metrics_ws(
 
 fn handle_container_deploy(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("container.deploy requires write permission"));
+        return Err(AgentError::Forbidden(
+            "container.deploy requires write permission",
+        ));
     }
     let tenant_id = require_str(&cmd.command, "tenant_id")?;
     let project_id = require_str(&cmd.command, "project_id")?;
@@ -302,7 +320,9 @@ fn handle_container_deploy(cmd: &VerifiedCommand) -> std::result::Result<Value, 
 
 fn handle_container_start(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("container.start requires write permission"));
+        return Err(AgentError::Forbidden(
+            "container.start requires write permission",
+        ));
     }
     let tenant_id = require_str(&cmd.command, "tenant_id")?;
     let name = require_str(&cmd.command, "name")?;
@@ -312,7 +332,9 @@ fn handle_container_start(cmd: &VerifiedCommand) -> std::result::Result<Value, A
 
 fn handle_container_stop(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("container.stop requires write permission"));
+        return Err(AgentError::Forbidden(
+            "container.stop requires write permission",
+        ));
     }
     let tenant_id = require_str(&cmd.command, "tenant_id")?;
     let name = require_str(&cmd.command, "name")?;
@@ -322,18 +344,26 @@ fn handle_container_stop(cmd: &VerifiedCommand) -> std::result::Result<Value, Ag
 
 fn handle_container_remove(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission != PermissionLevel::Destructive {
-        return Err(AgentError::Forbidden("container.remove requires destructive permission"));
+        return Err(AgentError::Forbidden(
+            "container.remove requires destructive permission",
+        ));
     }
     let tenant_id = require_str(&cmd.command, "tenant_id")?;
     let name = require_str(&cmd.command, "name")?;
-    let force = cmd.command.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+    let force = cmd
+        .command
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     podman::container_remove(&tenant_id, &name, force).map_err(anyhow::Error::from)?;
     Ok(json!({ "ok": true }))
 }
 
 fn handle_container_restart(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("container.restart requires write permission"));
+        return Err(AgentError::Forbidden(
+            "container.restart requires write permission",
+        ));
     }
     let tenant_id = require_str(&cmd.command, "tenant_id")?;
     let name = require_str(&cmd.command, "name")?;
@@ -343,7 +373,9 @@ fn handle_container_restart(cmd: &VerifiedCommand) -> std::result::Result<Value,
 
 fn handle_container_update(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("container.update requires write permission"));
+        return Err(AgentError::Forbidden(
+            "container.update requires write permission",
+        ));
     }
     let tenant_id = require_str(&cmd.command, "tenant_id")?;
     let name = require_str(&cmd.command, "name")?;
@@ -355,7 +387,9 @@ fn handle_container_update(cmd: &VerifiedCommand) -> std::result::Result<Value, 
 
 fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("wg.rotate_psk requires write permission"));
+        return Err(AgentError::Forbidden(
+            "wg.rotate_psk requires write permission",
+        ));
     }
     let new_psk = require_str(&cmd.command, "new_psk")?;
 
@@ -374,12 +408,21 @@ fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value, Age
         .to_string();
 
     if dashboard_pubkey.is_empty() {
-        return Err(AgentError::Internal(anyhow::anyhow!("no WireGuard peers found")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "no WireGuard peers found"
+        )));
     }
 
     use std::io::Write;
     let mut child = std::process::Command::new("wg")
-        .args(["set", "wg-lynx-agent", "peer", &dashboard_pubkey, "preshared-key", "/dev/stdin"])
+        .args([
+            "set",
+            "wg-lynx-agent",
+            "peer",
+            &dashboard_pubkey,
+            "preshared-key",
+            "/dev/stdin",
+        ])
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg set: {e}")))?;
@@ -390,11 +433,14 @@ fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value, Age
             .map_err(|e| AgentError::Internal(anyhow::anyhow!("write psk: {e}")))?;
     }
 
-    let status = child.wait()
+    let status = child
+        .wait()
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("wait wg: {e}")))?;
 
     if !status.success() {
-        return Err(AgentError::Internal(anyhow::anyhow!("wg set preshared-key failed")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "wg set preshared-key failed"
+        )));
     }
 
     // Persist new config to wg-quick config file
@@ -408,7 +454,9 @@ fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value, Age
 
 async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("update.self requires write permission"));
+        return Err(AgentError::Forbidden(
+            "update.self requires write permission",
+        ));
     }
     let version = require_str(&cmd.command, "version")?;
     let download_url = require_str(&cmd.command, "download_url")?;
@@ -424,9 +472,14 @@ async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value,
     Ok(json!({ "ok": true, "message": "update initiated" }))
 }
 
-async fn handle_dashboard_migrate(state: &AppState, cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+async fn handle_dashboard_migrate(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("dashboard.migrate requires write permission"));
+        return Err(AgentError::Forbidden(
+            "dashboard.migrate requires write permission",
+        ));
     }
 
     let target_url = require_str(&cmd.command, "target_url")?;
@@ -462,7 +515,9 @@ async fn handle_dashboard_migrate(state: &AppState, cmd: &VerifiedCommand) -> st
 
 fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("wg.data_plane.setup requires write permission"));
+        return Err(AgentError::Forbidden(
+            "wg.data_plane.setup requires write permission",
+        ));
     }
 
     // Derive interface name from tunnel_id (first 8 hex chars)
@@ -543,7 +598,9 @@ fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<Valu
 
 fn handle_wg_data_plane_teardown(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("wg.data_plane.teardown requires write permission"));
+        return Err(AgentError::Forbidden(
+            "wg.data_plane.teardown requires write permission",
+        ));
     }
 
     let tunnel_id = require_str(&cmd.command, "tunnel_id")?;
@@ -560,6 +617,57 @@ fn handle_wg_data_plane_teardown(cmd: &VerifiedCommand) -> std::result::Result<V
 
     tracing::info!("data-plane WireGuard interface {interface} torn down");
     Ok(json!({ "ok": true, "interface": interface }))
+}
+
+// --------------------------------------------------------------------------
+// cert.update — receive new CA-signed cert from dashboard and persist it
+// --------------------------------------------------------------------------
+
+async fn handle_cert_update(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission < PermissionLevel::Write {
+        return Err(AgentError::Forbidden(
+            "cert.update requires write permission",
+        ));
+    }
+
+    let payload = cmd
+        .command
+        .get("payload")
+        .and_then(|v| v.as_str())
+        .ok_or(AgentError::BadRequest("missing payload"))?
+        .to_string();
+    let signature = cmd
+        .command
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .ok_or(AgentError::BadRequest("missing signature"))?
+        .to_string();
+
+    let cert = crate::cert::SignedCert { payload, signature };
+
+    let ca_public = crate::cert::load_ca_public_key()
+        .ok_or_else(|| AgentError::Internal(anyhow::anyhow!("CA_PUBLIC_KEY not configured")))?;
+
+    crate::cert::verify(&cert, &ca_public, state.config.agent_id)
+        .map_err(|e| AgentError::Internal(e))?;
+
+    let cert_json =
+        serde_json::to_string(&cert).map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
+
+    let cert_path = std::path::Path::new("/etc/lynx/cert.json");
+    if let Some(parent) = cert_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
+    }
+    tokio::fs::write(cert_path, cert_json.as_bytes())
+        .await
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
+
+    tracing::info!(agent_id = %state.config.agent_id, "agent cert renewed and persisted to /etc/lynx/cert.json");
+
+    Ok(json!({ "ok": true }))
 }
 
 fn require_str(cmd: &Value, key: &'static str) -> std::result::Result<String, AgentError> {

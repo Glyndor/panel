@@ -1,9 +1,6 @@
 use super::{AgentConfirmRequest, MigrationState, PrepareMigrationResponse, StartMigrationRequest};
 use crate::{
-    auth::middleware::AuthUser,
-    crypto::hash::sha256_hex,
-    error::AppError,
-    state::AppState,
+    auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState,
 };
 use axum::{
     extract::{Extension, State},
@@ -43,11 +40,9 @@ pub async fn prepare_receive(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, AppError> {
-    let existing = sqlx::query_scalar!(
-        "SELECT status FROM migration_state WHERE id = 1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let existing = sqlx::query_scalar!("SELECT status FROM migration_state WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
 
     if existing != "idle" {
         return Err(AppError::Validation(
@@ -87,11 +82,9 @@ pub async fn start_migration(
     Extension(_user): Extension<AuthUser>,
     Json(req): Json<StartMigrationRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let existing = sqlx::query_scalar!(
-        "SELECT status FROM migration_state WHERE id = 1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let existing = sqlx::query_scalar!("SELECT status FROM migration_state WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
 
     if existing != "idle" {
         return Err(AppError::Validation(
@@ -104,12 +97,10 @@ pub async fn start_migration(
         return Err(AppError::Validation("target_url required".into()));
     }
 
-    let agents_total: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM agents"
-    )
-    .fetch_one(&state.db)
-    .await?
-    .unwrap_or(0);
+    let agents_total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM agents")
+        .fetch_one(&state.db)
+        .await?
+        .unwrap_or(0);
 
     sqlx::query!(
         r#"UPDATE migration_state
@@ -164,11 +155,9 @@ pub async fn abort_migration(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, AppError> {
-    let status = sqlx::query_scalar!(
-        "SELECT status FROM migration_state WHERE id = 1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let status = sqlx::query_scalar!("SELECT status FROM migration_state WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
 
     if status == "completed" || status == "idle" {
         return Err(AppError::Validation(
@@ -176,11 +165,9 @@ pub async fn abort_migration(
         ));
     }
 
-    sqlx::query!(
-        "UPDATE migration_state SET status='aborted', updated_at=NOW() WHERE id=1"
-    )
-    .execute(&state.db)
-    .await?;
+    sqlx::query!("UPDATE migration_state SET status='aborted', updated_at=NOW() WHERE id=1")
+        .execute(&state.db)
+        .await?;
 
     Ok(Json(json!({ "status": "aborted" })))
 }
@@ -227,7 +214,9 @@ pub async fn confirm_shutdown(
         std::process::exit(0);
     });
 
-    Ok(Json(json!({ "status": "completed", "message": "shutdown initiated" })))
+    Ok(Json(
+        json!({ "status": "completed", "message": "shutdown initiated" }),
+    ))
 }
 
 // --------------------------------------------------------------------------
@@ -248,11 +237,10 @@ pub async fn receive_migration(
 
     let token_hash = sha256_hex(provided_token.as_bytes());
 
-    let stored_hash = sqlx::query_scalar!(
-        "SELECT migration_token_hash FROM migration_state WHERE id=1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let stored_hash =
+        sqlx::query_scalar!("SELECT migration_token_hash FROM migration_state WHERE id=1")
+            .fetch_one(&state.db)
+            .await?;
 
     let valid = stored_hash
         .map(|h| {
@@ -265,11 +253,9 @@ pub async fn receive_migration(
         return Err(AppError::Unauthorized);
     }
 
-    let status = sqlx::query_scalar!(
-        "SELECT status FROM migration_state WHERE id=1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let status = sqlx::query_scalar!("SELECT status FROM migration_state WHERE id=1")
+        .fetch_one(&state.db)
+        .await?;
 
     if status != "preparing" {
         return Err(AppError::Validation(
@@ -277,11 +263,9 @@ pub async fn receive_migration(
         ));
     }
 
-    sqlx::query!(
-        "UPDATE migration_state SET status='transferring', updated_at=NOW() WHERE id=1"
-    )
-    .execute(&state.db)
-    .await?;
+    sqlx::query!("UPDATE migration_state SET status='transferring', updated_at=NOW() WHERE id=1")
+        .execute(&state.db)
+        .await?;
 
     let db = state.db.clone();
     let dump_bytes = body.to_vec();
@@ -312,7 +296,10 @@ pub async fn receive_migration(
         .execute(&db)
         .await;
 
-        tracing::info!("migration restore complete — waiting for {} agents", agent_count);
+        tracing::info!(
+            "migration restore complete — waiting for {} agents",
+            agent_count
+        );
     });
 
     Ok(StatusCode::ACCEPTED)
@@ -328,8 +315,8 @@ pub async fn agent_confirm(
     Json(req): Json<AgentConfirmRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     // Validate agent's sync token
-    let agent_id = Uuid::parse_str(&req.agent_id)
-        .map_err(|_| AppError::BadRequest("invalid agent_id"))?;
+    let agent_id =
+        Uuid::parse_str(&req.agent_id).map_err(|_| AppError::BadRequest("invalid agent_id"))?;
 
     let provided_token = headers
         .get(header::AUTHORIZATION)
@@ -339,13 +326,10 @@ pub async fn agent_confirm(
 
     let token_hash = sha256_hex(provided_token.as_bytes());
 
-    let stored = sqlx::query_scalar!(
-        "SELECT sync_token_hash FROM agents WHERE id=$1",
-        agent_id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .flatten();
+    let stored = sqlx::query_scalar!("SELECT sync_token_hash FROM agents WHERE id=$1", agent_id)
+        .fetch_optional(&state.db)
+        .await?
+        .flatten();
 
     let valid = stored
         .map(|h| {
@@ -364,11 +348,9 @@ pub async fn agent_confirm(
     .execute(&state.db)
     .await?;
 
-    let ms = sqlx::query!(
-        "SELECT agents_total, agents_confirmed FROM migration_state WHERE id=1"
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let ms = sqlx::query!("SELECT agents_total, agents_confirmed FROM migration_state WHERE id=1")
+        .fetch_one(&state.db)
+        .await?;
 
     tracing::info!(
         agent_id = %agent_id,
@@ -411,37 +393,31 @@ async fn run_migration(
         .await?;
 
     if !resp.status().is_success() && resp.status().as_u16() != 202 {
-        anyhow::bail!(
-            "VPS-B rejected migration data: {}",
-            resp.status()
-        );
+        anyhow::bail!("VPS-B rejected migration data: {}", resp.status());
     }
 
     // 3. Notify all agents to reconnect to VPS-B
     notify_agents_migrate(db, cfg, target_url).await?;
 
     // 4. Transition to waiting_agents state
-    sqlx::query!(
-        "UPDATE migration_state SET status='waiting_agents', updated_at=NOW() WHERE id=1"
-    )
-    .execute(db)
-    .await?;
+    sqlx::query!("UPDATE migration_state SET status='waiting_agents', updated_at=NOW() WHERE id=1")
+        .execute(db)
+        .await?;
 
     Ok(())
 }
 
 async fn pg_dump(database_url: &str) -> anyhow::Result<Vec<u8>> {
     let out = tokio::process::Command::new("pg_dump")
-        .args([
-            "--format=custom",
-            "--no-owner",
-            "--no-acl",
-            database_url,
-        ])
+        .args(["--format=custom", "--no-owner", "--no-acl", database_url])
         .output()
         .await?;
 
-    anyhow::ensure!(out.status.success(), "pg_dump failed: {}", String::from_utf8_lossy(&out.stderr));
+    anyhow::ensure!(
+        out.status.success(),
+        "pg_dump failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     Ok(out.stdout)
 }
 
@@ -452,7 +428,14 @@ async fn restore_dump(dump: &[u8]) -> anyhow::Result<()> {
         .unwrap_or_else(|_| "postgres://lynx_dashboard_app@localhost/lynx_dashboard".to_string());
 
     let mut child = tokio::process::Command::new("pg_restore")
-        .args(["--clean", "--if-exists", "--no-owner", "--no-acl", "-d", &db_url])
+        .args([
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--no-acl",
+            "-d",
+            &db_url,
+        ])
         .stdin(std::process::Stdio::piped())
         .spawn()?;
 
@@ -470,11 +453,9 @@ async fn notify_agents_migrate(
     cfg: &crate::config::Config,
     target_url: &str,
 ) -> anyhow::Result<()> {
-    let agents = sqlx::query!(
-        "SELECT id, wg_ip, api_port, status FROM agents"
-    )
-    .fetch_all(db)
-    .await?;
+    let agents = sqlx::query!("SELECT id, wg_ip, api_port, status FROM agents")
+        .fetch_all(db)
+        .await?;
 
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
