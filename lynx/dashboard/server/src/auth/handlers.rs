@@ -285,3 +285,126 @@ fn extract_ua(headers: &HeaderMap) -> String {
         .unwrap_or("")
         .to_string()
 }
+
+// --------------------------------------------------------------------------
+// GET /auth/me — return current user's username (auth-protected via JWT)
+// --------------------------------------------------------------------------
+
+pub async fn me(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(AppError::Unauthorized)?;
+
+    let keys = build_jwt_keys(&state);
+    let claims = jwt::verify_access_token(&keys, token).map_err(|_| AppError::Unauthorized)?;
+
+    let mut redis = state.redis.clone();
+    if !session::check_jti_valid(&mut redis, claims.jti)
+        .await
+        .map_err(anyhow::Error::from)?
+    {
+        return Err(AppError::Unauthorized);
+    }
+
+    let user = sqlx::query!(
+        "SELECT username FROM users WHERE id = $1",
+        claims.sub
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::Unauthorized)?;
+
+    Ok(Json(serde_json::json!({ "id": claims.sub, "username": user.username })))
+}
+
+// --------------------------------------------------------------------------
+// POST /auth/change-password — change password and invalidate all sessions
+// --------------------------------------------------------------------------
+
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ChangePasswordRequest>,
+) -> Result<StatusCode> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(AppError::Unauthorized)?;
+
+    let keys = build_jwt_keys(&state);
+    let claims = jwt::verify_access_token(&keys, token).map_err(|_| AppError::Unauthorized)?;
+
+    let mut redis = state.redis.clone();
+    if !session::check_jti_valid(&mut redis, claims.jti)
+        .await
+        .map_err(anyhow::Error::from)?
+    {
+        return Err(AppError::Unauthorized);
+    }
+
+    validate::password(&body.new_password)?;
+
+    let user = sqlx::query!(
+        "SELECT id, password_hash FROM users WHERE id = $1",
+        claims.sub
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::Unauthorized)?;
+
+    let ok = password::verify(&body.current_password, &user.password_hash)
+        .map_err(anyhow::Error::from)?;
+    if !ok {
+        return Err(AppError::InvalidCredentials);
+    }
+
+    let new_hash = password::hash(&body.new_password).map_err(anyhow::Error::from)?;
+
+    sqlx::query!(
+        "UPDATE users SET password_hash = $1 WHERE id = $2",
+        new_hash,
+        user.id
+    )
+    .execute(&state.db)
+    .await?;
+
+    // Invalidate ALL sessions for this user — password_changed reason
+    let sessions = sqlx::query_scalar!(
+        "SELECT id FROM sessions WHERE user_id = $1",
+        user.id
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    for session_id in &sessions {
+        let _ = session::log_event(&state.db, *session_id, "password_changed").await;
+    }
+
+    sqlx::query!(
+        "DELETE FROM sessions WHERE user_id = $1",
+        user.id
+    )
+    .execute(&state.db)
+    .await?;
+
+    // Revoke current access token in Redis
+    session::revoke_access_jti(&mut redis, claims.jti)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -10,6 +10,8 @@ import { UpdateSection } from "./UpdateSection";
 import { DomainSection } from "./DomainSection";
 import { MigrationSection } from "./MigrationSection";
 import { getMigrationStatus } from "./migrationActions";
+import { ChangePasswordForm } from "./ChangePasswordForm";
+import { getMe } from "./profileActions";
 
 interface Branding {
 	company_name: string;
@@ -82,14 +84,43 @@ export default async function SettingsPage({
 		fetchBranding(),
 	]);
 	const token = jar.get("access_token")?.value ?? "";
-	const [domainCfg, migrationState] = await Promise.all([
+	const [domainCfg, migrationState, me] = await Promise.all([
 		fetchDomainConfig(token),
 		getMigrationStatus(),
+		getMe(),
 	]);
 
 	return (
 		<div className="flex flex-col p-6 gap-8 max-w-3xl">
 			<h1 className="text-xl font-semibold">{t("title")}</h1>
+
+			{me && (
+				<section className="flex flex-col gap-3">
+					<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+						{t("profile")}
+					</h2>
+					<div className="rounded-lg border p-4 flex flex-col gap-4">
+						<div>
+							<p className="text-xs text-muted-foreground">{t("profileUsername")}</p>
+							<p className="text-sm font-medium font-mono">{me.username}</p>
+						</div>
+						<div className="border-t pt-4">
+							<p className="text-sm font-medium mb-3">{t("changePassword")}</p>
+							<ChangePasswordForm
+								locale={locale}
+								labels={{
+									currentPassword: t("currentPassword"),
+									newPassword: t("newPassword"),
+									btn: t("changePasswordBtn"),
+									success: t("changePasswordSuccess"),
+									wrong: t("changePasswordWrong"),
+									error: t("changePasswordError"),
+								}}
+							/>
+						</div>
+					</div>
+				</section>
+			)}
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
