@@ -40,6 +40,10 @@ pub async fn rotate_keys(
         _ => {}
     }
 
+    if matches!(req.scope.as_str(), "wireguard_psks" | "all") {
+        rotate_wireguard_psks(&state, user.user_id).await?;
+    }
+
     // Log rotation event
     let log_id = Uuid::now_v7();
     sqlx::query!(
@@ -110,6 +114,88 @@ async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
     sqlx::query!("DELETE FROM sessions WHERE expires_at > NOW()")
         .execute(&state.db)
         .await?;
+
+    Ok(())
+}
+
+/// Rotate WireGuard PSK for every online agent.
+///
+/// For each agent:
+/// 1. Generate a new PSK via `wg genpsk`.
+/// 2. Update the dashboard WireGuard peer to use the new PSK.
+/// 3. Send a signed `wg.rotate_psk` command so the agent reconfigures itself.
+async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(), AppError> {
+    let agents = sqlx::query!(
+        "SELECT id, wg_pubkey, wg_ip, api_port FROM agents WHERE status = 'online'"
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+
+    for agent in &agents {
+        // Generate new PSK
+        let psk_out = std::process::Command::new("wg")
+            .arg("genpsk")
+            .output();
+
+        let new_psk = match psk_out {
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            }
+            _ => {
+                tracing::warn!(agent_id = %agent.id, "wg genpsk failed — skipping agent");
+                continue;
+            }
+        };
+
+        // Update dashboard-side WireGuard peer with new PSK (best-effort)
+        let psk_update = std::process::Command::new("wg")
+            .args(["set", "wg-lynx-dashboard", "peer", &agent.wg_pubkey,
+                   "preshared-key", "/dev/stdin"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(new_psk.as_bytes());
+                }
+                child.wait()
+            });
+
+        if let Err(e) = psk_update {
+            tracing::warn!(agent_id = %agent.id, "wg set preshared-key failed: {e}");
+        }
+
+        // Send signed command to agent so it reconfigures its side
+        let command = serde_json::json!({
+            "type": "wg.rotate_psk",
+            "new_psk": new_psk,
+        });
+
+        let signed = cmd::sign_command(
+            &state.config,
+            agent.id,
+            triggered_by,
+            "write",
+            &command,
+        )
+        .map_err(|e| AppError::Internal(e))?;
+
+        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+
+        let _ = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", &*state.config.internal_token))
+            .json(&signed)
+            .send()
+            .await;
+
+        tracing::info!(agent_id = %agent.id, "WireGuard PSK rotated");
+    }
 
     Ok(())
 }

@@ -105,6 +105,7 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "container.restart" => handle_container_restart(&cmd),
         "container.update" => handle_container_update(&cmd),
         "update.self" => handle_update_self(&cmd).await,
+        "wg.rotate_psk" => handle_wg_rotate_psk(&cmd),
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))
@@ -307,6 +308,59 @@ fn handle_container_update(cmd: &VerifiedCommand) -> std::result::Result<Value, 
     let cpus = cmd.command.get("cpus").and_then(|v| v.as_f64());
     let memory_mb = cmd.command.get("memory_mb").and_then(|v| v.as_u64());
     podman::container_update(&tenant_id, &name, cpus, memory_mb).map_err(anyhow::Error::from)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("wg.rotate_psk requires write permission"));
+    }
+    let new_psk = require_str(&cmd.command, "new_psk")?;
+
+    // Apply new PSK to WireGuard interface — dashboard peer is the only peer.
+    // Query the dashboard public key from the current wg config.
+    let peers_out = std::process::Command::new("wg")
+        .args(["show", "wg-lynx-agent", "peers"])
+        .output()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg show: {e}")))?;
+
+    let dashboard_pubkey = String::from_utf8_lossy(&peers_out.stdout)
+        .trim()
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    if dashboard_pubkey.is_empty() {
+        return Err(AgentError::Internal(anyhow::anyhow!("no WireGuard peers found")));
+    }
+
+    use std::io::Write;
+    let mut child = std::process::Command::new("wg")
+        .args(["set", "wg-lynx-agent", "peer", &dashboard_pubkey, "preshared-key", "/dev/stdin"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg set: {e}")))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(new_psk.as_bytes())
+            .map_err(|e| AgentError::Internal(anyhow::anyhow!("write psk: {e}")))?;
+    }
+
+    let status = child.wait()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wait wg: {e}")))?;
+
+    if !status.success() {
+        return Err(AgentError::Internal(anyhow::anyhow!("wg set preshared-key failed")));
+    }
+
+    // Persist new config to wg-quick config file
+    let _ = std::process::Command::new("wg-quick")
+        .args(["save", "wg-lynx-agent"])
+        .status();
+
+    tracing::info!("WireGuard PSK rotated successfully");
     Ok(json!({ "ok": true }))
 }
 
