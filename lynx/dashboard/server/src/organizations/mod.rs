@@ -67,3 +67,21 @@ pub struct UpdateResourcesRequest {
     pub cpus: Option<f64>,
     pub memory_mb: Option<i64>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct DeployContainerRequest {
+    pub name: String,
+    pub image: String,
+    pub ports: Option<Vec<String>>,
+    pub env: Option<Vec<String>>,
+    pub cpus: Option<f64>,
+    pub memory_mb: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContainerActionPath {
+    pub id: Uuid,
+    pub proj_id: Uuid,
+    pub name: String,
+    pub action: String,
+}

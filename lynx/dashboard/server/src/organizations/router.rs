@@ -5,6 +5,7 @@ use axum::{
     Router,
 };
 
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(handlers::list_orgs).post(handlers::create_org))
@@ -14,4 +15,12 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/projects", get(handlers::list_projects).post(handlers::create_project))
         .route("/{id}/projects/{proj_id}", get(handlers::get_project))
         .route("/{id}/projects/{proj_id}/resources", put(handlers::update_container_resources))
+        .route(
+            "/{id}/projects/{proj_id}/containers",
+            get(handlers::list_containers).post(handlers::deploy_container),
+        )
+        .route(
+            "/{id}/projects/{proj_id}/containers/{name}/{action}",
+            post(handlers::container_action),
+        )
 }

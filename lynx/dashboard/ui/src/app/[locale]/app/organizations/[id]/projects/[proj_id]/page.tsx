@@ -5,6 +5,8 @@ import { BACKEND_URL } from "@/lib/api";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { ResourceForm } from "./ResourceForm";
+import { ContainerCard } from "./ContainerCard";
+import { DeployForm } from "./DeployForm";
 
 interface Project {
 	id: string;
@@ -15,6 +17,13 @@ interface Project {
 	created_at: string;
 }
 
+interface Container {
+	Names: string[];
+	Image: string;
+	Status: string;
+	State: string;
+}
+
 async function fetchProject(
 	token: string,
 	orgId: string,
@@ -23,15 +32,30 @@ async function fetchProject(
 	try {
 		const res = await fetch(
 			`${BACKEND_URL}/organizations/${orgId}/projects/${projId}`,
-			{
-				headers: { Authorization: `Bearer ${token}` },
-				cache: "no-store",
-			},
+			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
 		);
 		if (!res.ok) return null;
 		return res.json();
 	} catch {
 		return null;
+	}
+}
+
+async function fetchContainers(
+	token: string,
+	orgId: string,
+	projId: string,
+): Promise<Container[]> {
+	try {
+		const res = await fetch(
+			`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/containers`,
+			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+		);
+		if (!res.ok) return [];
+		const data = (await res.json()) as { containers?: Container[] } | Container[];
+		return Array.isArray(data) ? data : (data.containers ?? []);
+	} catch {
+		return [];
 	}
 }
 
@@ -46,9 +70,22 @@ export default async function ProjectDetailPage({
 		cookies(),
 	]);
 	const tok = jar.get("access_token")?.value ?? "";
-	const project = await fetchProject(tok, orgId, projId);
+
+	const [project, containers] = await Promise.all([
+		fetchProject(tok, orgId, projId),
+		fetchContainers(tok, orgId, projId),
+	]);
 
 	if (!project) notFound();
+
+	const containerLabels = {
+		start: t("cStart"),
+		stop: t("cStop"),
+		restart: t("cRestart"),
+		remove: t("cRemove"),
+		success: t("cActionSuccess"),
+		error: t("cActionError"),
+	};
 
 	return (
 		<div className="flex flex-col p-6 gap-6 max-w-3xl">
@@ -76,6 +113,50 @@ export default async function ProjectDetailPage({
 				</p>
 				<h1 className="text-xl font-semibold">{project.name}</h1>
 			</div>
+
+			<section className="flex flex-col gap-3">
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+					{t("containers")} ({containers.length})
+				</h2>
+				{containers.length === 0 ? (
+					<p className="text-sm text-muted-foreground">{t("noContainers")}</p>
+				) : (
+					<div className="rounded-lg border divide-y">
+						{containers.map((c) => (
+							<ContainerCard
+								key={c.Names[0] ?? c.Image}
+								orgId={orgId}
+								projId={projId}
+								container={c}
+								labels={containerLabels}
+							/>
+						))}
+					</div>
+				)}
+			</section>
+
+			<section className="flex flex-col gap-3">
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+					{t("deploy")}
+				</h2>
+				<div className="rounded-lg border p-4">
+					<DeployForm
+						orgId={orgId}
+						projId={projId}
+						labels={{
+							name: t("cName"),
+							image: t("cImage"),
+							ports: t("cPorts"),
+							env: t("cEnv"),
+							cpus: t("cpus"),
+							memoryMb: t("memoryMb"),
+							deploy: t("deployBtn"),
+							success: t("deploySuccess"),
+							error: t("deployError"),
+						}}
+					/>
+				</div>
+			</section>
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
