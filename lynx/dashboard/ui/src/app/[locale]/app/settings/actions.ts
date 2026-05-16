@@ -52,6 +52,56 @@ export interface BrandingPayload {
 	accent_color?: string;
 }
 
+export interface UpdateCheckResult {
+	current_version: string;
+	latest_version: string;
+	update_available: boolean;
+	release_url: string | null;
+}
+
+export async function checkForUpdates(): Promise<{
+	ok: boolean;
+	data?: UpdateCheckResult;
+	error?: string;
+}> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+	try {
+		const res = await fetch(`${BACKEND_URL}/admin/update-check`, {
+			headers: { Authorization: `Bearer ${tok}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return { ok: false, error: "server_error" };
+		return { ok: true, data: (await res.json()) as UpdateCheckResult };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}
+
+export async function triggerUpdate(
+	version: string,
+): Promise<{ ok: boolean; error?: string }> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+	try {
+		const res = await fetch(`${BACKEND_URL}/admin/trigger-update`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ version, channel: "stable" }),
+		});
+		if (!res.ok) {
+			const body = (await res.json()) as { error?: string };
+			return { ok: false, error: body.error ?? "server_error" };
+		}
+		return { ok: true };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}
+
 export async function updateBranding(
 	payload: BrandingPayload,
 ): Promise<{ ok: boolean; error?: string }> {

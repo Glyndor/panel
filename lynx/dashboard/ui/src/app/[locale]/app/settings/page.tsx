@@ -6,6 +6,7 @@ import { SessionList } from "./SessionList";
 import { SessionListSkeleton } from "./SessionListSkeleton";
 import { RotateButton } from "./RotateButton";
 import { BrandingForm } from "./BrandingForm";
+import { UpdateSection } from "./UpdateSection";
 
 interface Branding {
 	company_name: string;
@@ -65,6 +66,30 @@ export default async function SettingsPage({
 						locale={locale}
 						label={t("rotateKeysBtn")}
 						confirmMsg={t("rotateKeysConfirm")}
+					/>
+				</div>
+			</section>
+
+			<section className="flex flex-col gap-3">
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+					{t("updates")}
+				</h2>
+				<div className="rounded-lg border p-4">
+					<p className="text-sm text-muted-foreground mb-3">
+						{t("updatesDesc")}
+					</p>
+					<UpdateSection
+						labels={{
+							checkBtn: t("updateCheck"),
+							current: t("updateCurrent"),
+							latest: t("updateLatest"),
+							upToDate: t("updateUpToDate"),
+							updateAvailable: t("updateAvailable"),
+							triggerBtn: t("updateTrigger"),
+							triggerSuccess: t("updateTriggerSuccess"),
+							triggerError: t("updateTriggerError"),
+							checkError: t("updateCheckError"),
+						}}
 					/>
 				</div>
 			</section>
