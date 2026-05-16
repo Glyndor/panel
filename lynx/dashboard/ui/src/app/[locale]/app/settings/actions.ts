@@ -127,3 +127,91 @@ export async function updateBranding(
 		return { ok: false, error: "network_error" };
 	}
 }
+
+// Domain actions
+
+export async function configureDomain(
+	domain: string,
+	email: string,
+): Promise<{ ok: boolean; error?: string }> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+
+	try {
+		const res = await fetch(`${BACKEND_URL}/domain`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${tok}`,
+			},
+			body: JSON.stringify({ domain, email }),
+		});
+		if (!res.ok) return { ok: false, error: "server_error" };
+		revalidatePath("/app/settings");
+		return { ok: true };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}
+
+export async function verifyDomain(): Promise<{
+	ok: boolean;
+	dns_ok?: boolean;
+	domain?: string;
+	error?: string;
+}> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+
+	try {
+		const res = await fetch(`${BACKEND_URL}/domain/verify`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${tok}` },
+		});
+		if (!res.ok) return { ok: false, error: "server_error" };
+		const data = (await res.json()) as { dns_ok: boolean; domain: string };
+		return { ok: true, dns_ok: data.dns_ok, domain: data.domain };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}
+
+export async function setHsts(
+	enabled: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+
+	try {
+		const res = await fetch(`${BACKEND_URL}/domain/hsts`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${tok}`,
+			},
+			body: JSON.stringify({ enabled }),
+		});
+		if (!res.ok) return { ok: false, error: "server_error" };
+		revalidatePath("/app/settings");
+		return { ok: true };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}
+
+export async function closePort19443(): Promise<{ ok: boolean; error?: string }> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+
+	try {
+		const res = await fetch(`${BACKEND_URL}/domain/close-port`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${tok}` },
+		});
+		if (!res.ok) return { ok: false, error: "server_error" };
+		revalidatePath("/app/settings");
+		return { ok: true };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}

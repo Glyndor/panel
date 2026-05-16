@@ -7,6 +7,7 @@ import { SessionListSkeleton } from "./SessionListSkeleton";
 import { RotateButton } from "./RotateButton";
 import { BrandingForm } from "./BrandingForm";
 import { UpdateSection } from "./UpdateSection";
+import { DomainSection } from "./DomainSection";
 
 interface Branding {
 	company_name: string;
@@ -16,12 +17,32 @@ interface Branding {
 	accent_color: string;
 }
 
+interface DomainConfig {
+	domain: string | null;
+	cert_type: string;
+	cert_expires_at: string | null;
+	hsts_enabled: boolean;
+	port_19443_open: boolean;
+	status: string;
+	error_message: string | null;
+}
+
 const BRANDING_DEFAULTS: Branding = {
 	company_name: "Lynx",
 	logo_url: null,
 	primary_color: "#0f172a",
 	secondary_color: "#38bdf8",
 	accent_color: "#6366f1",
+};
+
+const DOMAIN_DEFAULTS: DomainConfig = {
+	domain: null,
+	cert_type: "self_signed",
+	cert_expires_at: null,
+	hsts_enabled: false,
+	port_19443_open: true,
+	status: "unconfigured",
+	error_message: null,
 };
 
 async function fetchBranding(): Promise<Branding> {
@@ -36,6 +57,19 @@ async function fetchBranding(): Promise<Branding> {
 	}
 }
 
+async function fetchDomainConfig(token: string): Promise<DomainConfig> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/domain`, {
+			headers: { Authorization: `Bearer ${token}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return DOMAIN_DEFAULTS;
+		return (await res.json()) as DomainConfig;
+	} catch {
+		return DOMAIN_DEFAULTS;
+	}
+}
+
 export default async function SettingsPage({
 	params,
 }: { params: Promise<{ locale: string }> }) {
@@ -46,10 +80,55 @@ export default async function SettingsPage({
 		fetchBranding(),
 	]);
 	const token = jar.get("access_token")?.value ?? "";
+	const domainCfg = await fetchDomainConfig(token);
 
 	return (
 		<div className="flex flex-col p-6 gap-8 max-w-3xl">
 			<h1 className="text-xl font-semibold">{t("title")}</h1>
+
+			<section className="flex flex-col gap-3">
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+					{t("domain")}
+				</h2>
+				<div className="rounded-lg border p-4">
+					<DomainSection
+						initial={domainCfg}
+						labels={{
+							desc: t("domainDesc"),
+							current: t("domainCurrent"),
+							none: t("domainNone"),
+							input: t("domainInput"),
+							email: t("domainEmail"),
+							setup: t("domainSetup"),
+							pending: t("domainPending"),
+							active: t("domainActive"),
+							error: t("domainError"),
+							unconfigured: t("domainUnconfigured"),
+							verify: t("domainVerify"),
+							dnsOk: t("domainDnsOk"),
+							dnsFail: t("domainDnsFail"),
+							verifyError: t("domainVerifyError"),
+							setupError: t("domainSetupError"),
+							hsts: t("domainHsts"),
+							hstsDesc: t("domainHstsDesc"),
+							hstsEnable: t("domainHstsEnable"),
+							hstsDisable: t("domainHstsDisable"),
+							hstsSuccess: t("domainHstsSuccess"),
+							hstsError: t("domainHstsError"),
+							closePort: t("domainClosePort"),
+							closePortDesc: t("domainClosePortDesc"),
+							closePortBtn: t("domainClosePortBtn"),
+							closePortConfirm: t("domainClosePortConfirm"),
+							closePortSuccess: t("domainClosePortSuccess"),
+							closePortError: t("domainClosePortError"),
+							cert: t("domainCert"),
+							certSelfSigned: t("domainCertSelfSigned"),
+							certLE: t("domainCertLE"),
+							certExpires: t("domainCertExpires"),
+						}}
+					/>
+				</div>
+			</section>
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
