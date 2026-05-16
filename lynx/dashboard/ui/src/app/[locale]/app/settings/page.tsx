@@ -12,6 +12,7 @@ import { MigrationSection } from "./MigrationSection";
 import { getMigrationStatus } from "./migrationActions";
 import { ChangePasswordForm } from "./ChangePasswordForm";
 import { getMe } from "./profileActions";
+import { RotationLog } from "./RotationLog";
 
 interface Branding {
 	company_name: string;
@@ -182,6 +183,14 @@ export default async function SettingsPage({
 						label={t("rotateKeysBtn")}
 						confirmMsg={t("rotateKeysConfirm")}
 					/>
+				</div>
+				<div className="flex flex-col gap-2 mt-2">
+					<p className="text-xs font-medium text-muted-foreground">
+						{t("rotationLog")}
+					</p>
+					<Suspense fallback={<div className="rounded-lg border h-20 animate-pulse bg-muted/30" />}>
+						<RotationLog token={token} locale={locale} />
+					</Suspense>
 				</div>
 			</section>
 
