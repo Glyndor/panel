@@ -41,3 +41,26 @@ pub struct AgentSummary {
     pub version: Option<String>,
     pub last_heartbeat: Option<DateTime<Utc>>,
 }
+
+/// Returned after successful agent registration.
+/// `sync_token` is shown once — agent must store it for audit-sync auth.
+#[derive(Debug, Serialize)]
+pub struct RegisterAgentResponse {
+    #[serde(flatten)]
+    pub agent: Agent,
+    pub sync_token: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct AuditSyncEntry {
+    pub id: Uuid,
+    pub agent_id: Uuid,
+    pub organization_id: Option<Uuid>,
+    pub user_id: Option<Uuid>,
+    pub command_type: String,
+    pub result: String,
+    pub error: Option<String>,
+    pub previous_hash: String,
+    pub entry_hash: String,
+    pub created_at: DateTime<Utc>,
+}

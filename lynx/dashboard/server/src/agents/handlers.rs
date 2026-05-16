@@ -1,7 +1,8 @@
-use super::{Agent, AgentSummary, RegisterAgentRequest, wg};
-use crate::{error::AppError, state::AppState};
+use super::{Agent, AgentSummary, AuditSyncEntry, RegisterAgentRequest, RegisterAgentResponse, wg};
+use crate::{crypto::hash::sha256_hex, error::AppError, state::AppState};
 use axum::{
     extract::{Path, State},
+    http::HeaderMap,
     response::IntoResponse,
     Json,
 };
@@ -51,14 +52,17 @@ pub async fn register_agent(
     State(state): State<AppState>,
     Json(req): Json<RegisterAgentRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Allocate next WireGuard IP
     let wg_ip = wg::next_available_ip(&state.db).await?;
+
+    // Generate sync token (returned once — agent must store it)
+    let sync_token = format!("{}", uuid::Uuid::now_v7()).replace('-', "") + &format!("{}", uuid::Uuid::now_v7()).replace('-', "");
+    let sync_token_hash = sha256_hex(sync_token.as_bytes());
 
     let agent = sqlx::query_as!(
         Agent,
         r#"
-        INSERT INTO agents (id, name, wg_pubkey, wg_ip, wg_endpoint, api_port)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO agents (id, name, wg_pubkey, wg_ip, wg_endpoint, api_port, sync_token_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, name, wg_pubkey, wg_ip, wg_endpoint,
                   api_port, status, version, last_heartbeat, created_at
         "#,
@@ -68,16 +72,15 @@ pub async fn register_agent(
         wg_ip.to_string(),
         req.wg_endpoint,
         req.api_port.unwrap_or(9090),
+        sync_token_hash,
     )
     .fetch_one(&state.db)
     .await?;
 
-    // Add WireGuard peer (best-effort — log error but don't fail registration)
     if let Err(e) = wg::add_peer(&req.wg_pubkey, wg_ip.into()) {
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
     }
 
-    // Log bootstrap event
     let event_id = uuid::Uuid::now_v7();
     sqlx::query!(
         "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, $3, $4)",
@@ -89,7 +92,10 @@ pub async fn register_agent(
     .execute(&state.db)
     .await?;
 
-    Ok((axum::http::StatusCode::CREATED, Json(agent)))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(RegisterAgentResponse { agent, sync_token }),
+    ))
 }
 
 // --------------------------------------------------------------------------
@@ -248,4 +254,86 @@ pub async fn send_command(
             .unwrap_or(axum::http::StatusCode::BAD_GATEWAY),
         Json(body),
     ))
+}
+
+// --------------------------------------------------------------------------
+// POST /agents/:id/audit-sync — agent pushes audit log batch (no user auth,
+// uses per-agent sync token)
+// --------------------------------------------------------------------------
+
+pub async fn receive_audit_sync(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(entries): Json<Vec<AuditSyncEntry>>,
+) -> Result<impl IntoResponse, AppError> {
+    // Verify per-agent sync token (not user JWT)
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    let stored_hash = sqlx::query_scalar!(
+        "SELECT sync_token_hash FROM agents WHERE id = $1",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .flatten()
+    .ok_or(AppError::NotFound)?;
+
+    let provided_hash = sha256_hex(token.as_bytes());
+    let ok: bool = subtle::ConstantTimeEq::ct_eq(
+        provided_hash.as_bytes(),
+        stored_hash.as_bytes(),
+    ).into();
+    if !ok {
+        return Err(AppError::Unauthorized);
+    }
+
+    if entries.is_empty() {
+        return Ok(axum::http::StatusCode::NO_CONTENT);
+    }
+
+    let mut tx = state.db.begin().await?;
+
+    for entry in &entries {
+        // Verify agent_id matches route parameter
+        if entry.agent_id != id {
+            continue;
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO audit_log (
+                id, agent_id, organization_id, user_id, command_type,
+                result, error, previous_hash, entry_hash, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (id) DO NOTHING
+            "#,
+            entry.id,
+            entry.agent_id,
+            entry.organization_id,
+            entry.user_id,
+            entry.command_type,
+            entry.result,
+            entry.error,
+            entry.previous_hash,
+            entry.entry_hash,
+            entry.created_at,
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    tracing::info!(
+        agent_id = %id,
+        count = entries.len(),
+        "audit log sync received"
+    );
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }

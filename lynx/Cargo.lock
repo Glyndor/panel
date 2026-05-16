@@ -1521,6 +1521,7 @@ dependencies = [
  "lynx-compose",
  "nix",
  "rand 0.8.6",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

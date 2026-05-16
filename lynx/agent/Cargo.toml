@@ -30,6 +30,9 @@ subtle = { workspace = true }
 zeroize = { workspace = true }
 rand = { workspace = true }
 
+# HTTP client (audit log sync to dashboard)
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+
 # time
 chrono = { workspace = true }
 uuid = { workspace = true }

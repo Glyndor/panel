@@ -7,6 +7,7 @@ mod metrics;
 mod nftables;
 mod podman;
 mod state;
+mod sync;
 
 use anyhow::Context;
 use axum::{
@@ -54,6 +55,9 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
         lockdown: lockdown.clone(),
     };
+
+    // Audit log sync task
+    tokio::spawn(sync::run_sync_task(state.clone()));
 
     // Heartbeat watchdog task
     let lockdown_clone = lockdown.clone();
