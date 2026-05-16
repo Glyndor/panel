@@ -85,10 +85,9 @@ async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
     use redis::AsyncCommands;
     let mut redis = state.redis.clone();
 
-    // Flush all JWT-related keys (access tokens + JTI records)
-    // Pattern: jti:* keys in Redis
+    // Flush all active access tokens stored as access:{jti}
     let keys: Vec<String> = redis
-        .keys("jti:*")
+        .keys("access:*")
         .await
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
