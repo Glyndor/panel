@@ -96,6 +96,29 @@ export function Sidebar({ locale, companyName, logoUrl }: Props) {
 					Sign out
 				</Button>
 			</div>
+
+			<div className="px-4 pb-3 pt-1 text-center">
+				<p className="text-[10px] text-muted-foreground/60 leading-tight">
+					Made with love by{" "}
+					<a
+						href="https://github.com/Jaro-c"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="hover:text-muted-foreground transition-colors"
+					>
+						Jaroc
+					</a>
+					{" · "}
+					<a
+						href="https://github.com/Jaro-c/Lynx"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="hover:text-muted-foreground transition-colors"
+					>
+						lynx
+					</a>
+				</p>
+			</div>
 		</aside>
 	);
 }

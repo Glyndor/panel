@@ -1,7 +1,7 @@
 {
   "auth": {
     "login": {
-      "title": "Sign in to Lynx",
+      "title": "Sign in to {company}",
       "subtitle": "Distributed infrastructure orchestration",
       "username": "Username",
       "password": "Password",

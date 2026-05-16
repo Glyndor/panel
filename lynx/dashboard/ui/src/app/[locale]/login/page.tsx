@@ -1,16 +1,35 @@
 
 import { getTranslations } from "next-intl/server";
+import { BACKEND_URL } from "@/lib/api";
 import { LoginForm } from "./LoginForm";
+
+async function fetchCompanyName(): Promise<string> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/branding`, {
+			next: { revalidate: 60 },
+		});
+		if (!res.ok) return "Lynx";
+		const data = (await res.json()) as { company_name?: string };
+		return data.company_name ?? "Lynx";
+	} catch {
+		return "Lynx";
+	}
+}
 
 export default async function LoginPage({ params }: { params: Promise<{ locale: string }>; }) {
 	const { locale } = await params;
-	const t = await getTranslations({ locale, namespace: "auth.login" });
+	const [t, companyName] = await Promise.all([
+		getTranslations({ locale, namespace: "auth.login" }),
+		fetchCompanyName(),
+	]);
 
 	return (
 		<main className="min-h-screen flex items-center justify-center bg-background px-4">
 			<div className="w-full max-w-sm">
 				<div className="mb-8 text-center">
-					<h1 className="text-2xl font-bold tracking-tight">{t("title")}</h1>
+					<h1 className="text-2xl font-bold tracking-tight">
+						{t("title", { company: companyName })}
+					</h1>
 					<p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
 				</div>
 

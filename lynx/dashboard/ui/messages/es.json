@@ -1,7 +1,7 @@
 {
   "auth": {
     "login": {
-      "title": "Iniciar sesión en Lynx",
+      "title": "Iniciar sesión en {company}",
       "subtitle": "Orquestación de infraestructura distribuida",
       "username": "Usuario",
       "password": "Contraseña",
