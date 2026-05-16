@@ -55,6 +55,13 @@ pub struct Project {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
+    pub slug: String,
+    pub agent_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdateResourcesRequest {
     pub container_name: String,
     pub cpus: Option<f64>,

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { InviteDialog } from "./InviteDialog";
 import { RemoveMemberButton } from "./RemoveMemberButton";
+import { CreateProjectDialog } from "./CreateProjectDialog";
 
 interface Org {
 	id: string;
@@ -30,6 +31,12 @@ interface Project {
 	created_at: string;
 }
 
+interface Agent {
+	id: string;
+	name: string;
+	status: string;
+}
+
 async function fetchOrg(token: string, id: string): Promise<Org | null> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/organizations/${id}`, {
@@ -46,6 +53,19 @@ async function fetchOrg(token: string, id: string): Promise<Org | null> {
 async function fetchMembers(token: string, id: string): Promise<Member[]> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/organizations/${id}/members`, {
+			headers: { Authorization: `Bearer ${token}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return [];
+		return res.json();
+	} catch {
+		return [];
+	}
+}
+
+async function fetchAgents(token: string): Promise<Agent[]> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/agents`, {
 			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
 		});
@@ -88,10 +108,11 @@ export default async function OrgDetailPage({
 	]);
 	const tok = jar.get("access_token")?.value ?? "";
 
-	const [org, members, projects] = await Promise.all([
+	const [org, members, projects, agents] = await Promise.all([
 		fetchOrg(tok, id),
 		fetchMembers(tok, id),
 		fetchProjects(tok, id),
+		fetchAgents(tok),
 	]);
 
 	if (!org) notFound();
@@ -160,9 +181,27 @@ export default async function OrgDetailPage({
 			</section>
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("projects")} ({projects.length})
-				</h2>
+				<div className="flex items-center justify-between">
+					<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+						{t("projects")} ({projects.length})
+					</h2>
+					<CreateProjectDialog
+						orgId={id}
+						agents={agents}
+						labels={{
+							trigger: t("createProject"),
+							title: t("createProjectTitle"),
+							name: t("projectName"),
+							slug: t("projectSlug"),
+							agent: t("projectAgent"),
+							noAgents: t("projectNoAgents"),
+							create: t("projectCreate"),
+							success: t("projectCreateSuccess"),
+							slugConflict: t("projectSlugConflict"),
+							error: t("projectCreateError"),
+						}}
+					/>
+				</div>
 				{projects.length === 0 ? (
 					<p className="text-sm text-muted-foreground">{t("noProjects")}</p>
 				) : (

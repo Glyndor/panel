@@ -71,7 +71,17 @@
       "noMembers": "No members yet.",
       "orgId": "ID:",
       "projects": "Projects",
-      "noProjects": "No projects yet."
+      "noProjects": "No projects yet.",
+      "createProject": "New project",
+      "createProjectTitle": "Create project",
+      "projectName": "Name",
+      "projectSlug": "Slug",
+      "projectAgent": "Target agent",
+      "projectNoAgents": "No agents available. Register an agent first.",
+      "projectCreate": "Create project",
+      "projectCreateSuccess": "Project created.",
+      "projectSlugConflict": "Slug already taken in this organization.",
+      "projectCreateError": "Failed to create project."
     },
     "projects": {
       "orgs": "Organizations",

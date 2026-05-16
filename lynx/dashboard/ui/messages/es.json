@@ -71,7 +71,17 @@
       "noMembers": "Sin miembros aún.",
       "orgId": "ID:",
       "projects": "Proyectos",
-      "noProjects": "Sin proyectos aún."
+      "noProjects": "Sin proyectos aún.",
+      "createProject": "Nuevo proyecto",
+      "createProjectTitle": "Crear proyecto",
+      "projectName": "Nombre",
+      "projectSlug": "Slug",
+      "projectAgent": "Agente destino",
+      "projectNoAgents": "No hay agentes disponibles. Registra un agente primero.",
+      "projectCreate": "Crear proyecto",
+      "projectCreateSuccess": "Proyecto creado.",
+      "projectSlugConflict": "Slug ya en uso en esta organización.",
+      "projectCreateError": "Error al crear el proyecto."
     },
     "projects": {
       "orgs": "Organizaciones",
