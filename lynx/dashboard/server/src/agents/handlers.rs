@@ -257,6 +257,72 @@ pub async fn send_command(
 }
 
 // --------------------------------------------------------------------------
+// POST /agents/:id/events — agent reports an event (divergence, heartbeat_lost, etc.)
+// Uses per-agent sync token (same as audit-sync auth)
+// --------------------------------------------------------------------------
+
+pub async fn receive_event(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Result<impl IntoResponse, AppError> {
+    // Verify per-agent sync token
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    let stored_hash = sqlx::query_scalar!(
+        "SELECT sync_token_hash FROM agents WHERE id = $1",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .flatten()
+    .ok_or(AppError::NotFound)?;
+
+    let provided_hash = sha256_hex(token.as_bytes());
+    let ok: bool = subtle::ConstantTimeEq::ct_eq(
+        provided_hash.as_bytes(),
+        stored_hash.as_bytes(),
+    ).into();
+    if !ok {
+        return Err(AppError::Unauthorized);
+    }
+
+    let event = body
+        .get("event")
+        .and_then(|v| v.as_str())
+        .ok_or(AppError::BadRequest("event field required"))?;
+    let detail = body.get("detail").and_then(|v| v.as_str()).map(String::from);
+
+    let allowed_events = [
+        "connected", "disconnected", "lockdown", "heartbeat_lost",
+        "update_applied", "nftables_divergence", "bootstrap_completed",
+    ];
+    if !allowed_events.contains(&event) {
+        return Err(AppError::BadRequest("unknown event type"));
+    }
+
+    let event_id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, $3, $4)",
+        event_id,
+        id,
+        event,
+        detail,
+    )
+    .execute(&state.db)
+    .await?;
+
+    tracing::info!(agent_id = %id, event, "agent event received");
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// --------------------------------------------------------------------------
 // POST /agents/:id/audit-sync — agent pushes audit log batch (no user auth,
 // uses per-agent sync token)
 // --------------------------------------------------------------------------

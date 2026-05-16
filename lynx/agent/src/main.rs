@@ -54,10 +54,14 @@ async fn main() -> anyhow::Result<()> {
         db,
         config: Arc::new(config),
         lockdown: lockdown.clone(),
+        nft_checksum: Arc::new(std::sync::Mutex::new(None)),
     };
 
     // Audit log sync task
     tokio::spawn(sync::run_sync_task(state.clone()));
+
+    // nftables divergence detection task
+    tokio::spawn(nftables::divergence::run_divergence_check(state.clone()));
 
     // Heartbeat watchdog task
     let lockdown_clone = lockdown.clone();

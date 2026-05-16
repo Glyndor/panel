@@ -18,4 +18,5 @@ pub fn router() -> Router<AppState> {
 pub fn agent_router() -> Router<AppState> {
     Router::new()
         .route("/{id}/audit-sync", post(handlers::receive_audit_sync))
+        .route("/{id}/events", post(handlers::receive_event))
 }
