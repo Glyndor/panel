@@ -1,7 +1,7 @@
 use super::{Agent, AgentSummary, AuditSyncEntry, RegisterAgentRequest, RegisterAgentResponse, wg};
-use crate::{crypto::hash::sha256_hex, error::AppError, state::AppState};
+use crate::{auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState};
 use axum::{
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::HeaderMap,
     response::IntoResponse,
     Json,
@@ -402,4 +402,45 @@ pub async fn receive_audit_sync(
     );
 
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// --------------------------------------------------------------------------
+// GET /agents/events — recent agent events across all agents
+// --------------------------------------------------------------------------
+
+pub async fn list_agent_events(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<impl IntoResponse, AppError> {
+    let limit: i64 = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20)
+        .min(100);
+
+    let events = sqlx::query!(
+        r#"
+        SELECT id, agent_id, event, detail, created_at
+        FROM agent_events
+        ORDER BY created_at DESC
+        LIMIT $1
+        "#,
+        limit
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let result: Vec<_> = events
+        .into_iter()
+        .map(|e| serde_json::json!({
+            "id": e.id,
+            "agent_id": e.agent_id,
+            "event": e.event,
+            "detail": e.detail,
+            "created_at": e.created_at,
+        }))
+        .collect();
+
+    Ok(Json(result))
 }

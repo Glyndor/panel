@@ -9,6 +9,7 @@ use axum::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(handlers::list_agents).post(handlers::register_agent))
+        .route("/events", get(handlers::list_agent_events))
         .route("/{id}", get(handlers::get_agent).delete(handlers::remove_agent))
         .route("/{id}/heartbeat", post(handlers::relay_heartbeat))
         .route("/{id}/cmd", post(handlers::send_command))

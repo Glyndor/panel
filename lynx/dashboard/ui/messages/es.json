@@ -49,11 +49,6 @@
       "organizations": "Organizaciones",
       "settings": "Ajustes"
     },
-    "overview": {
-      "title": "Resumen",
-      "noAgents": "No hay agentes conectados",
-      "noAgentsDesc": "Conecta un VPS agente para empezar a gestionar tu infraestructura."
-    },
     "organizations": {
       "title": "Organizaciones",
       "noOrgs": "Sin organizaciones aún",
@@ -77,9 +72,16 @@
     },
     "agents": {
       "title": "Agentes",
+      "register": "Registrar agente",
+      "registerSuccess": "Agente registrado",
+      "registerSuccessDesc": "Copia las credenciales. El token de sincronización solo se muestra una vez.",
+      "agentId": "ID del agente",
+      "wgIp": "IP WireGuard:",
+      "syncToken": "Token de sincronización",
+      "warnOnce": "El token de sincronización no volverá a mostrarse. Cópialo ahora.",
+      "done": "Hecho",
       "noAgents": "No hay agentes conectados",
       "noAgentsDesc": "Ejecuta el script de instalación del agente en un VPS para conectarlo.",
-      "wgIp": "IP WireGuard:",
       "version": "Versión:",
       "lastHeartbeat": "Último latido:",
       "status": {
@@ -87,6 +89,15 @@
         "lockdown": "Bloqueado",
         "offline": "Desconectado"
       }
+    },
+    "overview": {
+      "title": "Resumen",
+      "agentsOnline": "Agentes en línea",
+      "organizations": "Organizaciones",
+      "recentEvents": "Eventos recientes",
+      "noEvents": "Sin eventos recientes.",
+      "noAgents": "No hay agentes conectados",
+      "noAgentsDesc": "Conecta un VPS agente para empezar a gestionar tu infraestructura."
     }
   },
   "branding": {
