@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
 import { NftablesAlert } from "./NftablesAlert";
 
 type Agent = {
@@ -132,6 +133,12 @@ export async function AgentList({
 								{formatHeartbeat(agent.last_heartbeat)}
 							</p>
 							<p className="truncate text-xs opacity-60">{agent.id}</p>
+							<Link
+								href={`/${locale}/app/agents/${agent.id}/audit-log`}
+								className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+							>
+								{t("auditLog")}
+							</Link>
 							{nft.diverged && (
 								<NftablesAlert
 									agentId={agent.id}

@@ -161,6 +161,22 @@
       "brandingSaved": "Marca actualizada.",
       "brandingError": "Error al actualizar la marca."
     },
+    "auditLog": {
+      "title": "Registro de auditoría",
+      "noEntries": "Sin entradas de auditoría aún.",
+      "command": "Comando",
+      "result": "Resultado",
+      "user": "Usuario",
+      "org": "Org",
+      "time": "Hora",
+      "hash": "Hash",
+      "error": "Error",
+      "loadMore": "Cargar más",
+      "back": "Volver a agentes",
+      "resultSuccess": "éxito",
+      "resultRejected": "rechazado",
+      "resultFailed": "fallido"
+    },
     "agents": {
       "title": "Agentes",
       "register": "Registrar agente",
@@ -179,6 +195,7 @@
       "nftRestoreSuccess": "Ruleset de nftables restaurado.",
       "nftAcceptSuccess": "Cambios manuales aceptados.",
       "nftError": "Error al resolver divergencia de nftables.",
+      "auditLog": "Registro de auditoría",
       "version": "Versión:",
       "lastHeartbeat": "Último latido:",
       "status": {

@@ -578,3 +578,74 @@ pub async fn nftables_resolve(
         Json(body),
     ))
 }
+
+// --------------------------------------------------------------------------
+// GET /agents/:id/audit-log
+// Returns paginated audit log entries for a specific agent.
+// --------------------------------------------------------------------------
+
+pub async fn list_audit_log(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<impl IntoResponse, AppError> {
+    let limit: i64 = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50)
+        .min(200);
+
+    let offset: i64 = params
+        .get("offset")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let exists = sqlx::query_scalar!("SELECT 1 FROM agents WHERE id = $1", id)
+        .fetch_optional(&state.db)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let entries = sqlx::query!(
+        r#"
+        SELECT id, agent_id, organization_id, user_id,
+               command_type, result, error, entry_hash, created_at
+        FROM audit_log
+        WHERE agent_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+        "#,
+        id,
+        limit,
+        offset,
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let total: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM audit_log WHERE agent_id = $1",
+        id
+    )
+    .fetch_one(&state.db)
+    .await?
+    .unwrap_or(0);
+
+    let result: Vec<_> = entries
+        .into_iter()
+        .map(|e| serde_json::json!({
+            "id": e.id,
+            "agent_id": e.agent_id,
+            "organization_id": e.organization_id,
+            "user_id": e.user_id,
+            "command_type": e.command_type,
+            "result": e.result,
+            "error": e.error,
+            "entry_hash": &e.entry_hash[..16],
+            "created_at": e.created_at,
+        }))
+        .collect();
+
+    Ok(Json(json!({ "entries": result, "total": total, "limit": limit, "offset": offset })))
+}

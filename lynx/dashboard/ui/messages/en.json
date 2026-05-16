@@ -161,6 +161,22 @@
       "brandingSaved": "Branding updated.",
       "brandingError": "Failed to update branding."
     },
+    "auditLog": {
+      "title": "Audit Log",
+      "noEntries": "No audit log entries yet.",
+      "command": "Command",
+      "result": "Result",
+      "user": "User",
+      "org": "Org",
+      "time": "Time",
+      "hash": "Hash",
+      "error": "Error",
+      "loadMore": "Load more",
+      "back": "Back to agents",
+      "resultSuccess": "success",
+      "resultRejected": "rejected",
+      "resultFailed": "failed"
+    },
     "agents": {
       "title": "Agents",
       "register": "Register Agent",
@@ -179,6 +195,7 @@
       "nftRestoreSuccess": "nftables ruleset restored.",
       "nftAcceptSuccess": "Manual changes accepted.",
       "nftError": "Failed to resolve nftables divergence.",
+      "auditLog": "Audit log",
       "version": "Version:",
       "lastHeartbeat": "Last heartbeat:",
       "status": {
