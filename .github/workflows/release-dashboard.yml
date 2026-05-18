@@ -59,7 +59,7 @@ jobs:
       - name: Verify sqlx cache is up-to-date
         env:
           DATABASE_URL: postgresql://postgres:ci_test@localhost:5432/lynx_dashboard
-        run: cargo sqlx prepare --check --package lynx-dashboard-server
+        run: cargo sqlx prepare --check -- -p lynx-dashboard-server
 
   build:
     name: Build ${{ matrix.arch }}
