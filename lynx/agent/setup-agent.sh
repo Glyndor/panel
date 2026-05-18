@@ -43,8 +43,10 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 
 LYNX_DIR="/etc/lynx"
 AGENT_CONF="$LYNX_DIR/agent.env"
+LYNX_WG_DIR="$LYNX_DIR/wireguard"
+LYNX_WG_CONF="$LYNX_WG_DIR/lynx-wg.conf"   # source of truth (spec path)
 WG_DIR="/etc/wireguard"
-WG_CONF="$WG_DIR/wg-lynx-agent.conf"
+WG_CONF_LINK="$WG_DIR/wg-lynx-agent.conf"   # symlink for wg-quick compatibility
 WG_IFACE="wg-lynx-agent"
 AGENT_WG_IP="10.100.0.2"
 DASHBOARD_WG_IP="10.100.0.1"
@@ -80,7 +82,7 @@ _cleanup_existing() {
     if ip link show "$WG_IFACE" &>/dev/null; then
         wg-quick down "$WG_IFACE" 2>/dev/null || ip link delete "$WG_IFACE" 2>/dev/null || true
     fi
-    rm -f "$WG_CONF"
+    rm -f "$WG_CONF_LINK" "$LYNX_WG_CONF"
 
     # Remove PostgreSQL container + data
     podman rm -f "$PG_CONTAINER" 2>/dev/null || true
@@ -619,7 +621,8 @@ if [[ -n "$KEEPALIVE_LINE" ]]; then
 ${KEEPALIVE_LINE}"
 fi
 
-cat > "$WG_CONF" << EOF
+mkdir -p "$LYNX_WG_DIR"
+cat > "$LYNX_WG_CONF" << EOF
 [Interface]
 PrivateKey = ${AGENT_PRIV}
 Address = ${AGENT_WG_IP}/24
@@ -627,7 +630,13 @@ Address = ${AGENT_WG_IP}/24
 ${WG_PEER_BLOCK}
 EOF
 
-chmod 600 "$WG_CONF"
+chmod 600 "$LYNX_WG_CONF"
+chown lynx-agent:lynx-agent "$LYNX_WG_CONF"
+
+# Symlink into /etc/wireguard/ for wg-quick compatibility
+mkdir -p "$WG_DIR"
+ln -sf "$LYNX_WG_CONF" "$WG_CONF_LINK"
+
 AGENT_PRIV="$(openssl rand -hex 32)"  # overwrite
 PSK="$(openssl rand -hex 32)"
 unset AGENT_PRIV PSK
