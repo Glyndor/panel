@@ -1,0 +1,277 @@
+use crate::{
+    audit::{self, AuditEntry, AuditResult},
+    auth::{verify_bearer, verify_command, PermissionLevel, SignedCommand, VerifiedCommand},
+    cert,
+    error::{AgentError, Result},
+    state::AppState,
+    update,
+};
+use axum::{
+    extract::State,
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde_json::{json, Value};
+use tracing::{info, warn};
+
+use super::containers::require_str;
+use super::{
+    containers::{
+        handle_container_deploy, handle_container_list, handle_container_remove,
+        handle_container_restart, handle_container_start, handle_container_stop,
+        handle_container_update, handle_tenant_ensure,
+    },
+    nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
+    wireguard::{
+        handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk,
+    },
+};
+
+pub async fn health() -> StatusCode {
+    StatusCode::OK
+}
+
+pub async fn execute_command(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(signed): Json<SignedCommand>,
+) -> Result<Response> {
+    if state.is_locked_down() {
+        return Err(AgentError::Lockdown);
+    }
+
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    if !verify_bearer(token, &state.config.internal_token) {
+        return Err(AgentError::Unauthorized);
+    }
+
+    if !state.check_cmd_rate() {
+        let count = state.record_rate_rejection();
+        audit::append(
+            &state.db,
+            AuditEntry {
+                agent_id: state.config.agent_id,
+                organization_id: None,
+                user_id: None,
+                command_type: "unknown",
+                result: AuditResult::Rejected,
+                error: Some("rejected_rate_limit".to_string()),
+            },
+        )
+        .await
+        .ok();
+        if count >= 3 {
+            tracing::warn!(count, "rate limit threshold reached — alerting");
+        }
+        return Err(AgentError::BadRequest("rate limit exceeded"));
+    }
+
+    let verified = match verify_command(
+        &state.db,
+        &signed,
+        &state.config.dashboard_verify_key,
+        state.config.agent_id,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("command rejected: {e}");
+            audit::append(
+                &state.db,
+                AuditEntry {
+                    agent_id: state.config.agent_id,
+                    organization_id: None,
+                    user_id: None,
+                    command_type: "unknown",
+                    result: AuditResult::Rejected,
+                    error: Some(e.to_string()),
+                },
+            )
+            .await
+            .ok();
+            return Err(AgentError::Unauthorized);
+        }
+    };
+
+    dispatch(&state, verified).await
+}
+
+async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
+    let cmd_type = cmd
+        .command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    info!(
+        cmd_type = %cmd_type,
+        user_id = %cmd.user_id,
+        permission = ?cmd.permission,
+        "executing command"
+    );
+
+    let result: std::result::Result<Value, AgentError> = match cmd_type.as_str() {
+        "nftables.apply" => handle_nftables_apply(state, &cmd),
+        "nftables.restore" => handle_nftables_restore(state, &cmd),
+        "nftables.accept" => handle_nftables_accept(state, &cmd),
+        "container.list" => handle_container_list(&cmd),
+        "tenant.ensure" => handle_tenant_ensure(&cmd),
+        "container.deploy" => handle_container_deploy(&cmd),
+        "container.start" => handle_container_start(&cmd),
+        "container.stop" => handle_container_stop(&cmd),
+        "container.remove" => handle_container_remove(&cmd),
+        "container.restart" => handle_container_restart(&cmd),
+        "container.update" => handle_container_update(&cmd),
+        "update.self" => handle_update_self(&cmd).await,
+        "wg.rotate_psk" => handle_wg_rotate_psk(&cmd),
+        "wg.data_plane.setup" => handle_wg_data_plane_setup(&cmd),
+        "wg.data_plane.teardown" => handle_wg_data_plane_teardown(&cmd),
+        "dashboard.migrate" => handle_dashboard_migrate(state, &cmd).await,
+        "cert.update" => handle_cert_update(state, &cmd).await,
+        other => {
+            warn!("unknown command type: {other}");
+            Err(AgentError::BadRequest("unknown command type"))
+        }
+    };
+
+    let audit_result = match &result {
+        Ok(_) => AuditResult::Success,
+        Err(AgentError::BadRequest(_))
+        | Err(AgentError::Unauthorized)
+        | Err(AgentError::Forbidden(_)) => AuditResult::Rejected,
+        Err(_) => AuditResult::Failed,
+    };
+
+    audit::append(
+        &state.db,
+        AuditEntry {
+            agent_id: state.config.agent_id,
+            organization_id: cmd.organization_id,
+            user_id: Some(cmd.user_id),
+            command_type: &cmd_type,
+            result: audit_result,
+            error: match &result {
+                Err(e) => Some(sanitize_error(e)),
+                Ok(_) => None,
+            },
+        },
+    )
+    .await
+    .map_err(anyhow::Error::from)?;
+
+    result.map(|v| Json(v).into_response())
+}
+
+async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("update.self requires write permission"));
+    }
+    let version = require_str(&cmd.command, "version")?;
+    let download_url = require_str(&cmd.command, "download_url")?;
+    let sig_url = require_str(&cmd.command, "sig_url")?;
+
+    tokio::spawn(async move {
+        if let Err(e) = update::perform_update(&version, &download_url, &sig_url).await {
+            tracing::error!(version, "update failed: {e:#}");
+        }
+    });
+
+    Ok(json!({ "ok": true, "message": "update initiated" }))
+}
+
+pub async fn handle_dashboard_migrate(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden("dashboard.migrate requires write permission"));
+    }
+
+    let target_url = require_str(&cmd.command, "target_url")?;
+
+    let sync_token = match state.config.sync_token.as_deref() {
+        Some(t) => t.to_string(),
+        None => return Err(AgentError::BadRequest("no sync token configured")),
+    };
+    let agent_id = state.config.agent_id;
+
+    tokio::spawn(async move {
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+        else {
+            return;
+        };
+
+        let _ = client
+            .post(&format!("{target_url}/migration/agent-confirm"))
+            .header("Authorization", format!("Bearer {sync_token}"))
+            .json(&serde_json::json!({ "agent_id": agent_id }))
+            .send()
+            .await;
+
+        tracing::info!("notified VPS-B of migration confirmation");
+    });
+
+    Ok(json!({ "ok": true, "message": "migration acknowledgment sent" }))
+}
+
+pub async fn handle_cert_update(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission < PermissionLevel::Write {
+        return Err(AgentError::Forbidden("cert.update requires write permission"));
+    }
+
+    let payload = cmd
+        .command
+        .get("payload")
+        .and_then(|v| v.as_str())
+        .ok_or(AgentError::BadRequest("missing payload"))?
+        .to_string();
+    let signature = cmd
+        .command
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .ok_or(AgentError::BadRequest("missing signature"))?
+        .to_string();
+
+    let cert_entry = cert::SignedCert { payload, signature };
+
+    let ca_public = cert::load_ca_public_key()
+        .ok_or_else(|| AgentError::Internal(anyhow::anyhow!("CA_PUBLIC_KEY not configured")))?;
+
+    cert::verify(&cert_entry, &ca_public, state.config.agent_id)
+        .map_err(|e| AgentError::Internal(e))?;
+
+    let cert_json =
+        serde_json::to_string(&cert_entry).map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
+
+    let cert_path = std::path::Path::new("/etc/lynx/cert.json");
+    if let Some(parent) = cert_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
+    }
+    tokio::fs::write(cert_path, cert_json.as_bytes())
+        .await
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
+
+    tracing::info!(agent_id = %state.config.agent_id, "agent cert renewed and persisted to /etc/lynx/cert.json");
+
+    Ok(json!({ "ok": true }))
+}
+
+fn sanitize_error(e: &AgentError) -> String {
+    match e {
+        AgentError::Internal(_) => "internal error".to_string(),
+        other => other.to_string(),
+    }
+}

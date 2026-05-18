@@ -86,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
         lockdown: lockdown.clone(),
         nft_checksum: Arc::new(std::sync::Mutex::new(None)),
         nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
+        cmd_rate: Arc::new(std::sync::Mutex::new((0u64, 0u64))),
+        cmd_rejected_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        cmd_rejected_window: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     // Nonce cleanup: run at startup then every hour.

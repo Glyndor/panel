@@ -1,7 +1,7 @@
 use crate::config::Config;
 use sqlx::PgPool;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 
@@ -15,11 +15,52 @@ pub struct AppState {
     pub nft_checksum: Arc<Mutex<Option<String>>>,
     /// Rendered nft ruleset from last successful apply() — used for restore.
     pub nft_last_ruleset: Arc<Mutex<Option<String>>>,
+    /// In-memory command rate limiter: (window_start_secs, count_in_window)
+    pub cmd_rate: Arc<Mutex<(u64, u64)>>,
+    /// Count of `rejected_rate_limit` events in the current minute — alert threshold.
+    pub cmd_rejected_count: Arc<AtomicU64>,
+    /// Epoch-second when the current rejection-count minute window started.
+    pub cmd_rejected_window: Arc<AtomicU64>,
 }
 
 impl AppState {
     pub fn is_locked_down(&self) -> bool {
         self.lockdown.load(Ordering::SeqCst)
+    }
+
+    /// Returns true if the command is within the 100/min limit, false if it should be rejected.
+    pub fn check_cmd_rate(&self) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut guard = self.cmd_rate.lock().unwrap();
+        let (window_start, count) = *guard;
+        if now >= window_start + 60 {
+            *guard = (now, 1);
+            true
+        } else if count < 100 {
+            guard.1 += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Record a rejected-rate-limit event. Returns count in current minute.
+    pub fn record_rate_rejection(&self) -> u64 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let window = self.cmd_rejected_window.load(Ordering::SeqCst);
+        if now >= window + 60 {
+            self.cmd_rejected_window.store(now, Ordering::SeqCst);
+            self.cmd_rejected_count.store(1, Ordering::SeqCst);
+            1
+        } else {
+            self.cmd_rejected_count.fetch_add(1, Ordering::SeqCst) + 1
+        }
     }
 
     pub fn set_nft_checksum(&self, checksum: String) {
