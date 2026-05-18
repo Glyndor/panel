@@ -275,18 +275,18 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
 /// use the updated secret on the next backend start.
 pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
     use rand::RngCore;
+    use zeroize::Zeroizing;
 
     let mut buf = [0u8; 24];
     rand::rngs::OsRng.fill_bytes(&mut buf);
-    let new_pass: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+    let new_pass = Zeroizing::new(buf.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
-    sqlx::query(&format!(
-        "ALTER USER lynx_dashboard_app PASSWORD '{}'",
-        new_pass.replace('\'', "''")
-    ))
-    .execute(&state.db)
-    .await
-    .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+    // Dollar-quoting ($$...$$) avoids any quote-based injection.
+    // new_pass is hex [0-9a-f] so "$$" can never appear inside it.
+    sqlx::query(&format!("ALTER USER lynx_dashboard_app PASSWORD $${}$$", &*new_pass))
+        .execute(&state.db)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
     let status = std::process::Command::new("podman")
         .args([
@@ -328,16 +328,17 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
 /// so the new password is used after the next backend restart.
 pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
     use rand::RngCore;
+    use zeroize::Zeroizing;
 
     let mut buf = [0u8; 24];
     rand::rngs::OsRng.fill_bytes(&mut buf);
-    let new_pass: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+    let new_pass = Zeroizing::new(buf.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
     let mut redis = state.redis.clone();
     redis::cmd("CONFIG")
         .arg("SET")
         .arg("requirepass")
-        .arg(&new_pass)
+        .arg(&*new_pass)
         .query_async::<()>(&mut redis)
         .await
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;

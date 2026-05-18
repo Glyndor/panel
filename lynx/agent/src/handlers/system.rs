@@ -313,14 +313,15 @@ async fn handle_db_rotate_password(
         ));
     }
 
-    use rand::Rng;
-    let new_pass: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect();
+    use rand::RngCore;
+    use zeroize::Zeroizing;
+    let mut buf = [0u8; 24];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    let new_pass = Zeroizing::new(buf.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
-    sqlx::query(&format!("ALTER USER lynx_agent_app PASSWORD '{new_pass}'"))
+    // Dollar-quoting ($$...$$) avoids any quote-based injection.
+    // new_pass is hex [0-9a-f] so "$$" can never appear inside it.
+    sqlx::query(&format!("ALTER USER lynx_agent_app PASSWORD $${}$$", &*new_pass))
         .execute(&state.db)
         .await
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("ALTER USER: {e}")))?;
