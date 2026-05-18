@@ -16,6 +16,7 @@ import { useTransition } from "react";
 import { logoutAction } from "@/actions/(dashboard)/app/logout";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
+import { LocaleSwitcher } from "./LocaleSwitcher";
 
 type Props = { locale: string; companyName: string; logoUrl: string | null; isAdmin: boolean };
 
@@ -66,6 +67,7 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 						</span>
 					)}
 				</div>
+				<LocaleSwitcher locale={locale} />
 				<ThemeToggle />
 				<NotificationBell />
 			</div>
@@ -103,7 +105,7 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 					}
 				>
 					<LogOut className="size-4" />
-					Sign out
+					{t("signOut")}
 				</Button>
 			</div>
 

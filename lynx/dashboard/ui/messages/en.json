@@ -48,7 +48,8 @@
       "agents": "Agents",
       "organizations": "Organizations",
       "settings": "Settings",
-      "admin": "Admin"
+      "admin": "Admin",
+      "signOut": "Sign out"
     },
     "organizations": {
       "title": "Organizations",
