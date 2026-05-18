@@ -212,7 +212,7 @@ pub async fn set_hsts(
     Extension(user): Extension<AuthUser>,
     Json(req): Json<SetHstsRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let cfg = sqlx::query!("SELECT status, domain FROM domain_config WHERE id = 1")
+    let cfg = sqlx::query!("SELECT status, domain, cert_type FROM domain_config WHERE id = 1")
         .fetch_one(&state.db)
         .await?;
 
@@ -238,10 +238,19 @@ pub async fn set_hsts(
             }
         };
 
-        let config = nginx_conf(&domain, true, req.enabled);
+        // Use cert paths appropriate for cert_type.
+        let nginx_config = match cfg.cert_type.as_str() {
+            "cloudflare" | "custom" => {
+                let cert_path = custom_cert_path(&domain);
+                let key_path = custom_key_path(&domain);
+                nginx_conf_with_cert(&domain, &cert_path, &key_path, req.enabled)
+            }
+            _ => nginx_conf(&domain, true, req.enabled),
+        };
+
         let update_cmd = json!({
             "type": "nginx.update_config",
-            "config": config,
+            "config": nginx_config,
         });
         if let Err(e) = send_cmd(&state, &agent, user.user_id, &update_cmd).await {
             tracing::warn!("nginx reload after HSTS change failed: {e}");
