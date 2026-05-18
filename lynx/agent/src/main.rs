@@ -12,6 +12,7 @@ mod podman;
 mod state;
 mod sync;
 mod update;
+mod ws_client;
 
 use anyhow::Context;
 use axum::{
@@ -200,7 +201,10 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Audit log sync task
+    // WebSocket client — persistent connection to dashboard
+    tokio::spawn(ws_client::run_ws_client(state.clone()));
+
+    // Audit log sync task (HTTP batch fallback when WS is down)
     tokio::spawn(sync::run_sync_task(state.clone()));
 
     // nftables divergence detection task

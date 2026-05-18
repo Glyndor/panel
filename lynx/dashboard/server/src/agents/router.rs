@@ -1,4 +1,4 @@
-use super::handlers;
+use super::{handlers, ws_hub};
 use crate::state::AppState;
 use axum::{
     routing::{get, post},
@@ -29,4 +29,5 @@ pub fn agent_router() -> Router<AppState> {
     Router::new()
         .route("/{id}/audit-sync", post(handlers::receive_audit_sync))
         .route("/{id}/events", post(handlers::receive_event))
+        .route("/{id}/ws", get(ws_hub::agent_ws_handler))
 }

@@ -384,7 +384,7 @@ fn validate_cert(
     key_pem: Option<&str>,
 ) -> Result<(), AppError> {
     use x509_parser::pem::parse_x509_pem;
-    use x509_parser::prelude::*;
+    use x509_parser::extensions::GeneralName;
 
     // Parse PEM → X.509 cert in one step.
     let (_, pem) = parse_x509_pem(cert_pem.as_bytes())
@@ -461,7 +461,6 @@ fn cert_expires_at(cert_pem: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 fn verify_key_pair(cert_pem: &str, key_pem: &str) -> Result<(), anyhow::Error> {
     use rcgen::KeyPair;
     use x509_parser::pem::parse_x509_pem;
-    use x509_parser::prelude::*;
 
     let key = KeyPair::from_pem(key_pem)
         .map_err(|e| anyhow::anyhow!("invalid private key PEM: {e}"))?;

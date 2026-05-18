@@ -100,6 +100,7 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
         latest_agent_version: Arc::new(tokio::sync::RwLock::new(None)),
         wg_psks: Arc::new(tokio::sync::RwLock::new(wg_psks)),
+        agent_ws_conns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
 
     let auth_layer = middleware::from_fn_with_state(state.clone(), auth::middleware::require_auth);

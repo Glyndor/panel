@@ -6,4 +6,4 @@ mod system;
 mod wireguard;
 
 pub use metrics::metrics_ws;
-pub use system::{execute_command, health};
+pub use system::{execute_command, health, run_verified_command};

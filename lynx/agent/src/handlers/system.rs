@@ -36,25 +36,13 @@ pub async fn health() -> StatusCode {
     StatusCode::OK
 }
 
-pub async fn execute_command(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(signed): Json<SignedCommand>,
-) -> Result<Response> {
-    if state.is_locked_down() {
-        return Err(AgentError::Lockdown);
-    }
-
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-
-    if !verify_bearer(token, &state.config.internal_token) {
-        return Err(AgentError::Unauthorized);
-    }
-
+/// Verify a signed command, execute it, and write the audit entry.
+/// Returns the result `Value` on success.
+/// Called by both the HTTP handler (after bearer auth) and the WS client.
+pub async fn run_verified_command(
+    state: &AppState,
+    signed: SignedCommand,
+) -> std::result::Result<Value, AgentError> {
     if !state.check_cmd_rate() {
         let count = state.record_rate_rejection();
         audit::append(
@@ -104,11 +92,7 @@ pub async fn execute_command(
         }
     };
 
-    dispatch(&state, verified).await
-}
-
-async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
-    let cmd_type = cmd
+    let cmd_type = verified
         .command
         .get("type")
         .and_then(|v| v.as_str())
@@ -117,41 +101,12 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
 
     info!(
         cmd_type = %cmd_type,
-        user_id = %cmd.user_id,
-        permission = ?cmd.permission,
+        user_id = %verified.user_id,
+        permission = ?verified.permission,
         "executing command"
     );
 
-    let result: std::result::Result<Value, AgentError> = match cmd_type.as_str() {
-        "nftables.apply" => handle_nftables_apply(state, &cmd),
-        "nftables.restore" => handle_nftables_restore(state, &cmd),
-        "nftables.accept" => handle_nftables_accept(state, &cmd),
-        "container.list" => handle_container_list(&cmd),
-        "tenant.ensure" => handle_tenant_ensure(&cmd),
-        "container.deploy" => handle_container_deploy(&cmd),
-        "container.start" => handle_container_start(&cmd),
-        "container.stop" => handle_container_stop(&cmd),
-        "container.remove" => handle_container_remove(&cmd),
-        "container.restart" => handle_container_restart(&cmd),
-        "container.update" => handle_container_update(&cmd),
-        "update.self" => handle_update_self(&cmd).await,
-        "wg.rotate_psk" => handle_wg_rotate_psk(&cmd),
-        "wg.data_plane.setup" => handle_wg_data_plane_setup(&cmd),
-        "wg.data_plane.teardown" => handle_wg_data_plane_teardown(&cmd),
-        "dashboard.migrate" => handle_dashboard_migrate(state, &cmd).await,
-        "cert.update" => handle_cert_update(state, &cmd).await,
-        "vps.reboot" => handle_vps_reboot(&cmd),
-        "nginx.deploy" => handle_nginx_deploy(state, &cmd).await,
-        "nginx.update_config" => handle_nginx_update_config(state, &cmd).await,
-        "nginx.install_cert" => Ok(handle_nginx_install_cert(state, &cmd)?),
-        "certbot.obtain" => handle_certbot_obtain(state, &cmd).await,
-        "nftables.close_setup_port" => Ok(handle_close_setup_port(state, &cmd)?),
-        "db.rotate_password" => handle_db_rotate_password(state, &cmd).await,
-        other => {
-            warn!("unknown command type: {other}");
-            Err(AgentError::BadRequest("unknown command type"))
-        }
-    };
+    let result = command_dispatch(state, &verified).await;
 
     let audit_result = match &result {
         Ok(_) => AuditResult::Success,
@@ -165,8 +120,8 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         &state.db,
         AuditEntry {
             agent_id: state.config.agent_id,
-            organization_id: cmd.organization_id,
-            user_id: Some(cmd.user_id),
+            organization_id: verified.organization_id,
+            user_id: Some(verified.user_id),
             command_type: &cmd_type,
             result: audit_result,
             error: match &result {
@@ -178,7 +133,73 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
     .await
     .map_err(anyhow::Error::from)?;
 
-    result.map(|v| Json(v).into_response())
+    result
+}
+
+/// HTTP handler — adds bearer token auth and lockdown check on top of `run_verified_command`.
+pub async fn execute_command(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(signed): Json<SignedCommand>,
+) -> Result<Response> {
+    if state.is_locked_down() {
+        return Err(AgentError::Lockdown);
+    }
+
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    if !verify_bearer(token, &state.config.internal_token) {
+        return Err(AgentError::Unauthorized);
+    }
+
+    run_verified_command(&state, signed)
+        .await
+        .map(|v| Json(v).into_response())
+}
+
+async fn command_dispatch(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    match cmd
+        .command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+    {
+        "nftables.apply" => handle_nftables_apply(state, cmd),
+        "nftables.restore" => handle_nftables_restore(state, cmd),
+        "nftables.accept" => handle_nftables_accept(state, cmd),
+        "container.list" => handle_container_list(cmd),
+        "tenant.ensure" => handle_tenant_ensure(cmd),
+        "container.deploy" => handle_container_deploy(cmd),
+        "container.start" => handle_container_start(cmd),
+        "container.stop" => handle_container_stop(cmd),
+        "container.remove" => handle_container_remove(cmd),
+        "container.restart" => handle_container_restart(cmd),
+        "container.update" => handle_container_update(cmd),
+        "update.self" => handle_update_self(cmd).await,
+        "wg.rotate_psk" => handle_wg_rotate_psk(cmd),
+        "wg.data_plane.setup" => handle_wg_data_plane_setup(cmd),
+        "wg.data_plane.teardown" => handle_wg_data_plane_teardown(cmd),
+        "dashboard.migrate" => handle_dashboard_migrate(state, cmd).await,
+        "cert.update" => handle_cert_update(state, cmd).await,
+        "vps.reboot" => handle_vps_reboot(cmd),
+        "nginx.deploy" => handle_nginx_deploy(state, cmd).await,
+        "nginx.update_config" => handle_nginx_update_config(state, cmd).await,
+        "nginx.install_cert" => Ok(handle_nginx_install_cert(state, cmd)?),
+        "certbot.obtain" => handle_certbot_obtain(state, cmd).await,
+        "nftables.close_setup_port" => Ok(handle_close_setup_port(state, cmd)?),
+        "db.rotate_password" => handle_db_rotate_password(state, cmd).await,
+        other => {
+            warn!("unknown command type: {other}");
+            Err(AgentError::BadRequest("unknown command type"))
+        }
+    }
 }
 
 async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
@@ -300,7 +321,6 @@ async fn handle_db_rotate_password(
         .await
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("ALTER USER: {e}")))?;
 
-    // Update Podman secret so new password survives restarts.
     let status = std::process::Command::new("podman")
         .args(["secret", "create", "--replace", "lynx-agent-pg-pass", "-"])
         .stdin(std::process::Stdio::piped())
@@ -324,7 +344,6 @@ fn handle_vps_reboot(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentE
     if cmd.permission < PermissionLevel::Write {
         return Err(AgentError::Forbidden("vps.reboot requires write permission"));
     }
-    // Fire-and-forget — we exit before being able to respond.
     tokio::spawn(async {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         let _ = std::process::Command::new("systemctl").arg("reboot").status();

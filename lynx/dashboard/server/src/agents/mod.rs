@@ -3,6 +3,7 @@ pub mod handlers;
 pub mod heartbeat;
 pub mod router;
 pub mod wg;
+pub mod ws_hub;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

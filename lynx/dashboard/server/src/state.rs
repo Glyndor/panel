@@ -2,9 +2,17 @@ use crate::config::Config;
 use redis::aio::ConnectionManager;
 use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 use uuid::Uuid;
 use zeroize::Zeroizing;
+
+/// Live WebSocket connection from a connected agent.
+pub struct AgentWsConn {
+    /// Send outbound messages (text frames) to the agent.
+    pub sender: tokio::sync::mpsc::UnboundedSender<axum::extract::ws::Message>,
+    /// Pending command responses keyed by request UUID.
+    pub pending: Arc<tokio::sync::Mutex<HashMap<Uuid, oneshot::Sender<serde_json::Value>>>>,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -16,4 +24,6 @@ pub struct AppState {
     /// Per-agent WireGuard PSKs in memory (agent_id → base64 PSK).
     /// Loaded at startup from Podman secret files; updated when agents register/rotate.
     pub wg_psks: Arc<RwLock<HashMap<Uuid, Zeroizing<String>>>>,
+    /// Active WebSocket connections from agents (agent_id → connection).
+    pub agent_ws_conns: Arc<RwLock<HashMap<Uuid, Arc<AgentWsConn>>>>,
 }

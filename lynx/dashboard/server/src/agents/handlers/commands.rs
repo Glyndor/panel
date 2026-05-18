@@ -1,4 +1,4 @@
-use crate::{crypto::cmd::sign_command, error::AppError, state::AppState};
+use crate::{agents::ws_hub, crypto::cmd::sign_command, error::AppError, state::AppState};
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
@@ -93,6 +93,19 @@ pub async fn send_command(
 
     let signed = sign_command(&state.config, id, cmd_user_id, &permission, &payload)?;
 
+    // Try WS first if agent has active connection.
+    let signed_val = serde_json::to_value(&signed).unwrap_or(serde_json::json!({}));
+    if let Some(body) = ws_hub::push_command(&state, id, signed_val).await {
+        let ok = body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        let code = if ok {
+            axum::http::StatusCode::OK
+        } else {
+            axum::http::StatusCode::BAD_GATEWAY
+        };
+        return Ok((code, Json(body)));
+    }
+
+    // Fallback: HTTP POST to agent's /cmd endpoint.
     let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
     let token = &*state.config.internal_token;

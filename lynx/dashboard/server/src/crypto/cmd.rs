@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 /// Signed command payload sent to the agent's /cmd endpoint.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct SignedCommand {
     /// base64url(JSON payload)
     pub payload: String,
