@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM used_nonces WHERE created_at < NOW() - INTERVAL '5 minutes'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "94c1a847466d0f3d6e710940729b642f7edd695e6ec47660ec606eb743cd7b91"
+}
