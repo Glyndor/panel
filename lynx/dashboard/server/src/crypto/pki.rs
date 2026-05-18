@@ -95,7 +95,10 @@ pub fn verify_cert(
 /// Generate a new CA Ed25519 keypair (for startup when not configured).
 pub fn gen_ca_keypair() -> (Zeroizing<[u8; 32]>, [u8; 32]) {
     let mut seed = [0u8; 32];
-    { use rand::Rng; rand::rng().fill_bytes(&mut seed); }
+    {
+        use rand::Rng;
+        rand::rng().fill_bytes(&mut seed);
+    }
     let signing_key = SigningKey::from_bytes(&seed);
     let pub_bytes = signing_key.verifying_key().to_bytes();
     (Zeroizing::new(seed), pub_bytes)
