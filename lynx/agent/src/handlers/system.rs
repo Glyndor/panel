@@ -22,6 +22,7 @@ use super::{
         handle_container_restart, handle_container_start, handle_container_stop,
         handle_container_update, handle_tenant_ensure,
     },
+    nginx_cmd::{handle_certbot_obtain, handle_close_setup_port, handle_nginx_deploy, handle_nginx_update_config},
     nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
     wireguard::{
         handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk,
@@ -136,6 +137,12 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "wg.data_plane.teardown" => handle_wg_data_plane_teardown(&cmd),
         "dashboard.migrate" => handle_dashboard_migrate(state, &cmd).await,
         "cert.update" => handle_cert_update(state, &cmd).await,
+        "vps.reboot" => handle_vps_reboot(&cmd),
+        "nginx.deploy" => handle_nginx_deploy(state, &cmd).await,
+        "nginx.update_config" => handle_nginx_update_config(state, &cmd).await,
+        "certbot.obtain" => handle_certbot_obtain(state, &cmd).await,
+        "nftables.close_setup_port" => Ok(handle_close_setup_port(state, &cmd)?),
+        "db.rotate_password" => handle_db_rotate_password(state, &cmd).await,
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))
@@ -267,6 +274,58 @@ pub async fn handle_cert_update(
     tracing::info!(agent_id = %state.config.agent_id, "agent cert renewed and persisted to /etc/lynx/cert.json");
 
     Ok(json!({ "ok": true }))
+}
+
+async fn handle_db_rotate_password(
+    state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission < PermissionLevel::Write {
+        return Err(AgentError::Forbidden("db.rotate_password requires write permission"));
+    }
+
+    use rand::Rng;
+    let new_pass: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+
+    sqlx::query(&format!("ALTER USER lynx_agent_app PASSWORD '{new_pass}'"))
+        .execute(&state.db)
+        .await
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("ALTER USER: {e}")))?;
+
+    // Update Podman secret so new password survives restarts.
+    let status = std::process::Command::new("podman")
+        .args(["secret", "create", "--replace", "lynx-agent-pg-pass", "-"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child.stdin.as_mut().unwrap().write_all(new_pass.as_bytes())?;
+            child.wait()
+        })
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("podman secret create: {e}")))?;
+
+    if !status.success() {
+        tracing::warn!("failed to update Podman secret lynx-agent-pg-pass — password rotated in DB but secret not updated");
+    }
+
+    tracing::info!("agent PostgreSQL password rotated");
+    Ok(json!({ "ok": true }))
+}
+
+fn handle_vps_reboot(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+    if cmd.permission < PermissionLevel::Write {
+        return Err(AgentError::Forbidden("vps.reboot requires write permission"));
+    }
+    // Fire-and-forget — we exit before being able to respond.
+    tokio::spawn(async {
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        let _ = std::process::Command::new("systemctl").arg("reboot").status();
+    });
+    Ok(json!({ "ok": true, "message": "reboot initiated" }))
 }
 
 fn sanitize_error(e: &AgentError) -> String {

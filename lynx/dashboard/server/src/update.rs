@@ -114,7 +114,7 @@ async fn build_ssrf_safe_client(url: &str) -> Result<reqwest::Client> {
 
     // Build client with pinned resolver to avoid second DNS lookup (TOCTOU).
     let pinned_ip = addrs[0];
-    let mut client_builder = reqwest::Client::builder()
+    let client_builder = reqwest::Client::builder()
         .user_agent(format!("lynx-dashboard/{}", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(300))
         .resolve(host, std::net::SocketAddr::new(pinned_ip, port));
