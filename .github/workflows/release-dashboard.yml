@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "dashboard@*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. dashboard@1.1.0)"
+        required: true
 
 permissions:
   contents: write
@@ -59,21 +64,21 @@ jobs:
   build:
     name: Build ${{ matrix.arch }}
     needs: prepare
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runs-on: ubuntu-latest
-            arch: x86_64
+          - arch: x86_64
             rust-target: x86_64-unknown-linux-musl
-            bun-arch: x64
+            bun-target: bun-linux-x64-musl
+            use-cross: false
 
-          - runs-on: ubuntu-24.04-arm
-            arch: arm64
+          - arch: arm64
             rust-target: aarch64-unknown-linux-musl
-            bun-arch: aarch64
+            bun-target: bun-linux-arm64-musl
+            use-cross: true
 
     defaults:
       run:
@@ -93,14 +98,25 @@ jobs:
         with:
           workspaces: lynx
 
-      - name: Install musl toolchain
+      - name: Install musl toolchain (x86_64)
+        if: ${{ !matrix.use-cross }}
         run: sudo apt-get install -y musl-tools
+
+      - name: Install cross (arm64)
+        if: ${{ matrix.use-cross }}
+        run: cargo install cross --locked
 
       - name: Build backend (musl static)
         run: |
-          cargo build --release \
-            --package lynx-dashboard-server \
-            --target ${{ matrix.rust-target }}
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            cross build --release \
+              --package lynx-dashboard-server \
+              --target ${{ matrix.rust-target }}
+          else
+            cargo build --release \
+              --package lynx-dashboard-server \
+              --target ${{ matrix.rust-target }}
+          fi
         env:
           SQLX_OFFLINE: "true"
 
@@ -117,18 +133,17 @@ jobs:
 
       # --- Frontend -----------------------------------------------------------
 
-      - name: Install musl bun
+      - name: Install bun (x64 for execution)
         working-directory: ${{ github.workspace }}
         run: |
-          BUN_ARCH="${{ matrix.bun-arch }}"
           VERSION=$(curl -s "https://api.github.com/repos/oven-sh/bun/releases/latest" \
             | grep '"tag_name"' | head -1 | cut -d'"' -f4)
           BASE_URL="https://github.com/oven-sh/bun/releases/download/${VERSION}"
-          curl -sL "${BASE_URL}/bun-linux-${BUN_ARCH}-musl.zip" -o bun.zip
+          curl -sL "${BASE_URL}/bun-linux-x64-musl.zip" -o bun.zip
           curl -sL "${BASE_URL}/SHASUMS256.txt" -o SHASUMS256.txt
-          grep "bun-linux-${BUN_ARCH}-musl.zip" SHASUMS256.txt | sha256sum -c -
+          grep "bun-linux-x64-musl.zip" SHASUMS256.txt | sha256sum -c -
           unzip -q bun.zip
-          sudo mv "bun-linux-${BUN_ARCH}-musl/bun" /usr/local/bin/bun
+          sudo mv "bun-linux-x64-musl/bun" /usr/local/bin/bun
           bun --version
 
       - name: Install frontend deps
@@ -141,10 +156,11 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
-      - name: Compile standalone binary (musl)
+      - name: Compile standalone binary
         working-directory: lynx/dashboard/ui
         run: |
           bun build --compile \
+            --target ${{ matrix.bun-target }} \
             .next/standalone/server.js \
             --outfile "lynx-dashboard-frontend-linux-${{ matrix.arch }}"
 
@@ -175,7 +191,6 @@ jobs:
         with:
           name: dashboard-${{ matrix.arch }}
           path: |
-            lynx/target/${{ matrix.rust-target }}/release/lynx-dashboard-server
             lynx-dashboard-backend-linux-${{ matrix.arch }}
             lynx-dashboard-backend-linux-${{ matrix.arch }}.sig
             lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}
@@ -197,6 +212,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           generate_release_notes: true
           files: |
             lynx-dashboard-backend-linux-x86_64
