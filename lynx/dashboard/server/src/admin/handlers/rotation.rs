@@ -274,11 +274,11 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
 /// Existing pool connections remain valid until they close; new connections will
 /// use the updated secret on the next backend start.
 pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
-    use rand::RngCore;
+    use rand::Rng;
     use zeroize::Zeroizing;
 
     let mut buf = [0u8; 24];
-    rand::rngs::OsRng.fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     let new_pass = Zeroizing::new(buf.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
     // Dollar-quoting ($$...$$) avoids any quote-based injection.
@@ -330,11 +330,11 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
 /// connections remain valid until they are recycled; the Podman secret is updated
 /// so the new password is used after the next backend restart.
 pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
-    use rand::RngCore;
+    use rand::Rng;
     use zeroize::Zeroizing;
 
     let mut buf = [0u8; 24];
-    rand::rngs::OsRng.fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     let new_pass = Zeroizing::new(buf.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
     let mut redis = state.redis.clone();

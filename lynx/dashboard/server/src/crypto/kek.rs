@@ -3,12 +3,12 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use anyhow::Result;
-use rand::rngs::OsRng;
+use rand::Rng;
 use zeroize::Zeroizing;
 
 pub fn gen_dek() -> Zeroizing<[u8; 32]> {
     let mut dek = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut OsRng, &mut dek);
+    rand::rng().fill_bytes(&mut dek);
     Zeroizing::new(dek)
 }
 
@@ -35,7 +35,7 @@ pub fn decrypt_with_dek(ciphertext: &[u8], dek: &[u8; 32]) -> Result<Vec<u8>> {
 fn encrypt_aes_gcm(plaintext: &[u8], key_bytes: &[u8; 32]) -> Result<Vec<u8>> {
     let key = Key::<Aes256Gcm>::from_slice(key_bytes);
     let cipher = Aes256Gcm::new(key);
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = Aes256Gcm::generate_nonce(&mut aes_gcm::aead::OsRng);
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
         .map_err(|e| anyhow::anyhow!("AES-GCM encrypt: {e}"))?;

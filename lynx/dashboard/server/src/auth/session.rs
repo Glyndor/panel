@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rand::rngs::OsRng;
+use rand::Rng;
 use redis::{aio::ConnectionManager, AsyncCommands};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -25,7 +25,7 @@ pub struct SessionRecord {
 
 pub fn gen_refresh_token() -> Vec<u8> {
     let mut buf = vec![0u8; 32];
-    rand::RngCore::fill_bytes(&mut OsRng, &mut buf);
+    rand::rng().fill_bytes(&mut buf);
     buf
 }
 

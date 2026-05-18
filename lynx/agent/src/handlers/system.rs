@@ -313,10 +313,10 @@ async fn handle_db_rotate_password(
         ));
     }
 
-    use rand::RngCore;
+    use rand::Rng;
     use zeroize::Zeroizing;
     let mut buf = [0u8; 24];
-    rand::rngs::OsRng.fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     let new_pass = Zeroizing::new(buf.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
     // Dollar-quoting ($$...$$) avoids any quote-based injection.
