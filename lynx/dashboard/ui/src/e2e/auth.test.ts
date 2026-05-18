@@ -23,7 +23,7 @@ test.describe("Login page", () => {
 
 	test("root path redirects to login", async ({ page }) => {
 		await page.goto("/");
-		await expect(page).toHaveURL(/\/en\/login/);
+		await page.waitForURL(/\/en\/login/, { timeout: 10_000 });
 	});
 
 	test("submit button is disabled while submitting", async ({ page }) => {

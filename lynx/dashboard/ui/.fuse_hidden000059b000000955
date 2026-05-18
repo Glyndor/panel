@@ -1,0 +1,15 @@
+[install]
+exact = true
+ignoreScripts = true
+minimumReleaseAge = 86400
+
+[install.lockfile]
+save = true
+print = "bun"
+
+[run]
+bun = true
+noOrphans = true
+
+[install.trusted]
+packages = ["sharp", "unrs-resolver"]

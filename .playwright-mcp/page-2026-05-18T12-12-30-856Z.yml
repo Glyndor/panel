@@ -1,0 +1,78 @@
+- generic [ref=e1]:
+  - generic [ref=e61]:
+    - complementary [ref=e62]:
+      - generic [ref=e63]:
+        - generic [ref=e65]: Lynx
+        - button "Switch language" [ref=e66] [cursor=pointer]:
+          - img "English" [ref=e67]
+        - button "Toggle theme" [ref=e68] [cursor=pointer]:
+          - img
+        - button "Notifications" [ref=e69] [cursor=pointer]:
+          - img [ref=e70]
+      - navigation [ref=e73]:
+        - link "Overview" [ref=e74] [cursor=pointer]:
+          - /url: /en/app
+          - img [ref=e75]
+          - text: Overview
+        - link "Agents" [active] [ref=e80] [cursor=pointer]:
+          - /url: /en/app/agents
+          - img [ref=e81]
+          - text: Agents
+        - link "Organizations" [ref=e83] [cursor=pointer]:
+          - /url: /en/app/organizations
+          - img [ref=e84]
+          - text: Organizations
+        - link "Settings" [ref=e88] [cursor=pointer]:
+          - /url: /en/app/settings
+          - img [ref=e89]
+          - text: Settings
+      - button "Sign out" [ref=e93] [cursor=pointer]:
+        - img
+        - text: Sign out
+      - paragraph [ref=e95]:
+        - text: Made with love by
+        - link "Jaroc" [ref=e96] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c
+        - text: ·
+        - link "lynx" [ref=e97] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c/Lynx
+    - main [ref=e98]:
+      - generic [ref=e133]:
+        - generic [ref=e134]:
+          - heading "Agents" [level=1] [ref=e135]
+          - button "Register Agent" [ref=e136] [cursor=pointer]:
+            - img
+            - text: Register Agent
+        - generic [ref=e137]:
+          - generic [ref=e138]:
+            - generic [ref=e140]:
+              - generic [ref=e141]: local-agent
+              - generic [ref=e142]: Offline
+            - generic [ref=e143]:
+              - paragraph [ref=e144]: "WireGuard IP: 10.100.0.2"
+              - paragraph [ref=e145]: "Version: —"
+              - paragraph [ref=e146]: "Last heartbeat: 24s ago"
+              - paragraph [ref=e147]: 01970001-0000-7000-8000-000000000001
+              - generic [ref=e148]:
+                - link "Agent Detail →" [ref=e149] [cursor=pointer]:
+                  - /url: /en/app/agents/01970001-0000-7000-8000-000000000001
+                - link "Audit log" [ref=e150] [cursor=pointer]:
+                  - /url: /en/app/agents/01970001-0000-7000-8000-000000000001/audit-log
+          - generic [ref=e151]:
+            - generic [ref=e153]:
+              - generic [ref=e154]: local-agent
+              - generic [ref=e155]: Offline
+            - generic [ref=e156]:
+              - paragraph [ref=e157]: "WireGuard IP: 10.100.0.3"
+              - paragraph [ref=e158]: "Version: —"
+              - paragraph [ref=e159]: "Last heartbeat: 29s ago"
+              - paragraph [ref=e160]: 01970001-0000-7000-8000-000000000002
+              - generic [ref=e161]:
+                - link "Agent Detail →" [ref=e162] [cursor=pointer]:
+                  - /url: /en/app/agents/01970001-0000-7000-8000-000000000002
+                - link "Audit log" [ref=e163] [cursor=pointer]:
+                  - /url: /en/app/agents/01970001-0000-7000-8000-000000000002/audit-log
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e28] [cursor=pointer]:
+    - img [ref=e29]
+  - alert [ref=e32]

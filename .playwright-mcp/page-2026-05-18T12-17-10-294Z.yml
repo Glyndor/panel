@@ -1,0 +1,53 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e6]: Lynx
+        - button "Switch language" [ref=e7] [cursor=pointer]:
+          - img "English" [ref=e8]
+        - button "Toggle theme" [ref=e9] [cursor=pointer]:
+          - img
+        - button "Notifications" [ref=e10] [cursor=pointer]:
+          - img [ref=e11]
+      - navigation [ref=e14]:
+        - link "Overview" [ref=e15] [cursor=pointer]:
+          - /url: /en/app
+          - img [ref=e16]
+          - text: Overview
+        - link "Agents" [ref=e21] [cursor=pointer]:
+          - /url: /en/app/agents
+          - img [ref=e22]
+          - text: Agents
+        - link "Organizations" [ref=e24] [cursor=pointer]:
+          - /url: /en/app/organizations
+          - img [ref=e25]
+          - text: Organizations
+        - link "Settings" [ref=e29] [cursor=pointer]:
+          - /url: /en/app/settings
+          - img [ref=e30]
+          - text: Settings
+      - button "Sign out" [ref=e34] [cursor=pointer]:
+        - img
+        - text: Sign out
+      - paragraph [ref=e36]:
+        - text: Made with love by
+        - link "Jaroc" [ref=e37] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c
+        - text: ·
+        - link "lynx" [ref=e38] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c/Lynx
+    - main [ref=e39]:
+      - generic [ref=e40]:
+        - generic [ref=e41]:
+          - heading "Organizations" [level=1] [ref=e42]
+          - button "New Organization" [ref=e43] [cursor=pointer]:
+            - img
+            - text: New Organization
+        - generic [ref=e45]:
+          - img [ref=e46]
+          - paragraph [ref=e50]: No organizations yet
+          - paragraph [ref=e51]: Create an organization to start managing projects and containers.
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e57] [cursor=pointer]:
+    - img [ref=e58]
+  - alert [ref=e61]
