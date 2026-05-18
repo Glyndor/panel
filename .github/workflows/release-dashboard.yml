@@ -59,7 +59,7 @@ jobs:
       - name: Verify sqlx cache is up-to-date
         env:
           DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
-        run: cargo sqlx prepare --check --package lynx-dashboard-server
+        run: cargo sqlx prepare --check -- --package lynx-dashboard-server
 
   ci-server:
     name: CI server (Rust)
