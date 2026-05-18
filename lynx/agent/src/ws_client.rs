@@ -85,7 +85,7 @@ async fn run_session(
             _ = hb_ticker.tick() => {
                 let hb = heartbeat_payload(state);
                 let text = serde_json::to_string(&hb).unwrap_or_default();
-                if sink.send(Message::Text(text)).await.is_err() {
+                if sink.send(Message::Text(text.into())).await.is_err() {
                     break;
                 }
             }
@@ -96,7 +96,7 @@ async fn run_session(
                         "data": m,
                     });
                     let text = serde_json::to_string(&frame).unwrap_or_default();
-                    if sink.send(Message::Text(text)).await.is_err() {
+                    if sink.send(Message::Text(text.into())).await.is_err() {
                         break;
                     }
                 }
@@ -108,7 +108,7 @@ async fn run_session(
                     "data": m,
                 });
                 let text = serde_json::to_string(&frame).unwrap_or_default();
-                if sink.send(Message::Text(text)).await.is_err() {
+                if sink.send(Message::Text(text.into())).await.is_err() {
                     break;
                 }
             }
@@ -120,7 +120,7 @@ async fn run_session(
                         let reply = handle_message(state, text.as_str()).await;
                         if let Some(frame) = reply {
                             let text = serde_json::to_string(&frame).unwrap_or_default();
-                            if sink.send(Message::Text(text)).await.is_err() {
+                            if sink.send(Message::Text(text.into())).await.is_err() {
                                 break;
                             }
                         }

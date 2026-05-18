@@ -26,7 +26,7 @@ tower-http = { version = "0.6", features = ["trace", "cors", "set-header", "limi
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "ipnetwork", "macros"] }
 
 # cache
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.2", features = ["tokio-comp", "connection-manager"] }
 
 # auth
 argon2 = "0.5"
@@ -35,14 +35,14 @@ subtle = "2"
 zeroize = { version = "1", features = ["derive"] }
 
 # crypto primitives
-rand = "0.8"
-sha2 = "0.10"
+rand = "0.10"
+sha2 = "0.11"
 aes-gcm = "0.10"
 base64ct = { version = "1", features = ["alloc"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "zeroize"] }
 x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
-rcgen = { version = "0.13", features = ["x509-parser"] }
-x509-parser = "0.16"
+rcgen = { version = "0.14", features = ["x509-parser"] }
+x509-parser = "0.18"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio-rustls = "0.26"
 
@@ -51,7 +51,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # WebSocket (agent client)
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 [profile.release]

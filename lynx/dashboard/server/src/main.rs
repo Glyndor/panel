@@ -222,13 +222,13 @@ async fn run_cli_command(cmd: Command, db: &sqlx::PgPool) -> anyhow::Result<()> 
 }
 
 fn generate_random_password() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use rand::RngExt;
+    let mut rng = rand::rng();
     let charset: Vec<char> =
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
             .chars()
             .collect();
     (0..24)
-        .map(|_| charset[rng.gen_range(0..charset.len())])
+        .map(|_| charset[rng.random_range(0..charset.len())])
         .collect()
 }
