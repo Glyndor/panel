@@ -21,4 +21,5 @@ pub fn protected_router() -> Router<AppState> {
     Router::new()
         .route("/me/preferences", get(handlers::get_preferences))
         .route("/me/preferences", post(handlers::update_preferences))
+        .route("/me/single-session", post(handlers::update_single_session))
 }

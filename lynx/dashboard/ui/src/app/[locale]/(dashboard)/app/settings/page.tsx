@@ -11,6 +11,7 @@ import { DomainSection } from "@/components/(dashboard)/app/settings/DomainSecti
 import { MigrationSection } from "@/components/(dashboard)/app/settings/MigrationSection";
 import { getMigrationStatus } from "@/actions/(dashboard)/app/settings/migration";
 import { ChangePasswordForm } from "@/components/(dashboard)/app/settings/ChangePasswordForm";
+import { SingleSessionToggle } from "@/components/(dashboard)/app/settings/SingleSessionToggle";
 import { getMe } from "@/actions/(dashboard)/app/settings/profile";
 import { RotationLog } from "@/components/(dashboard)/app/settings/RotationLog";
 
@@ -116,6 +117,17 @@ export default async function SettingsPage({
 									success: t("changePasswordSuccess"),
 									wrong: t("changePasswordWrong"),
 									error: t("changePasswordError"),
+								}}
+							/>
+						</div>
+						<div className="border-t pt-4">
+							<SingleSessionToggle
+								initial={me.single_session}
+								labels={{
+									label: t("singleSession"),
+									desc: t("singleSessionDesc"),
+									success: t("singleSessionSuccess"),
+									error: t("singleSessionError"),
 								}}
 							/>
 						</div>

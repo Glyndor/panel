@@ -17,6 +17,7 @@ export async function loginAction(
 		refresh_token: string;
 		expires_in: number;
 		force_password_change: boolean;
+		theme: string;
 	}>("/auth/login", {
 		method: "POST",
 		body: JSON.stringify({ username: data.username, password: data.password }),
@@ -48,6 +49,13 @@ export async function loginAction(
 		secure,
 		sameSite: "strict",
 		maxAge: 86400,
+		path: "/",
+	});
+	jar.set("theme_preference", result.data.theme ?? "system", {
+		httpOnly: false,
+		secure,
+		sameSite: "strict",
+		maxAge: 60 * 60 * 24 * 365,
 		path: "/",
 	});
 

@@ -38,6 +38,8 @@ export async function changePassword(
 export async function getMe(): Promise<{
 	id: string;
 	username: string;
+	is_admin: boolean;
+	single_session: boolean;
 } | null> {
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";
@@ -51,5 +53,24 @@ export async function getMe(): Promise<{
 		return res.json();
 	} catch {
 		return null;
+	}
+}
+
+export async function toggleSingleSession(enabled: boolean): Promise<{ ok: boolean }> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+
+	try {
+		const res = await fetch(`${BACKEND_URL}/auth/me/single-session`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${tok}`,
+			},
+			body: JSON.stringify({ enabled }),
+		});
+		return { ok: res.ok };
+	} catch {
+		return { ok: false };
 	}
 }

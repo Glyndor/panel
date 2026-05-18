@@ -208,7 +208,7 @@ pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
-) -> Result<Json<TokenResponse>> {
+) -> Result<impl IntoResponse> {
     let ip = extract_ip(&headers);
     let ua = extract_ua(&headers);
     let mut redis = state.redis.clone();
@@ -232,11 +232,12 @@ pub async fn login(
         id: Uuid,
         password_hash: String,
         force_password_change: bool,
+        single_session: bool,
     }
 
     let user = sqlx::query_as!(
         UserRow,
-        "SELECT id, password_hash, force_password_change FROM users WHERE username = $1",
+        "SELECT id, password_hash, force_password_change, single_session FROM users WHERE username = $1",
         username
     )
     .fetch_optional(&state.db)
@@ -254,6 +255,13 @@ pub async fn login(
     let ok = password::verify(&body.password, &u.password_hash).map_err(anyhow::Error::from)?;
     if !ok {
         return Err(AppError::InvalidCredentials);
+    }
+
+    // Enforce single_session: invalidate all existing sessions before creating a new one.
+    if u.single_session {
+        session::revoke_all_user_sessions(&state.db, &mut redis, u.id, "mass_logout")
+            .await
+            .map_err(anyhow::Error::from)?;
     }
 
     let session_id = Uuid::now_v7();
@@ -294,12 +302,23 @@ pub async fn login(
         .await
         .map_err(anyhow::Error::from)?;
 
-    Ok(Json(TokenResponse {
-        access_token,
-        refresh_token: Base64UrlUnpadded::encode_string(&refresh_raw),
-        expires_in: 900,
-        force_password_change: u.force_password_change,
-    }))
+    // Fetch theme preference so the client can set the cookie immediately.
+    let theme = sqlx::query_scalar!(
+        "SELECT theme FROM user_preferences WHERE user_id = $1",
+        u.id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(anyhow::Error::from)?
+    .unwrap_or_else(|| "system".to_string());
+
+    Ok(Json(serde_json::json!({
+        "access_token": access_token,
+        "refresh_token": Base64UrlUnpadded::encode_string(&refresh_raw),
+        "expires_in": 900_u64,
+        "force_password_change": u.force_password_change,
+        "theme": theme,
+    })))
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<StatusCode> {
@@ -434,10 +453,13 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
         return Err(AppError::Unauthorized);
     }
 
-    let user = sqlx::query!("SELECT username FROM users WHERE id = $1", claims.sub)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
+    let user = sqlx::query!(
+        "SELECT username, single_session FROM users WHERE id = $1",
+        claims.sub
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::Unauthorized)?;
 
     let is_admin: bool = sqlx::query_scalar!(
         r#"SELECT EXISTS(
@@ -455,6 +477,7 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
         "id": claims.sub,
         "username": user.username,
         "is_admin": is_admin,
+        "single_session": user.single_session,
     })))
 }
 
@@ -553,6 +576,31 @@ pub async fn get_preferences(
 pub struct UpdatePreferencesRequest {
     pub theme: Option<String>,
     pub locale: Option<String>,
+}
+
+// --------------------------------------------------------------------------
+// POST /auth/me/single-session — toggle single-session mode for current user
+// --------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct SingleSessionRequest {
+    pub enabled: bool,
+}
+
+pub async fn update_single_session(
+    State(state): State<AppState>,
+    Extension(user): Extension<crate::auth::middleware::AuthUser>,
+    Json(body): Json<SingleSessionRequest>,
+) -> Result<StatusCode> {
+    sqlx::query!(
+        "UPDATE users SET single_session = $1 WHERE id = $2",
+        body.enabled,
+        user.user_id
+    )
+    .execute(&state.db)
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn update_preferences(
