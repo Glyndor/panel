@@ -17,7 +17,7 @@ mod ws_client;
 use anyhow::Context;
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -305,19 +305,13 @@ async fn main() -> anyhow::Result<()> {
     // Build TLS acceptor before moving state into router.
     let tls_acceptor = build_tls_acceptor(&state.config);
 
-    // Pass last_heartbeat to the heartbeat route via extension
-    let hb = last_heartbeat.clone();
     let app = Router::new()
         .route("/health", get(handlers::health))
         .route("/cmd", post(handlers::execute_command))
         .route("/metrics/ws", get(handlers::metrics_ws))
-        .route(
-            "/heartbeat",
-            post(move |State(state): State<AppState>, headers: HeaderMap| {
-                let hb = hb.clone();
-                async move { heartbeat_handler(state, headers, hb).await }
-            }),
-        )
+        .route("/heartbeat", post(heartbeat_handler))
+        // Inject last_heartbeat as a layer extension so the handler can access it.
+        .layer(axum::Extension(last_heartbeat.clone()))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
@@ -337,18 +331,32 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn heartbeat_handler(
-    state: AppState,
-    headers: HeaderMap,
-    hb: Arc<std::sync::Mutex<std::time::Instant>>,
+    State(state): State<AppState>,
+    hb: axum::Extension<Arc<std::sync::Mutex<std::time::Instant>>>,
+    Json(signed): Json<auth::SignedCommand>,
 ) -> Response {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
+    // Heartbeat ACK requires a valid Ed25519 signature — bearer token alone is
+    // insufficient so that `internal_token` compromise cannot suppress lockdown.
+    let verified = auth::verify_command(
+        &state.db,
+        &signed,
+        &state.config.dashboard_verify_key,
+        state.config.agent_id,
+    )
+    .await;
 
-    if !auth::verify_bearer(token, &state.config.internal_token) {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let cmd = match verified {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("heartbeat ACK rejected: invalid signature: {e}");
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+    };
+
+    let cmd_type = cmd.command.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if cmd_type != "agent.heartbeat_ack" {
+        tracing::warn!("heartbeat endpoint received unexpected command type: {cmd_type}");
+        return StatusCode::BAD_REQUEST.into_response();
     }
 
     *hb.lock().unwrap() = std::time::Instant::now();
