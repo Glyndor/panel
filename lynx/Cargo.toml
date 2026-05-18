@@ -26,7 +26,7 @@ tower-http = { version = "0.6", features = ["trace", "cors", "set-header", "limi
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "ipnetwork", "macros"] }
 
 # cache
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.2", features = ["tokio-comp", "connection-manager"] }
 
 # auth
 argon2 = "0.5"
