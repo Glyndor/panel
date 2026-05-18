@@ -8,6 +8,7 @@ use axum::{
         ws::{Message, WebSocket},
         Extension, Path, State, WebSocketUpgrade,
     },
+    http::HeaderMap,
     response::IntoResponse,
 };
 use uuid::Uuid;
@@ -19,9 +20,11 @@ pub async fn frontend_metrics_ws(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Path(agent_id): Path<Uuid>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, AppError> {
-    // Verify the agent exists and the user has access.
+    super::events_ws::validate_ws_origin(&state, &headers).await?;
+
     let exists = sqlx::query_scalar!(
         "SELECT id FROM agents WHERE id = $1",
         agent_id
@@ -34,20 +37,18 @@ pub async fn frontend_metrics_ws(
         return Err(AppError::NotFound);
     }
 
-    let _ = user; // access verified by JWT middleware; roles checked above
+    let _ = user;
 
     Ok(ws.on_upgrade(move |socket| handle_frontend_socket(state, agent_id, socket)))
 }
 
 async fn handle_frontend_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
-    // Subscribe to the agent's broadcast channel.
     let rx = {
         let map = state.agent_metric_tx.read().await;
         map.get(&agent_id).map(|tx| tx.subscribe())
     };
 
     let Some(mut rx) = rx else {
-        // Agent not connected — send an empty "agent_offline" frame and close.
         let frame = serde_json::json!({ "type": "agent_offline", "agent_id": agent_id }).to_string();
         let _ = socket.send(Message::Text(frame.into())).await;
         return;
@@ -63,7 +64,6 @@ async fn handle_frontend_socket(state: AppState, agent_id: Uuid, mut socket: Web
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Agent disconnected — notify frontend.
                         let frame = serde_json::json!({ "type": "agent_offline", "agent_id": agent_id }).to_string();
                         let _ = socket.send(Message::Text(frame.into())).await;
                         break;
@@ -74,7 +74,6 @@ async fn handle_frontend_socket(state: AppState, agent_id: Uuid, mut socket: Web
                 }
             }
             msg = socket.recv() => {
-                // Frontend is receive-only; any close frame or error ends the session.
                 match msg {
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
