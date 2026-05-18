@@ -40,9 +40,52 @@ pub async fn receive_audit_sync(
         return Ok(axum::http::StatusCode::NO_CONTENT);
     }
 
+    // Validate hash chain before persisting — same integrity check as WS path.
+    let mut expected_prev: String = sqlx::query_scalar!(
+        "SELECT entry_hash FROM audit_log WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .unwrap_or_default();
+
+    let mut ordered = entries.clone();
+    ordered.sort_by_key(|e| e.created_at);
+
+    for entry in &ordered {
+        if entry.agent_id != id {
+            continue;
+        }
+        if entry.previous_hash != expected_prev {
+            tracing::error!(
+                agent_id = %id,
+                entry_id = %entry.id,
+                "audit_log hash chain mismatch on HTTP sync — rejecting batch"
+            );
+            let event_id = Uuid::now_v7();
+            let _ = sqlx::query!(
+                "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'audit_integrity_failure', $3)",
+                event_id,
+                id,
+                Some(format!("hash chain broken at entry {}", entry.id))
+            )
+            .execute(&state.db)
+            .await;
+            crate::alerts::fire(
+                &state,
+                "audit_integrity_failure",
+                Some(format!("agent={id} entry={} hash chain mismatch (HTTP sync)", entry.id)),
+                None::<Uuid>,
+            )
+            .await;
+            return Err(AppError::Validation("audit hash chain mismatch".into()));
+        }
+        expected_prev = entry.entry_hash.clone();
+    }
+
     let mut tx = state.db.begin().await?;
 
-    for entry in &entries {
+    for entry in &ordered {
         if entry.agent_id != id {
             continue;
         }
