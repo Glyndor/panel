@@ -22,7 +22,7 @@ pub async fn login(
     if let Err(e) = rate_limit::check_login(&mut redis, &ip).await {
         if matches!(e, AppError::RateLimited { .. }) {
             crate::alerts::fire(
-                &state.db,
+                &state,
                 "rate_limit_hit",
                 Some(format!("login rate limit exceeded from ip={ip}")),
                 None::<Uuid>,
@@ -116,11 +116,21 @@ pub async fn login(
     .map_err(anyhow::Error::from)?
     .unwrap_or_else(|| "system".to_string());
 
+    let redirect = body.redirect_to.as_deref().and_then(|r| {
+        // Only allow relative paths (/...) — external URLs silently discarded.
+        if r.starts_with('/') && !r.starts_with("//") {
+            Some(r.to_string())
+        } else {
+            None
+        }
+    });
+
     Ok(Json(serde_json::json!({
         "access_token": access_token,
         "refresh_token": Base64UrlUnpadded::encode_string(&refresh_raw),
         "expires_in": 900_u64,
         "force_password_change": u.force_password_change,
         "theme": theme,
+        "redirect_to": redirect,
     })))
 }

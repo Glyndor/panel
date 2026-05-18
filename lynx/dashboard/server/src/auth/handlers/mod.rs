@@ -25,12 +25,25 @@ pub(super) fn build_jwt_keys(state: &AppState) -> jwt::JwtKeys {
 }
 
 pub(super) fn extract_ip(headers: &HeaderMap) -> String {
-    headers
+    let raw = headers
         .get("x-real-ip")
         .or_else(|| headers.get("x-forwarded-for"))
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // x-forwarded-for may contain a comma-separated list; prefer IPv4 over IPv6.
+    let mut ipv4: Option<&str> = None;
+    let mut first: Option<&str> = None;
+    for candidate in raw.split(',') {
+        let s = candidate.trim();
+        if first.is_none() {
+            first = Some(s);
+        }
+        if s.contains('.') && !s.contains(':') && ipv4.is_none() {
+            ipv4 = Some(s);
+        }
+    }
+    ipv4.or(first).unwrap_or_default().to_string()
 }
 
 pub(super) fn extract_ua(headers: &HeaderMap) -> String {

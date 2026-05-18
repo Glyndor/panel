@@ -252,7 +252,7 @@ async fn store_audit_entries(
                 "audit_log hash chain mismatch — rejecting batch"
             );
             crate::alerts::fire(
-                &state.db,
+                &state,
                 "audit_integrity_failure",
                 Some(format!(
                     "agent={agent_id} entry={} hash chain mismatch — entries rejected",

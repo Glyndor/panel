@@ -114,7 +114,7 @@ async fn poll_agents(state: &AppState) {
             .execute(&state.db)
             .await;
             broadcast_event(state, id, "heartbeat_lost", None);
-            alerts::fire(&state.db, "heartbeat_lost", None, id).await;
+            alerts::fire(&state, "heartbeat_lost", None, id).await;
             tracing::warn!(agent_id = %id, "heartbeat lost — agent went offline");
         }
 

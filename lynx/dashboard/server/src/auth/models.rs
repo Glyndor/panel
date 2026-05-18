@@ -13,6 +13,8 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// Optional post-login destination; validated server-side (relative paths only).
+    pub redirect_to: Option<String>,
 }
 
 #[derive(Deserialize)]

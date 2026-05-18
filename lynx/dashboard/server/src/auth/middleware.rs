@@ -50,7 +50,7 @@ pub async fn require_auth(
         let _ = crate::auth::session::log_event(&state.db, claims.session_id, "intercepted").await;
         let _ = crate::auth::session::delete_by_session_id(&state.db, claims.session_id).await;
         crate::alerts::fire(
-            &state.db,
+            &state,
             "intercepted",
             Some(format!("session={} ip_mismatch={}", claims.session_id, claims.ip_hash != expected_ip)),
             None,

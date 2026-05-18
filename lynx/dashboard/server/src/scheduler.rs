@@ -280,6 +280,16 @@ async fn check_rotation(state: &AppState) {
         tracing::warn!("scheduler: cert rotation failed: {e}");
     }
 
+    // PostgreSQL app-user password rotation.
+    if let Err(e) = rotation::rotate_pg_app_password(state).await {
+        tracing::warn!("scheduler: PostgreSQL password rotation failed: {e}");
+    }
+
+    // Redis password rotation.
+    if let Err(e) = rotation::rotate_redis_password(state).await {
+        tracing::warn!("scheduler: Redis password rotation failed: {e}");
+    }
+
     let log_id = Uuid::now_v7();
     let _ = sqlx::query!(
         "INSERT INTO rotation_log (id, triggered_by, reason, scope) VALUES ($1, NULL, 'scheduled', 'all')",

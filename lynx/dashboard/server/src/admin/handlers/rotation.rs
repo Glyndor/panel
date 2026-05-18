@@ -44,6 +44,15 @@ pub async fn rotate_keys(
         rotate_agent_certs(&state).await?;
     }
 
+    if req.scope == "all" {
+        if let Err(e) = rotate_pg_app_password(&state).await {
+            tracing::warn!("manual rotation: PostgreSQL password rotation failed: {e}");
+        }
+        if let Err(e) = rotate_redis_password(&state).await {
+            tracing::warn!("manual rotation: Redis password rotation failed: {e}");
+        }
+    }
+
     let log_id = Uuid::now_v7();
     sqlx::query!(
         r#"
@@ -252,6 +261,114 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
     }
 
     tracing::info!(count = agents.len(), "agent certs rotated");
+    Ok(())
+}
+
+/// Rotate `lynx_dashboard_app` PostgreSQL password.
+///
+/// Uses the current pool connection (still authenticated) to issue ALTER USER,
+/// then replaces the Podman secret so the new password survives a backend restart.
+/// Existing pool connections remain valid until they close; new connections will
+/// use the updated secret on the next backend start.
+pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
+    use rand::RngCore;
+
+    let mut buf = [0u8; 24];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    let new_pass: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+
+    sqlx::query(&format!(
+        "ALTER USER lynx_dashboard_app PASSWORD '{}'",
+        new_pass.replace('\'', "''")
+    ))
+    .execute(&state.db)
+    .await
+    .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+
+    let status = std::process::Command::new("podman")
+        .args([
+            "secret",
+            "create",
+            "--replace",
+            "lynx-dashboard-pg-pass",
+            "-",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(new_pass.as_bytes());
+            }
+            child.wait()
+        });
+
+    match status {
+        Ok(s) if s.success() => {
+            tracing::info!("PostgreSQL app password rotated and Podman secret updated");
+        }
+        Ok(s) => {
+            tracing::warn!(code = ?s.code(), "podman secret create --replace failed for pg-pass");
+        }
+        Err(e) => {
+            tracing::warn!("podman secret replace pg-pass spawn error: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Rotate Redis password via `CONFIG SET requirepass`.
+///
+/// Takes effect immediately for new connections.  Existing ConnectionManager
+/// connections remain valid until they are recycled; the Podman secret is updated
+/// so the new password is used after the next backend restart.
+pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
+    use rand::RngCore;
+
+    let mut buf = [0u8; 24];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    let new_pass: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+
+    let mut redis = state.redis.clone();
+    redis::cmd("CONFIG")
+        .arg("SET")
+        .arg("requirepass")
+        .arg(&new_pass)
+        .query_async::<()>(&mut redis)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+
+    let status = std::process::Command::new("podman")
+        .args([
+            "secret",
+            "create",
+            "--replace",
+            "lynx-dashboard-redis-pass",
+            "-",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(new_pass.as_bytes());
+            }
+            child.wait()
+        });
+
+    match status {
+        Ok(s) if s.success() => {
+            tracing::info!("Redis password rotated and Podman secret updated");
+        }
+        Ok(s) => {
+            tracing::warn!(code = ?s.code(), "podman secret create --replace failed for redis-pass");
+        }
+        Err(e) => {
+            tracing::warn!("podman secret replace redis-pass spawn error: {e}");
+        }
+    }
+
     Ok(())
 }
 
