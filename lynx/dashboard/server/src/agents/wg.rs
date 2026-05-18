@@ -54,25 +54,42 @@ pub fn remove_peer(pubkey: &str) -> Result<()> {
     Ok(())
 }
 
-/// Allocate the next available WireGuard IP in the 10.100.0.0/24 subnet.
-/// Dashboard = .1, agents start at .2.
-pub async fn next_available_ip(db: &sqlx::PgPool) -> Result<std::net::Ipv4Addr> {
-    let used: Vec<String> = sqlx::query_scalar!("SELECT wg_ip FROM agents")
-        .fetch_all(db)
-        .await
-        .context("fetch wg_ip list")?;
+/// Allocate the next free IP from the ip_pool table (SELECT FOR UPDATE, race-safe).
+/// Returns the allocated IP string (e.g. "10.100.0.2") without the prefix length.
+pub async fn allocate_ip(db: &sqlx::PgPool, agent_id: uuid::Uuid) -> Result<String> {
+    let mut tx = db.begin().await.context("begin ip_pool transaction")?;
 
-    let used_ips: std::collections::HashSet<u8> = used
-        .iter()
-        .filter_map(|ip| ip.split('.').nth(3)?.parse::<u8>().ok())
-        .collect();
+    let row = sqlx::query!(
+        "SELECT ip::text AS ip FROM ip_pool WHERE agent_id IS NULL ORDER BY ip LIMIT 1 FOR UPDATE SKIP LOCKED"
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("fetch free ip")?
+    .ok_or_else(|| anyhow::anyhow!("WireGuard IP pool exhausted"))?;
 
-    // Start from .2 (.1 is dashboard), max .254
-    for last_octet in 2u8..=254 {
-        if !used_ips.contains(&last_octet) {
-            return Ok(std::net::Ipv4Addr::new(10, 100, 0, last_octet));
-        }
-    }
+    let ip = row.ip.unwrap_or_default();
 
-    anyhow::bail!("WireGuard IP space exhausted (10.100.0.2–254)")
+    sqlx::query!(
+        "UPDATE ip_pool SET agent_id = $1, updated_at = NOW() WHERE ip::text = $2",
+        agent_id,
+        ip,
+    )
+    .execute(&mut *tx)
+    .await
+    .context("claim ip in pool")?;
+
+    tx.commit().await.context("commit ip_pool transaction")?;
+    Ok(ip)
+}
+
+/// Release an agent's IP back to the pool.
+pub async fn release_ip(db: &sqlx::PgPool, agent_id: uuid::Uuid) -> Result<()> {
+    sqlx::query!(
+        "UPDATE ip_pool SET agent_id = NULL, updated_at = NOW() WHERE agent_id = $1",
+        agent_id,
+    )
+    .execute(db)
+    .await
+    .context("release ip to pool")?;
+    Ok(())
 }
