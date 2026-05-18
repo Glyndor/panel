@@ -1,8 +1,8 @@
 "use server";
 
-import { BACKEND_URL } from "@/lib/api";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { BACKEND_URL, validateId } from "@/lib/api";
 
 async function token(): Promise<string> {
 	const jar = await cookies();
@@ -10,22 +10,22 @@ async function token(): Promise<string> {
 }
 
 function base(orgId: string, projId: string) {
-	return `${BACKEND_URL}/organizations/${orgId}/projects/${projId}/containers`;
+	return `${BACKEND_URL}/organizations/${validateId(orgId)}/projects/${validateId(projId)}/containers`;
 }
 
 async function post(url: string): Promise<{ ok: boolean; error?: string }> {
 	try {
 		const res = await fetch(url, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${await token()}` },
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json()) as { error?: string; detail?: string };
-			return { ok: false, error: body.detail ?? body.error ?? "server_error" };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
 		}
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -37,10 +37,7 @@ export async function containerAction(
 ): Promise<{ ok: boolean; error?: string }> {
 	const result = await post(`${base(orgId, projId)}/${name}/${action}`);
 	if (result.ok) {
-		revalidatePath(
-			`/[locale]/app/organizations/${orgId}/projects/${projId}`,
-			"page",
-		);
+		revalidatePath(`/[locale]/app/organizations/${orgId}/projects/${projId}`, "page");
 	}
 	return result;
 }
@@ -59,23 +56,20 @@ export async function deployContainer(
 ): Promise<{ ok: boolean; error?: string }> {
 	try {
 		const res = await fetch(base(orgId, projId), {
-			method: "POST",
+			body: JSON.stringify(payload),
 			headers: {
 				Authorization: `Bearer ${await token()}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify(payload),
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json()) as { error?: string; detail?: string };
-			return { ok: false, error: body.detail ?? body.error ?? "server_error" };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
 		}
-		revalidatePath(
-			`/[locale]/app/organizations/${orgId}/projects/${projId}`,
-			"page",
-		);
+		revalidatePath(`/[locale]/app/organizations/${orgId}/projects/${projId}`, "page");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }

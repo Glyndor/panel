@@ -1,8 +1,8 @@
 "use server";
 
-import { BACKEND_URL } from "@/lib/api";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { BACKEND_URL, validateId } from "@/lib/api";
 
 async function token(): Promise<string> {
 	const jar = await cookies();
@@ -16,13 +16,15 @@ export async function createProject(
 	agentId: string,
 ): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(`${BACKEND_URL}/organizations/${orgId}/projects`, {
-			method: "POST",
+		const oid = validateId(orgId);
+		const aid = validateId(agentId);
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/projects`, {
+			body: JSON.stringify({ agent_id: aid, name, slug }),
 			headers: {
 				Authorization: `Bearer ${await token()}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ name, slug, agent_id: agentId }),
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json()) as {
@@ -30,13 +32,13 @@ export async function createProject(
 				detail?: string;
 			};
 			if (body.error === "conflict") {
-				return { ok: false, error: "slug_conflict" };
+				return { error: "slug_conflict", ok: false };
 			}
-			return { ok: false, error: body.detail ?? body.error ?? "server_error" };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
 		}
 		revalidatePath(`/[locale]/app/organizations/${orgId}`, "page");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }

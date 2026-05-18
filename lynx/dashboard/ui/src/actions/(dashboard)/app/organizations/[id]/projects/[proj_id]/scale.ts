@@ -1,8 +1,8 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { BACKEND_URL } from "@/lib/api";
+import { cookies } from "next/headers";
+import { BACKEND_URL, validateId } from "@/lib/api";
 
 export async function addHorizontalScale(
 	orgId: string,
@@ -14,23 +14,23 @@ export async function addHorizontalScale(
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";
 
-	const res = await fetch(
-		`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/scale/horizontal`,
-		{
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${tok}`,
-			},
-			body: JSON.stringify({
-				target_agent_id: targetAgentId,
-				image,
-				replica_count: replicaCount,
-			}),
+	const oid = validateId(orgId);
+	const pid = validateId(projId);
+	const aid = validateId(targetAgentId);
+	const res = await fetch(`${BACKEND_URL}/organizations/${oid}/projects/${pid}/scale/horizontal`, {
+		body: JSON.stringify({
+			image,
+			replica_count: replicaCount,
+			target_agent_id: aid,
+		}),
+		headers: {
+			Authorization: `Bearer ${tok}`,
+			"Content-Type": "application/json",
 		},
-	);
+		method: "POST",
+	});
 
-	if (!res.ok) return { ok: false, error: `${res.status}` };
+	if (!res.ok) return { error: `${res.status}`, ok: false };
 	revalidatePath(`/app/organizations/${orgId}/projects/${projId}`);
 	return { ok: true };
 }
@@ -43,15 +43,15 @@ export async function teardownHorizontalScale(
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";
 
-	const res = await fetch(
-		`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/scale/horizontal/${tunnelId}`,
-		{
-			method: "DELETE",
-			headers: { Authorization: `Bearer ${tok}` },
-		},
-	);
+	const oid2 = validateId(orgId);
+	const pid2 = validateId(projId);
+	const tid = validateId(tunnelId);
+	const res = await fetch(`${BACKEND_URL}/organizations/${oid2}/projects/${pid2}/scale/horizontal/${tid}`, {
+		headers: { Authorization: `Bearer ${tok}` },
+		method: "DELETE",
+	});
 
-	if (!res.ok) return { ok: false, error: `${res.status}` };
+	if (!res.ok) return { error: `${res.status}`, ok: false };
 	revalidatePath(`/app/organizations/${orgId}/projects/${projId}`);
 	return { ok: true };
 }

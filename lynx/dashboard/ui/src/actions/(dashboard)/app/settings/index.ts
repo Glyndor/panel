@@ -1,20 +1,19 @@
 "use server";
 
-import { BACKEND_URL } from "@/lib/api";
+import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { BACKEND_URL, validateId } from "@/lib/api";
 
-export async function revokeSession(
-	sessionId: string,
-): Promise<{ ok: boolean }> {
+export async function revokeSession(sessionId: string): Promise<{ ok: boolean }> {
 	const jar = await cookies();
 	const token = jar.get("access_token")?.value ?? "";
 
 	try {
-		const res = await fetch(`${BACKEND_URL}/admin/sessions/${sessionId}`, {
-			method: "DELETE",
+		const sid = validateId(sessionId);
+		const res = await fetch(`${BACKEND_URL}/admin/sessions/${sid}`, {
 			headers: { Authorization: `Bearer ${token}` },
+			method: "DELETE",
 		});
 		return { ok: res.ok };
 	} catch {
@@ -28,12 +27,12 @@ export async function rotateKeys(locale: string): Promise<void> {
 
 	try {
 		await fetch(`${BACKEND_URL}/admin/rotate`, {
-			method: "POST",
+			body: JSON.stringify({ reason: "manual", scope: "jwt_keys" }),
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ scope: "jwt_keys", reason: "manual" }),
+			method: "POST",
 		});
 	} catch {
 		// Rotation may still have succeeded on the backend
@@ -45,18 +44,18 @@ export async function rotateKeys(locale: string): Promise<void> {
 }
 
 export interface BrandingPayload {
+	accent_color?: string;
 	company_name?: string;
 	logo_url?: string | null;
 	primary_color?: string;
 	secondary_color?: string;
-	accent_color?: string;
 }
 
 export interface UpdateCheckResult {
 	current_version: string;
 	latest_version: string;
-	update_available: boolean;
 	release_url: string | null;
+	update_available: boolean;
 }
 
 export async function checkForUpdates(): Promise<{
@@ -68,89 +67,82 @@ export async function checkForUpdates(): Promise<{
 	const tok = jar.get("access_token")?.value ?? "";
 	try {
 		const res = await fetch(`${BACKEND_URL}/admin/update-check`, {
-			headers: { Authorization: `Bearer ${tok}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${tok}` },
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
-		return { ok: true, data: (await res.json()) as UpdateCheckResult };
+		if (!res.ok) return { error: "server_error", ok: false };
+		return { data: (await res.json()) as UpdateCheckResult, ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function triggerUpdate(
-	version: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function triggerUpdate(version: string): Promise<{ ok: boolean; error?: string }> {
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";
 	try {
 		const res = await fetch(`${BACKEND_URL}/admin/trigger-update`, {
-			method: "POST",
+			body: JSON.stringify({ channel: "stable", version }),
 			headers: {
 				Authorization: `Bearer ${tok}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ version, channel: "stable" }),
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json()) as { error?: string };
-			return { ok: false, error: body.error ?? "server_error" };
+			return { error: body.error ?? "server_error", ok: false };
 		}
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function updateBranding(
-	payload: BrandingPayload,
-): Promise<{ ok: boolean; error?: string }> {
+export async function updateBranding(payload: BrandingPayload): Promise<{ ok: boolean; error?: string }> {
 	const jar = await cookies();
 	const token = jar.get("access_token")?.value ?? "";
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/admin/branding`, {
-			method: "PUT",
+			body: JSON.stringify(payload),
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify(payload),
+			method: "PUT",
 		});
 		if (!res.ok) {
 			const body = (await res.json()) as { error?: string };
-			return { ok: false, error: body.error ?? "server_error" };
+			return { error: body.error ?? "server_error", ok: false };
 		}
 		revalidatePath("/", "layout");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
 // Domain actions
 
-export async function configureDomain(
-	domain: string,
-	email: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function configureDomain(domain: string, email: string): Promise<{ ok: boolean; error?: string }> {
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/domain`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${tok}`,
-			},
 			body: JSON.stringify({ domain, email }),
+			headers: {
+				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
+		if (!res.ok) return { error: "server_error", ok: false };
 		revalidatePath("/app/settings");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -165,37 +157,35 @@ export async function verifyDomain(): Promise<{
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/domain/verify`, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${tok}` },
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
+		if (!res.ok) return { error: "server_error", ok: false };
 		const data = (await res.json()) as { dns_ok: boolean; domain: string };
-		return { ok: true, dns_ok: data.dns_ok, domain: data.domain };
+		return { dns_ok: data.dns_ok, domain: data.domain, ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function setHsts(
-	enabled: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+export async function setHsts(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/domain/hsts`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${tok}`,
-			},
 			body: JSON.stringify({ enabled }),
+			headers: {
+				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
+		if (!res.ok) return { error: "server_error", ok: false };
 		revalidatePath("/app/settings");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -209,25 +199,25 @@ export async function uploadCert(
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/domain/cert/upload`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${tok}`,
-			},
 			body: JSON.stringify({
-				cert_type: certType,
 				cert_pem: certPem,
+				cert_type: certType,
 				key_pem: keyPem ?? null,
 			}),
+			headers: {
+				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json().catch(() => ({}))) as { error?: string };
-			return { ok: false, error: body.error ?? "server_error" };
+			return { error: body.error ?? "server_error", ok: false };
 		}
 		revalidatePath("/app/settings");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -237,13 +227,13 @@ export async function closePort19443(): Promise<{ ok: boolean; error?: string }>
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/domain/close-port`, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${tok}` },
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
+		if (!res.ok) return { error: "server_error", ok: false };
 		revalidatePath("/app/settings");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }

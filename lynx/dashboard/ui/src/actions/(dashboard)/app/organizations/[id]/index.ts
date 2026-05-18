@@ -1,8 +1,8 @@
 "use server";
 
-import { BACKEND_URL } from "@/lib/api";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { BACKEND_URL, validateId } from "@/lib/api";
 
 async function token(): Promise<string> {
 	const jar = await cookies();
@@ -15,44 +15,41 @@ export async function inviteMember(
 	role: string,
 ): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(`${BACKEND_URL}/organizations/${orgId}/members`, {
-			method: "POST",
+		const oid = validateId(orgId);
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/members`, {
+			body: JSON.stringify({ role, username }),
 			headers: {
 				Authorization: `Bearer ${await token()}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ username, role }),
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json()) as { error?: string; detail?: string };
-			return { ok: false, error: body.detail ?? body.error ?? "server_error" };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
 		}
 		revalidatePath(`/[locale]/app/organizations/${orgId}`, "page");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function removeMember(
-	orgId: string,
-	userId: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function removeMember(orgId: string, userId: string): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/organizations/${orgId}/members/${userId}`,
-			{
-				method: "DELETE",
-				headers: { Authorization: `Bearer ${await token()}` },
-			},
-		);
+		const oid = validateId(orgId);
+		const uid = validateId(userId);
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/members/${uid}`, {
+			headers: { Authorization: `Bearer ${await token()}` },
+			method: "DELETE",
+		});
 		if (!res.ok) {
 			const body = (await res.json()) as { error?: string; detail?: string };
-			return { ok: false, error: body.detail ?? body.error ?? "server_error" };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
 		}
 		revalidatePath(`/[locale]/app/organizations/${orgId}`, "page");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }

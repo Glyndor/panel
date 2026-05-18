@@ -1,8 +1,8 @@
 "use server";
 
-import { BACKEND_URL } from "@/lib/api";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { BACKEND_URL, validateId } from "@/lib/api";
 
 async function tok(): Promise<string> {
 	const jar = await cookies();
@@ -10,29 +10,29 @@ async function tok(): Promise<string> {
 }
 
 export interface NftRule {
-	id: string;
-	scope: "global" | "local";
 	agent_id: string | null;
-	kind: string;
-	port: number | null;
-	protocol: string | null;
+	created_at: string;
+	description: string | null;
+	enabled: boolean;
+	id: string;
 	ip_list: string[];
 	ip_version: string;
-	rate_per_min: number | null;
-	description: string | null;
+	kind: string;
+	port: number | null;
 	priority: number;
-	enabled: boolean;
-	created_at: string;
+	protocol: string | null;
+	rate_per_min: number | null;
+	scope: "global" | "local";
 }
 
 export interface CreateRulePayload {
+	description?: string;
+	ip_list?: string[];
 	kind: string;
 	port?: number;
-	protocol?: string;
-	ip_list?: string[];
-	rate_per_min?: number;
-	description?: string;
 	priority?: number;
+	protocol?: string;
+	rate_per_min?: number;
 }
 
 // --- Global rules ---
@@ -40,8 +40,8 @@ export interface CreateRulePayload {
 export async function listGlobalRules(): Promise<NftRule[]> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/nftables/global`, {
-			headers: { Authorization: `Bearer ${await tok()}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${await tok()}` },
 		});
 		if (!res.ok) return [];
 		return res.json();
@@ -50,42 +50,39 @@ export async function listGlobalRules(): Promise<NftRule[]> {
 	}
 }
 
-export async function createGlobalRule(
-	payload: CreateRulePayload,
-): Promise<{ ok: boolean; error?: string }> {
+export async function createGlobalRule(payload: CreateRulePayload): Promise<{ ok: boolean; error?: string }> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/nftables/global`, {
-			method: "POST",
+			body: JSON.stringify(payload),
 			headers: {
 				Authorization: `Bearer ${await tok()}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify(payload),
+			method: "POST",
 		});
 		if (!res.ok) {
 			const body = (await res.json().catch(() => ({}))) as { error?: string };
-			return { ok: false, error: body.error ?? "server_error" };
+			return { error: body.error ?? "server_error", ok: false };
 		}
 		revalidatePath("/app/agents");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function deleteGlobalRule(
-	ruleId: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function deleteGlobalRule(ruleId: string): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(`${BACKEND_URL}/nftables/global/${ruleId}`, {
-			method: "DELETE",
+		const id = validateId(ruleId);
+		const res = await fetch(`${BACKEND_URL}/nftables/global/${id}`, {
 			headers: { Authorization: `Bearer ${await tok()}` },
+			method: "DELETE",
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
+		if (!res.ok) return { error: "server_error", ok: false };
 		revalidatePath("/app/agents");
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -97,14 +94,14 @@ export async function pushGlobalRules(): Promise<{
 }> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/nftables/global/push`, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${await tok()}` },
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: "server_error" };
+		if (!res.ok) return { error: "server_error", ok: false };
 		const data = (await res.json()) as { pushed: number; failed: number };
-		return { ok: true, pushed: data.pushed, failed: data.failed };
+		return { failed: data.failed, ok: true, pushed: data.pushed };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -112,13 +109,11 @@ export async function pushGlobalRules(): Promise<{
 
 export async function listLocalRules(agentId: string): Promise<NftRule[]> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/nftables/agents/${agentId}/local`,
-			{
-				headers: { Authorization: `Bearer ${await tok()}` },
-				cache: "no-store",
-			},
-		);
+		const id = validateId(agentId);
+		const res = await fetch(`${BACKEND_URL}/nftables/agents/${id}/local`, {
+			cache: "no-store",
+			headers: { Authorization: `Bearer ${await tok()}` },
+		});
 		if (!res.ok) return [];
 		return res.json();
 	} catch {
@@ -131,62 +126,52 @@ export async function createLocalRule(
 	payload: CreateRulePayload,
 ): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/nftables/agents/${agentId}/local`,
-			{
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${await tok()}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify(payload),
+		const id = validateId(agentId);
+		const res = await fetch(`${BACKEND_URL}/nftables/agents/${id}/local`, {
+			body: JSON.stringify(payload),
+			headers: {
+				Authorization: `Bearer ${await tok()}`,
+				"Content-Type": "application/json",
 			},
-		);
+			method: "POST",
+		});
 		if (!res.ok) {
 			const body = (await res.json().catch(() => ({}))) as { error?: string };
-			return { ok: false, error: body.error ?? "server_error" };
+			return { error: body.error ?? "server_error", ok: false };
 		}
 		revalidatePath(`/app/agents`);
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function deleteLocalRule(
-	agentId: string,
-	ruleId: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function deleteLocalRule(agentId: string, ruleId: string): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/nftables/agents/${agentId}/local/${ruleId}`,
-			{
-				method: "DELETE",
-				headers: { Authorization: `Bearer ${await tok()}` },
-			},
-		);
-		if (!res.ok) return { ok: false, error: "server_error" };
+		const aid = validateId(agentId);
+		const rid = validateId(ruleId);
+		const res = await fetch(`${BACKEND_URL}/nftables/agents/${aid}/local/${rid}`, {
+			headers: { Authorization: `Bearer ${await tok()}` },
+			method: "DELETE",
+		});
+		if (!res.ok) return { error: "server_error", ok: false };
 		revalidatePath(`/app/agents`);
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
-export async function pushLocalRules(
-	agentId: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function pushLocalRules(agentId: string): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/nftables/agents/${agentId}/local/push`,
-			{
-				method: "POST",
-				headers: { Authorization: `Bearer ${await tok()}` },
-			},
-		);
-		if (!res.ok) return { ok: false, error: "server_error" };
+		const id = validateId(agentId);
+		const res = await fetch(`${BACKEND_URL}/nftables/agents/${id}/local/push`, {
+			headers: { Authorization: `Bearer ${await tok()}` },
+			method: "POST",
+		});
+		if (!res.ok) return { error: "server_error", ok: false };
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
