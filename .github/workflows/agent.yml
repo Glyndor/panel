@@ -18,6 +18,10 @@ on:
       - "lynx/Cargo.lock"
       - ".github/workflows/agent.yml"
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
