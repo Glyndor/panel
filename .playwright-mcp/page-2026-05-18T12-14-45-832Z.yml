@@ -1,0 +1,104 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e6]: Lynx
+        - button "Switch language" [ref=e7] [cursor=pointer]:
+          - img "English" [ref=e8]
+        - button "Toggle theme" [ref=e9] [cursor=pointer]:
+          - img
+        - button "Notifications" [ref=e10] [cursor=pointer]:
+          - img [ref=e11]
+      - navigation [ref=e14]:
+        - link "Overview" [ref=e15] [cursor=pointer]:
+          - /url: /en/app
+          - img [ref=e16]
+          - text: Overview
+        - link "Agents" [ref=e21] [cursor=pointer]:
+          - /url: /en/app/agents
+          - img [ref=e22]
+          - text: Agents
+        - link "Organizations" [ref=e24] [cursor=pointer]:
+          - /url: /en/app/organizations
+          - img [ref=e25]
+          - text: Organizations
+        - link "Settings" [ref=e29] [cursor=pointer]:
+          - /url: /en/app/settings
+          - img [ref=e30]
+          - text: Settings
+      - button "Sign out" [ref=e34] [cursor=pointer]:
+        - img
+        - text: Sign out
+      - paragraph [ref=e36]:
+        - text: Made with love by
+        - link "Jaroc" [ref=e37] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c
+        - text: ·
+        - link "lynx" [ref=e38] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c/Lynx
+    - main [ref=e39]:
+      - generic [ref=e40]:
+        - navigation [ref=e41]:
+          - link "Agents" [ref=e42] [cursor=pointer]:
+            - /url: /en/app/agents
+          - img [ref=e43]
+          - generic [ref=e45]: local-agent
+        - generic [ref=e46]:
+          - heading "local-agent" [level=1] [ref=e47]
+          - generic [ref=e48]: Offline
+        - generic [ref=e50]:
+          - generic [ref=e51]:
+            - paragraph [ref=e52]: "WireGuard IP:"
+            - paragraph [ref=e53]: 10.100.0.2
+          - generic [ref=e54]:
+            - paragraph [ref=e55]: "Version:"
+            - paragraph [ref=e56]: —
+          - generic [ref=e57]:
+            - paragraph [ref=e58]: "Last heartbeat:"
+            - paragraph [ref=e59]: 14s ago
+            - paragraph [ref=e60]: 18 May 2026, 07:14:30
+          - generic [ref=e61]:
+            - paragraph [ref=e62]: ID
+            - paragraph [ref=e63]: 01970001-0000-7000-8000-000000000001
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - img [ref=e66]
+            - text: Firewall Rules
+          - paragraph [ref=e68]: nftables rules applied to this agent. Changes pushed automatically.
+          - generic [ref=e69]:
+            - paragraph [ref=e70]: Global rules
+            - generic [ref=e71]:
+              - paragraph [ref=e72]: No rules defined.
+              - generic [ref=e73]:
+                - button "Add rule" [ref=e74] [cursor=pointer]:
+                  - img
+                  - text: Add rule
+                - button "Push to agent" [ref=e75] [cursor=pointer]:
+                  - img
+                  - text: Push to agent
+          - generic [ref=e76]:
+            - paragraph [ref=e77]: Local rules (this agent)
+            - generic [ref=e78]:
+              - paragraph [ref=e79]: No rules defined.
+              - generic [ref=e80]:
+                - button "Add rule" [ref=e81] [cursor=pointer]:
+                  - img
+                  - text: Add rule
+                - button "Push to agent" [ref=e82] [cursor=pointer]:
+                  - img
+                  - text: Push to agent
+        - generic [ref=e83]:
+          - paragraph [ref=e84]: Audit log
+          - link "Audit log →" [ref=e85] [cursor=pointer]:
+            - /url: /en/app/agents/01970001-0000-7000-8000-000000000001/audit-log
+        - generic [ref=e87]:
+          - button "Reboot VPS" [ref=e88] [cursor=pointer]:
+            - img
+            - text: Reboot VPS
+          - button "Remove agent" [ref=e89] [cursor=pointer]:
+            - img
+            - text: Remove agent
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e95] [cursor=pointer]:
+    - img [ref=e96]
+  - alert [ref=e99]
