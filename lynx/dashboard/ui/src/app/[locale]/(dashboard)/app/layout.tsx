@@ -32,6 +32,20 @@ async function fetchBranding(): Promise<Branding> {
 	}
 }
 
+async function fetchIsAdmin(token: string): Promise<boolean> {
+	try {
+		const res = await fetch(`${BACKEND_URL}/auth/me`, {
+			headers: { Authorization: `Bearer ${token}` },
+			cache: "no-store",
+		});
+		if (!res.ok) return false;
+		const data = (await res.json()) as { is_admin?: boolean };
+		return data.is_admin === true;
+	} catch {
+		return false;
+	}
+}
+
 export default async function AppLayout({
 	children,
 	params,
@@ -39,13 +53,17 @@ export default async function AppLayout({
 	const { locale } = await params;
 
 	const jar = await cookies();
-	const hasAccess = jar.has("access_token") || jar.has("refresh_token");
+	const token = jar.get("access_token")?.value;
+	const hasAccess = !!token || jar.has("refresh_token");
 
 	if (!hasAccess) {
 		redirect(`/${locale}/login`);
 	}
 
-	const branding = await fetchBranding();
+	const [branding, isAdmin] = await Promise.all([
+		fetchBranding(),
+		token ? fetchIsAdmin(token) : Promise.resolve(false),
+	]);
 
 	return (
 		<div className="flex h-screen overflow-hidden">
@@ -53,6 +71,7 @@ export default async function AppLayout({
 				locale={locale}
 				companyName={branding.company_name}
 				logoUrl={branding.logo_url}
+				isAdmin={isAdmin}
 			/>
 			<main className="flex flex-1 flex-col overflow-y-auto">
 				{children}

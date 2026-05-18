@@ -7,6 +7,7 @@ import {
 	LogOut,
 	Monitor,
 	Settings,
+	ShieldCheck,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -15,9 +16,9 @@ import { useTransition } from "react";
 import { logoutAction } from "@/actions/(dashboard)/app/logout";
 import { NotificationBell } from "./NotificationBell";
 
-type Props = { locale: string; companyName: string; logoUrl: string | null };
+type Props = { locale: string; companyName: string; logoUrl: string | null; isAdmin: boolean };
 
-export function Sidebar({ locale, companyName, logoUrl }: Props) {
+export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 	const t = useTranslations("app.nav");
 	const pathname = usePathname();
 	const [, startTransition] = useTransition();
@@ -43,6 +44,9 @@ export function Sidebar({ locale, companyName, logoUrl }: Props) {
 			label: t("settings"),
 			icon: Settings,
 		},
+		...(isAdmin
+			? [{ href: `/${locale}/app/admin`, label: t("admin"), icon: ShieldCheck }]
+			: []),
 	];
 
 	return (

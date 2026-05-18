@@ -112,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
 
     let orgs_router = organizations::router::router().route_layer(auth_layer.clone());
 
-    let admin_router = admin::router::router().route_layer(auth_layer.clone());
+    let admin_router = admin::router::router(state.clone()).route_layer(auth_layer.clone());
 
     let domain_router = domain::router::router().route_layer(auth_layer.clone());
 

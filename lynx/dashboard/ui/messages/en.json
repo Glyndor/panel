@@ -47,7 +47,8 @@
       "overview": "Overview",
       "agents": "Agents",
       "organizations": "Organizations",
-      "settings": "Settings"
+      "settings": "Settings",
+      "admin": "Admin"
     },
     "organizations": {
       "title": "Organizations",
@@ -372,5 +373,40 @@
   "branding": {
     "madeWith": "Made with love by",
     "author": "Jaroc"
+  },
+  "admin": {
+    "title": "Admin",
+    "users": "Users",
+    "roles": "Roles",
+    "deleteUser": "Delete user",
+    "deleteConfirm": "Delete user",
+    "deleteSuccess": "User deleted.",
+    "deleteError": "Failed to delete user.",
+    "forcePasswordChange": "Force password reset",
+    "forcePasswordChangeSuccess": "Password reset forced.",
+    "forcePasswordChangeError": "Failed to force password reset.",
+    "addRole": "Add role",
+    "addRoleSuccess": "Role assigned.",
+    "addRoleError": "Failed to assign role.",
+    "removeRole": "Remove role",
+    "removeRoleSuccess": "Role removed.",
+    "removeRoleError": "Failed to remove role.",
+    "noRoles": "No roles assigned.",
+    "selectRole": "Select role",
+    "createRole": "New role",
+    "createRoleSuccess": "Role created.",
+    "createRoleError": "Failed to create role.",
+    "deleteRole": "Delete role",
+    "deleteRoleConfirm": "Delete role",
+    "deleteRoleSuccess": "Role deleted.",
+    "deleteRoleError": "Failed to delete role.",
+    "addPermission": "Add permission",
+    "addPermissionSuccess": "Permission added.",
+    "addPermissionError": "Failed to add permission.",
+    "removePermission": "Remove permission",
+    "removePermissionSuccess": "Permission removed.",
+    "removePermissionError": "Failed to remove permission.",
+    "roleName": "Role name",
+    "noPermissions": "No permissions assigned."
   }
 }

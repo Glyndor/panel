@@ -439,9 +439,23 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-    Ok(Json(
-        serde_json::json!({ "id": claims.sub, "username": user.username }),
-    ))
+    let is_admin: bool = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE ur.user_id = $1 AND p.key = '*:*'
+        ) AS "exists!""#,
+        claims.sub
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(serde_json::json!({
+        "id": claims.sub,
+        "username": user.username,
+        "is_admin": is_admin,
+    })))
 }
 
 // --------------------------------------------------------------------------

@@ -47,7 +47,8 @@
       "overview": "Resumen",
       "agents": "Agentes",
       "organizations": "Organizaciones",
-      "settings": "Ajustes"
+      "settings": "Ajustes",
+      "admin": "Admin"
     },
     "organizations": {
       "title": "Organizaciones",
@@ -372,5 +373,40 @@
   "branding": {
     "madeWith": "Hecho con amor por",
     "author": "Jaroc"
+  },
+  "admin": {
+    "title": "Admin",
+    "users": "Usuarios",
+    "roles": "Roles",
+    "deleteUser": "Eliminar usuario",
+    "deleteConfirm": "Eliminar usuario",
+    "deleteSuccess": "Usuario eliminado.",
+    "deleteError": "Error al eliminar usuario.",
+    "forcePasswordChange": "Forzar restablecimiento de contraseña",
+    "forcePasswordChangeSuccess": "Restablecimiento forzado.",
+    "forcePasswordChangeError": "Error al forzar restablecimiento.",
+    "addRole": "Asignar rol",
+    "addRoleSuccess": "Rol asignado.",
+    "addRoleError": "Error al asignar rol.",
+    "removeRole": "Quitar rol",
+    "removeRoleSuccess": "Rol eliminado.",
+    "removeRoleError": "Error al quitar rol.",
+    "noRoles": "Sin roles asignados.",
+    "selectRole": "Seleccionar rol",
+    "createRole": "Nuevo rol",
+    "createRoleSuccess": "Rol creado.",
+    "createRoleError": "Error al crear rol.",
+    "deleteRole": "Eliminar rol",
+    "deleteRoleConfirm": "Eliminar rol",
+    "deleteRoleSuccess": "Rol eliminado.",
+    "deleteRoleError": "Error al eliminar rol.",
+    "addPermission": "Añadir permiso",
+    "addPermissionSuccess": "Permiso añadido.",
+    "addPermissionError": "Error al añadir permiso.",
+    "removePermission": "Quitar permiso",
+    "removePermissionSuccess": "Permiso eliminado.",
+    "removePermissionError": "Error al quitar permiso.",
+    "roleName": "Nombre del rol",
+    "noPermissions": "Sin permisos asignados."
   }
 }

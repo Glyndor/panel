@@ -1,6 +1,6 @@
 use crate::{crypto, error::AppError, state::AppState};
 use axum::{
-    extract::{Request, State},
+    extract::{Extension, Request, State},
     middleware::Next,
     response::Response,
 };
@@ -77,6 +77,34 @@ pub async fn require_auth(
         user_id: claims.sub,
         session_id: claims.session_id,
     });
+
+    Ok(next.run(req).await)
+}
+
+/// Middleware: requires the authenticated user to have the `*:*` permission (admin).
+/// Must run after `require_auth` (needs `Extension<AuthUser>`).
+pub async fn require_admin(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    let is_admin: bool = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE ur.user_id = $1 AND p.key = '*:*'
+        ) AS "exists!""#,
+        user.user_id
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+
+    if !is_admin {
+        return Err(AppError::Forbidden);
+    }
 
     Ok(next.run(req).await)
 }
