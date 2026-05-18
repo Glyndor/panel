@@ -1,4 +1,4 @@
-use crate::{crypto::cmd, state::AppState};
+use crate::{agents::ws_hub, crypto::cmd, state::AppState};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -37,8 +37,32 @@ async fn poll_agents(state: &AppState) {
     let latest = state.latest_agent_version.read().await.clone();
 
     for agent in agents {
-        let url = format!("http://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
         let id = agent.id;
+
+        // Skip HTTP poll if agent has an active WS connection — it sends heartbeats proactively.
+        if ws_hub::is_connected(&state, id).await {
+            // Check for pending updates even for WS-connected agents.
+            if let Some(ref target) = latest {
+                let current_ver: Option<String> = sqlx::query_scalar!(
+                    "SELECT version FROM agents WHERE id = $1",
+                    id
+                )
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+
+                if let Some(ref current) = current_ver {
+                    if current != target {
+                        dispatch_update_ws(state, id, target).await;
+                    }
+                }
+            }
+            continue;
+        }
+
+        let url = format!("http://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
         let resp = client
             .post(&url)
             .header("Authorization", format!("Bearer {token}"))
@@ -90,6 +114,36 @@ async fn poll_agents(state: &AppState) {
                 }
             }
         }
+    }
+}
+
+async fn dispatch_update_ws(state: &AppState, agent_id: Uuid, version: &str) {
+    let github_repo = "Jaro-c/Lynx";
+    let download_url = format!(
+        "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-x86_64"
+    );
+    let sig_url = format!(
+        "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-x86_64.sig"
+    );
+    let command = serde_json::json!({
+        "type": "update.self",
+        "version": version,
+        "download_url": download_url,
+        "sig_url": sig_url,
+    });
+
+    let signed = match cmd::sign_command(&state.config, agent_id, Uuid::nil(), "write", &command) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(agent_id = %agent_id, "WS update sign_command failed: {e}");
+            return;
+        }
+    };
+
+    let signed_val = serde_json::to_value(&signed).unwrap_or_default();
+    match ws_hub::push_command(state, agent_id, signed_val).await {
+        Some(_) => tracing::info!(agent_id = %agent_id, version, "WS update.self dispatched"),
+        None => tracing::warn!(agent_id = %agent_id, "WS update.self: no response (agent may have disconnected)"),
     }
 }
 
