@@ -33,6 +33,23 @@ pub async fn update_branding(
     State(state): State<AppState>,
     Json(req): Json<UpdateBrandingRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    // Validate company name length.
+    if let Some(ref name) = req.company_name {
+        if name.len() > 255 {
+            return Err(AppError::Validation("company_name must be ≤ 255 characters".into()));
+        }
+    }
+
+    // Validate logo_url: must be https:// and not excessively long.
+    if let Some(ref url) = req.logo_url {
+        if !url.starts_with("https://") {
+            return Err(AppError::Validation("logo_url must start with https://".into()));
+        }
+        if url.len() > 2048 {
+            return Err(AppError::Validation("logo_url must be ≤ 2048 characters".into()));
+        }
+    }
+
     // Validate hex colors if provided
     for (field, val) in [
         ("primary_color", &req.primary_color),

@@ -82,7 +82,17 @@ pub async fn set_domain(
 ) -> Result<impl IntoResponse, AppError> {
     let domain = req.domain.trim().to_lowercase();
 
-    if domain.is_empty() || domain.contains(' ') {
+    // Strict validation: only DNS-valid characters (alphanumeric, hyphens, dots).
+    // Rejects newlines, semicolons, slashes, etc. that could inject nginx directives.
+    let domain_valid = !domain.is_empty()
+        && domain.len() <= 253
+        && domain
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains("..");
+    if !domain_valid {
         return Err(AppError::Validation("invalid domain".into()));
     }
 
