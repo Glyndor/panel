@@ -12,6 +12,10 @@ on:
       - "lynx/dashboard/ui/**"
       - ".github/workflows/dashboard-ui.yml"
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   typecheck:
     name: TypeScript
