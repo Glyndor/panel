@@ -39,6 +39,7 @@ tokio-rustls = { workspace = true }
 
 # HTTP client (audit log sync to dashboard)
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+url = { workspace = true }
 
 # WebSocket client (agent → dashboard persistent connection)
 tokio-tungstenite = { workspace = true }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE migration_state\n           SET status='preparing', role='target', migration_token_hash=$1,\n               started_at=NOW(), updated_at=NOW()\n           WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1a81592075c7e595b54bbe73962fe67deb509826b890a399e24e6c7cd8a25539"
+}

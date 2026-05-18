@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { registerAgentSchema } from "@/schemas/(dashboard)/app/agents";
 import { createOrgSchema } from "@/schemas/(dashboard)/app/organizations";
-import {
-	createProjectSchema,
-	inviteMemberSchema,
-} from "@/schemas/(dashboard)/app/organizations/[id]";
+import { createProjectSchema, inviteMemberSchema } from "@/schemas/(dashboard)/app/organizations/[id]";
 import {
 	addTunnelSchema,
 	deployContainerSchema,
@@ -87,25 +84,23 @@ describe("createOrgSchema", () => {
 
 describe("inviteMemberSchema", () => {
 	it("accepts valid viewer invite", () => {
-		expect(inviteMemberSchema.safeParse({ username: "alice", role: "viewer" }).success).toBe(true);
+		expect(inviteMemberSchema.safeParse({ role: "viewer", username: "alice" }).success).toBe(true);
 	});
 
 	it("accepts valid member invite", () => {
-		expect(inviteMemberSchema.safeParse({ username: "bob", role: "member" }).success).toBe(true);
+		expect(inviteMemberSchema.safeParse({ role: "member", username: "bob" }).success).toBe(true);
 	});
 
 	it("accepts valid admin invite", () => {
-		expect(inviteMemberSchema.safeParse({ username: "carol", role: "admin" }).success).toBe(true);
+		expect(inviteMemberSchema.safeParse({ role: "admin", username: "carol" }).success).toBe(true);
 	});
 
 	it("rejects unknown role", () => {
-		expect(
-			inviteMemberSchema.safeParse({ username: "dave", role: "superadmin" }).success,
-		).toBe(false);
+		expect(inviteMemberSchema.safeParse({ role: "superadmin", username: "dave" }).success).toBe(false);
 	});
 
 	it("rejects empty username", () => {
-		expect(inviteMemberSchema.safeParse({ username: "", role: "viewer" }).success).toBe(false);
+		expect(inviteMemberSchema.safeParse({ role: "viewer", username: "" }).success).toBe(false);
 	});
 
 	it("rejects missing role", () => {
@@ -118,7 +113,7 @@ describe("inviteMemberSchema", () => {
 // ---------------------------------------------------------------------------
 
 describe("createProjectSchema", () => {
-	const valid = { name: "Web App", slug: "web-app", agent_id: "some-uuid" };
+	const valid = { agent_id: "some-uuid", name: "Web App", slug: "web-app" };
 
 	it("accepts valid project data", () => {
 		expect(createProjectSchema.safeParse(valid).success).toBe(true);
@@ -154,7 +149,7 @@ describe("createProjectSchema", () => {
 // ---------------------------------------------------------------------------
 
 describe("deployContainerSchema", () => {
-	const valid = { name: "nginx", image: "docker.io/library/nginx:latest" };
+	const valid = { image: "docker.io/library/nginx:latest", name: "nginx" };
 
 	it("accepts minimal valid container data (no optional fields)", () => {
 		expect(deployContainerSchema.safeParse(valid).success).toBe(true);
@@ -164,10 +159,10 @@ describe("deployContainerSchema", () => {
 		expect(
 			deployContainerSchema.safeParse({
 				...valid,
-				ports: "80:80",
-				env: "FOO=bar",
 				cpus: 0.5,
+				env: "FOO=bar",
 				memory_mb: 256,
+				ports: "80:80",
 			}).success,
 		).toBe(true);
 	});
@@ -235,9 +230,9 @@ describe("resourceFormSchema", () => {
 
 describe("addTunnelSchema", () => {
 	const valid = {
-		target_agent_id: "agent-uuid-xyz",
 		image: "docker.io/library/nginx:latest",
 		replica_count: 2,
+		target_agent_id: "agent-uuid-xyz",
 	};
 
 	it("accepts valid tunnel data", () => {

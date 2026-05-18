@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, wg_ip::text AS wg_ip, api_port, COALESCE(arch, 'x86_64') AS arch FROM agents WHERE status = 'online' AND (version IS NULL OR version != $1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "wg_ip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "api_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "arch",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "cf1514bfec20e40e19443a39e371d2792cafb0b80fea5a8ca7df57ea3c8f6e7f"
+}

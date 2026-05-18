@@ -2,30 +2,22 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { removeMember } from "@/actions/(dashboard)/app/organizations/[id]";
+import { Button } from "@/components/ui/button";
 
 interface Props {
-	orgId: string;
-	userId: string;
-	label: string;
-	successMsg: string;
 	errorMsg: string;
+	label: string;
+	orgId: string;
+	successMsg: string;
+	userId: string;
 }
 
-export function RemoveMemberButton({
-	orgId,
-	userId,
-	label,
-	successMsg,
-	errorMsg,
-}: Props) {
+export function RemoveMemberButton({ orgId, userId, label, successMsg, errorMsg }: Props) {
 	const [isPending, startTransition] = useTransition();
 
 	return (
 		<Button
-			variant="ghost"
-			size="sm"
 			className="text-destructive hover:text-destructive hover:bg-destructive/10"
 			disabled={isPending}
 			onClick={() =>
@@ -38,6 +30,8 @@ export function RemoveMemberButton({
 					}
 				})
 			}
+			size="sm"
+			variant="ghost"
 		>
 			{label}
 		</Button>

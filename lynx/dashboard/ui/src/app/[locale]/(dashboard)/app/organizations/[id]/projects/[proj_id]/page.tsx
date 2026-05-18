@@ -1,56 +1,52 @@
+import { ChevronRight } from "lucide-react";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { BACKEND_URL } from "@/lib/api";
-import Link from "next/link";
-import { ChevronRight } from "lucide-react";
-import { ResourceForm } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/ResourceForm";
 import { ContainerCard } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/ContainerCard";
 import { DeployForm } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/DeployForm";
 import { HorizontalScaleSection } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/HorizontalScaleSection";
+import { ResourceForm } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/ResourceForm";
+import { BACKEND_URL } from "@/lib/api";
 
 interface Project {
+	agent_id: string;
+	created_at: string;
 	id: string;
 	name: string;
-	slug: string;
-	agent_id: string;
 	organization_id: string;
-	created_at: string;
+	slug: string;
 }
 
 interface Container {
-	Names: string[];
 	Image: string;
-	Status: string;
+	Names: string[];
 	State: string;
+	Status: string;
 }
 
 interface Agent {
 	id: string;
 	name: string;
-	wg_ip: string;
 	status: string;
+	wg_ip: string;
 }
 
 interface Tunnel {
-	id: string;
-	agent_b_id: string;
 	agent_a_wg_ip: string;
+	agent_b_id: string;
 	agent_b_wg_ip: string;
+	id: string;
 	replica_count: number;
 	status: string;
 }
 
-async function fetchProject(
-	token: string,
-	orgId: string,
-	projId: string,
-): Promise<Project | null> {
+async function fetchProject(token: string, orgId: string, projId: string): Promise<Project | null> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/organizations/${orgId}/projects/${projId}`,
-			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
-		);
+		const res = await fetch(`${BACKEND_URL}/organizations/${orgId}/projects/${projId}`, {
+			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
+		});
 		if (!res.ok) return null;
 		return res.json();
 	} catch {
@@ -61,8 +57,8 @@ async function fetchProject(
 async function fetchAgents(token: string): Promise<Agent[]> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/agents`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) return [];
 		return res.json();
@@ -71,16 +67,12 @@ async function fetchAgents(token: string): Promise<Agent[]> {
 	}
 }
 
-async function fetchTunnels(
-	token: string,
-	orgId: string,
-	projId: string,
-): Promise<Tunnel[]> {
+async function fetchTunnels(token: string, orgId: string, projId: string): Promise<Tunnel[]> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/scale/horizontal`,
-			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
-		);
+		const res = await fetch(`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/scale/horizontal`, {
+			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
+		});
 		if (!res.ok) return [];
 		return res.json();
 	} catch {
@@ -88,16 +80,12 @@ async function fetchTunnels(
 	}
 }
 
-async function fetchContainers(
-	token: string,
-	orgId: string,
-	projId: string,
-): Promise<Container[]> {
+async function fetchContainers(token: string, orgId: string, projId: string): Promise<Container[]> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/containers`,
-			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
-		);
+		const res = await fetch(`${BACKEND_URL}/organizations/${orgId}/projects/${projId}/containers`, {
+			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
+		});
 		if (!res.ok) return [];
 		const data = (await res.json()) as { containers?: Container[] } | Container[];
 		return Array.isArray(data) ? data : (data.containers ?? []);
@@ -112,10 +100,7 @@ export default async function ProjectDetailPage({
 	params: Promise<{ locale: string; id: string; proj_id: string }>;
 }) {
 	const { locale, id: orgId, proj_id: projId } = await params;
-	const [t, jar] = await Promise.all([
-		getTranslations({ locale, namespace: "app.projects" }),
-		cookies(),
-	]);
+	const [t, jar] = await Promise.all([getTranslations({ locale, namespace: "app.projects" }), cookies()]);
 	const tok = jar.get("access_token")?.value ?? "";
 
 	const [project, containers, tunnels, agents] = await Promise.all([
@@ -128,27 +113,24 @@ export default async function ProjectDetailPage({
 	if (!project) notFound();
 
 	const containerLabels = {
+		error: t("cActionError"),
+		remove: t("cRemove"),
+		restart: t("cRestart"),
 		start: t("cStart"),
 		stop: t("cStop"),
-		restart: t("cRestart"),
-		remove: t("cRemove"),
 		success: t("cActionSuccess"),
-		error: t("cActionError"),
 	};
 
 	return (
 		<div className="flex flex-col p-6 gap-6 max-w-3xl">
 			<nav className="flex items-center gap-1 text-sm text-muted-foreground">
-				<Link
-					href={`/${locale}/app/organizations`}
-					className="hover:text-foreground transition-colors"
-				>
+				<Link className="hover:text-foreground transition-colors" href={`/${locale}/app/organizations`}>
 					{t("orgs")}
 				</Link>
 				<ChevronRight className="size-3.5" />
 				<Link
-					href={`/${locale}/app/organizations/${orgId}`}
 					className="hover:text-foreground transition-colors"
+					href={`/${locale}/app/organizations/${orgId}`}
 				>
 					{t("org")}
 				</Link>
@@ -173,11 +155,11 @@ export default async function ProjectDetailPage({
 					<div className="rounded-lg border divide-y">
 						{containers.map((c) => (
 							<ContainerCard
+								container={c}
 								key={c.Names[0] ?? c.Image}
+								labels={containerLabels}
 								orgId={orgId}
 								projId={projId}
-								container={c}
-								labels={containerLabels}
 							/>
 						))}
 					</div>
@@ -185,51 +167,49 @@ export default async function ProjectDetailPage({
 			</section>
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("deploy")}
-				</h2>
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("deploy")}</h2>
 				<div className="rounded-lg border p-4">
 					<DeployForm
+						labels={{
+							cpus: t("cpus"),
+							deploy: t("deployBtn"),
+							env: t("cEnv"),
+							error: t("deployError"),
+							image: t("cImage"),
+							memoryMb: t("memoryMb"),
+							name: t("cName"),
+							ports: t("cPorts"),
+							success: t("deploySuccess"),
+						}}
 						orgId={orgId}
 						projId={projId}
-						labels={{
-							name: t("cName"),
-							image: t("cImage"),
-							ports: t("cPorts"),
-							env: t("cEnv"),
-							cpus: t("cpus"),
-							memoryMb: t("memoryMb"),
-							deploy: t("deployBtn"),
-							success: t("deploySuccess"),
-							error: t("deployError"),
-						}}
 					/>
 				</div>
 			</section>
 
 			<HorizontalScaleSection
+				agents={agents.filter((a) => a.id !== project.agent_id)}
+				labels={{
+					addBtn: t("addTunnel"),
+					agentB: t("tunnelTargetAgent"),
+					confirm: t("tunnelConfirm"),
+					desc: t("horizontalScaleDesc"),
+					dialogTitle: t("addTunnelTitle"),
+					error: t("tunnelError"),
+					image: t("tunnelImage"),
+					noTunnels: t("noTunnels"),
+					replicaCount: t("tunnelReplicaCount"),
+					replicas: t("tunnelReplicas"),
+					status: "Status",
+					success: t("tunnelSuccess"),
+					targetAgent: t("tunnelTargetAgent"),
+					teardownError: t("tunnelTeardownError"),
+					teardownSuccess: t("tunnelTeardownSuccess"),
+					title: t("horizontalScale"),
+				}}
 				orgId={orgId}
 				projId={projId}
 				tunnels={tunnels}
-				agents={agents.filter((a) => a.id !== project.agent_id)}
-				labels={{
-					title: t("horizontalScale"),
-					desc: t("horizontalScaleDesc"),
-					addBtn: t("addTunnel"),
-					dialogTitle: t("addTunnelTitle"),
-					targetAgent: t("tunnelTargetAgent"),
-					image: t("tunnelImage"),
-					replicas: t("tunnelReplicas"),
-					confirm: t("tunnelConfirm"),
-					success: t("tunnelSuccess"),
-					error: t("tunnelError"),
-					teardownSuccess: t("tunnelTeardownSuccess"),
-					teardownError: t("tunnelTeardownError"),
-					noTunnels: t("noTunnels"),
-					agentB: t("tunnelTargetAgent"),
-					replicaCount: t("tunnelReplicaCount"),
-					status: "Status",
-				}}
 			/>
 
 			<section className="flex flex-col gap-3">
@@ -237,20 +217,18 @@ export default async function ProjectDetailPage({
 					{t("verticalScale")}
 				</h2>
 				<div className="rounded-lg border p-4">
-					<p className="text-sm text-muted-foreground mb-4">
-						{t("verticalScaleDesc")}
-					</p>
+					<p className="text-sm text-muted-foreground mb-4">{t("verticalScaleDesc")}</p>
 					<ResourceForm
-						orgId={orgId}
-						projId={projId}
 						labels={{
+							apply: t("apply"),
 							containerName: t("containerName"),
 							cpus: t("cpus"),
-							memoryMb: t("memoryMb"),
-							apply: t("apply"),
-							success: t("applySuccess"),
 							error: t("applyError"),
+							memoryMb: t("memoryMb"),
+							success: t("applySuccess"),
 						}}
+						orgId={orgId}
+						projId={projId}
 					/>
 				</div>
 			</section>

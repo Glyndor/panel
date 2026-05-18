@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 
 export interface AgentMetrics {
 	cpu_percent: number;
-	mem_used_mb: number;
-	mem_total_mb: number;
-	disk_used_gb: number;
 	disk_total_gb: number;
+	disk_used_gb: number;
+	mem_total_mb: number;
+	mem_used_mb: number;
 	timestamp: number;
 }
 

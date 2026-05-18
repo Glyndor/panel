@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE migration_state\n           SET status='transferring', role='source', target_url=$1,\n               agents_total=$2, agents_confirmed=0,\n               started_at=NOW(), updated_at=NOW()\n           WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0343546b4d839bf052229dcdafb90d801a3ca916849a363869bba605b648b07"
+}

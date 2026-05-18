@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO agent_events (id, agent_id, event, detail, created_at) VALUES ($1, $2, $3, $4, NOW())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28b24383bd086639f396e2bb59ae7620ef22bc6083c74a810ba4017c92ba7fd3"
+}

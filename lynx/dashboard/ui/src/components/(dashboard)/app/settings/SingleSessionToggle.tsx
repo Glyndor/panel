@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { toggleSingleSession } from "@/actions/(dashboard)/app/settings/profile";
+import { Switch } from "@/components/ui/switch";
 
 type Props = {
 	initial: boolean;
@@ -38,11 +38,7 @@ export function SingleSessionToggle({ initial, labels }: Props) {
 				<p className="text-sm font-medium">{labels.label}</p>
 				<p className="mt-0.5 text-xs text-muted-foreground">{labels.desc}</p>
 			</div>
-			<Switch
-				checked={enabled}
-				onCheckedChange={handleChange}
-				className="cursor-pointer shrink-0"
-			/>
+			<Switch checked={enabled} className="cursor-pointer shrink-0" onCheckedChange={handleChange} />
 		</div>
 	);
 }

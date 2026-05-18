@@ -58,6 +58,9 @@ pub async fn login(
         Some(u) => u,
     };
 
+    // Per-username rate limit — prevents credential stuffing across many IPs.
+    rate_limit::check_login_username(&mut redis, &username).await?;
+
     let ok = password::verify(&body.password, &u.password_hash)?;
     if !ok {
         return Err(AppError::InvalidCredentials);

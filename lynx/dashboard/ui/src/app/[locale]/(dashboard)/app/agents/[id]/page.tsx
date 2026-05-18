@@ -1,55 +1,52 @@
+import { ChevronRight, Shield } from "lucide-react";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import Link from "next/link";
-import { BACKEND_URL } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { ChevronRight, Shield } from "lucide-react";
-import { AgentDetailActions } from "@/components/(dashboard)/app/agents/detail/AgentDetailActions";
-import { MetricsPanel } from "@/components/(dashboard)/app/agents/detail/MetricsPanel";
-import { NftablesAlert } from "@/components/(dashboard)/app/agents/NftablesAlert";
-import { NftRulesPanel } from "@/components/(dashboard)/app/agents/detail/NftRulesPanel";
 import {
+	createGlobalRule,
+	createLocalRule,
+	deleteGlobalRule,
+	deleteLocalRule,
 	listGlobalRules,
 	listLocalRules,
-	createGlobalRule,
-	deleteGlobalRule,
 	pushGlobalRules,
-	createLocalRule,
-	deleteLocalRule,
 	pushLocalRules,
 } from "@/actions/(dashboard)/app/agents/nftables";
+import { AgentDetailActions } from "@/components/(dashboard)/app/agents/detail/AgentDetailActions";
+import { MetricsPanel } from "@/components/(dashboard)/app/agents/detail/MetricsPanel";
+import { NftRulesPanel } from "@/components/(dashboard)/app/agents/detail/NftRulesPanel";
+import { NftablesAlert } from "@/components/(dashboard)/app/agents/NftablesAlert";
+import { Badge } from "@/components/ui/badge";
+import { BACKEND_URL } from "@/lib/api";
 
 interface Agent {
+	created_at: string;
 	id: string;
+	last_heartbeat: string | null;
 	name: string;
-	wg_ip: string;
-	wg_endpoint: string | null;
 	status: "online" | "lockdown" | "offline";
 	version: string | null;
-	last_heartbeat: string | null;
-	created_at: string;
+	wg_endpoint: string | null;
+	wg_ip: string;
 }
 
 interface NftStatus {
-	diverged: boolean;
 	detail?: string | null;
+	diverged: boolean;
 }
 
-const STATUS_BADGE: Record<
-	Agent["status"],
-	"default" | "destructive" | "secondary"
-> = {
-	online: "default",
+const STATUS_BADGE: Record<Agent["status"], "default" | "destructive" | "secondary"> = {
 	lockdown: "destructive",
 	offline: "secondary",
+	online: "default",
 };
 
 async function fetchAgent(token: string, id: string): Promise<Agent | null> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/agents/${id}`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (res.status === 404) return null;
 		if (!res.ok) return null;
@@ -59,14 +56,11 @@ async function fetchAgent(token: string, id: string): Promise<Agent | null> {
 	}
 }
 
-async function fetchNftStatus(
-	token: string,
-	id: string,
-): Promise<NftStatus> {
+async function fetchNftStatus(token: string, id: string): Promise<NftStatus> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/agents/${id}/nftables-status`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) return { diverged: false };
 		return res.json();
@@ -78,13 +72,13 @@ async function fetchNftStatus(
 function formatTime(ts: string | null): string {
 	if (!ts) return "—";
 	return new Date(ts).toLocaleString("en-GB", {
-		year: "numeric",
-		month: "short",
 		day: "numeric",
 		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
 		hour12: false,
+		minute: "2-digit",
+		month: "short",
+		second: "2-digit",
+		year: "numeric",
 	});
 }
 
@@ -96,16 +90,9 @@ function formatHeartbeat(ts: string | null): string {
 	return `${Math.floor(diff / 3600)}h ago`;
 }
 
-export default async function AgentDetailPage({
-	params,
-}: {
-	params: Promise<{ locale: string; id: string }>;
-}) {
+export default async function AgentDetailPage({ params }: { params: Promise<{ locale: string; id: string }> }) {
 	const { locale, id: agentId } = await params;
-	const [t, jar] = await Promise.all([
-		getTranslations({ locale, namespace: "app.agents" }),
-		cookies(),
-	]);
+	const [t, jar] = await Promise.all([getTranslations({ locale, namespace: "app.agents" }), cookies()]);
 	const tok = jar.get("access_token")?.value ?? "";
 
 	const [agent, nft, globalRules, localRules] = await Promise.all([
@@ -120,10 +107,7 @@ export default async function AgentDetailPage({
 	return (
 		<div className="flex flex-col p-6 gap-6 max-w-3xl">
 			<nav className="flex items-center gap-1 text-sm text-muted-foreground">
-				<Link
-					href={`/${locale}/app/agents`}
-					className="hover:text-foreground transition-colors"
-				>
+				<Link className="hover:text-foreground transition-colors" href={`/${locale}/app/agents`}>
 					{t("title")}
 				</Link>
 				<ChevronRight className="size-3.5" />
@@ -132,9 +116,7 @@ export default async function AgentDetailPage({
 
 			<div className="flex items-center gap-3 flex-wrap">
 				<h1 className="text-xl font-semibold">{agent.name}</h1>
-				<Badge variant={STATUS_BADGE[agent.status]}>
-					{t(`status.${agent.status}`)}
-				</Badge>
+				<Badge variant={STATUS_BADGE[agent.status]}>{t(`status.${agent.status}`)}</Badge>
 			</div>
 
 			<div className="rounded-lg border p-4 flex flex-col gap-3">
@@ -157,16 +139,12 @@ export default async function AgentDetailPage({
 						<p className="text-xs text-muted-foreground">{t("lastHeartbeat")}</p>
 						<p className="font-medium">{formatHeartbeat(agent.last_heartbeat)}</p>
 						{agent.last_heartbeat && (
-							<p className="text-xs text-muted-foreground">
-								{formatTime(agent.last_heartbeat)}
-							</p>
+							<p className="text-xs text-muted-foreground">{formatTime(agent.last_heartbeat)}</p>
 						)}
 					</div>
 					<div>
 						<p className="text-xs text-muted-foreground">ID</p>
-						<p className="font-mono text-xs text-muted-foreground select-all">
-							{agent.id}
-						</p>
+						<p className="font-mono text-xs text-muted-foreground select-all">{agent.id}</p>
 					</div>
 				</div>
 			</div>
@@ -176,12 +154,12 @@ export default async function AgentDetailPage({
 					<MetricsPanel
 						agentId={agent.id}
 						labels={{
-							metrics: t("metricsLive"),
-							cpu: t("metricsCpu"),
-							memory: t("metricsMemory"),
-							disk: t("metricsDisk"),
-							connecting: t("metricsConnecting"),
 							agentOffline: t("metricsAgentOffline"),
+							connecting: t("metricsConnecting"),
+							cpu: t("metricsCpu"),
+							disk: t("metricsDisk"),
+							memory: t("metricsMemory"),
+							metrics: t("metricsLive"),
 							offline: t("metricsOffline"),
 						}}
 					/>
@@ -200,12 +178,12 @@ export default async function AgentDetailPage({
 						agentId={agent.id}
 						detail={nft.detail ?? null}
 						labels={{
-							title: t("nftDiverged"),
-							restore: t("nftRestore"),
 							accept: t("nftAccept"),
-							restoreSuccess: t("nftRestoreSuccess"),
 							acceptSuccess: t("nftAcceptSuccess"),
 							error: t("nftError"),
+							restore: t("nftRestore"),
+							restoreSuccess: t("nftRestoreSuccess"),
+							title: t("nftDiverged"),
 						}}
 					/>
 				)}
@@ -218,30 +196,30 @@ export default async function AgentDetailPage({
 						initialRules={globalRules}
 						labels={{
 							addRule: t("nftAddRule"),
-							kind: t("nftKind"),
-							port: t("nftPort"),
-							protocol: t("nftProtocol"),
-							ipList: t("nftIpList"),
-							ratePerMin: t("nftRatePerMin"),
-							description: t("nftDescription"),
-							priority: t("nftPriority"),
 							create: t("nftCreate"),
-							createSuccess: t("nftCreateSuccess"),
 							createError: t("nftCreateError"),
-							deleteSuccess: t("nftDeleteSuccess"),
+							createSuccess: t("nftCreateSuccess"),
 							deleteError: t("nftDeleteError"),
-							push: t("nftPush"),
-							pushSuccess: t("nftPushSuccess"),
-							pushError: t("nftPushError"),
-							noRules: t("nftNoRules"),
-							kindAllowPort: t("nftKindAllowPort"),
-							kindBlockPort: t("nftKindBlockPort"),
+							deleteSuccess: t("nftDeleteSuccess"),
+							description: t("nftDescription"),
+							ipList: t("nftIpList"),
+							kind: t("nftKind"),
 							kindAllowIp: t("nftKindAllowIp"),
+							kindAllowPort: t("nftKindAllowPort"),
 							kindBlockIp: t("nftKindBlockIp"),
+							kindBlockPort: t("nftKindBlockPort"),
 							kindRateLimit: t("nftKindRateLimit"),
+							noRules: t("nftNoRules"),
+							port: t("nftPort"),
+							priority: t("nftPriority"),
+							protoBoth: t("nftProtoBoth"),
+							protocol: t("nftProtocol"),
 							protoTcp: t("nftProtoTcp"),
 							protoUdp: t("nftProtoUdp"),
-							protoBoth: t("nftProtoBoth"),
+							push: t("nftPush"),
+							pushError: t("nftPushError"),
+							pushSuccess: t("nftPushSuccess"),
+							ratePerMin: t("nftRatePerMin"),
 						}}
 						onCreateRule={createGlobalRule}
 						onDeleteRule={deleteGlobalRule}
@@ -257,30 +235,30 @@ export default async function AgentDetailPage({
 						initialRules={localRules}
 						labels={{
 							addRule: t("nftAddRule"),
-							kind: t("nftKind"),
-							port: t("nftPort"),
-							protocol: t("nftProtocol"),
-							ipList: t("nftIpList"),
-							ratePerMin: t("nftRatePerMin"),
-							description: t("nftDescription"),
-							priority: t("nftPriority"),
 							create: t("nftCreate"),
-							createSuccess: t("nftCreateSuccess"),
 							createError: t("nftCreateError"),
-							deleteSuccess: t("nftDeleteSuccess"),
+							createSuccess: t("nftCreateSuccess"),
 							deleteError: t("nftDeleteError"),
-							push: t("nftPush"),
-							pushSuccess: t("nftPushSuccess"),
-							pushError: t("nftPushError"),
-							noRules: t("nftNoRules"),
-							kindAllowPort: t("nftKindAllowPort"),
-							kindBlockPort: t("nftKindBlockPort"),
+							deleteSuccess: t("nftDeleteSuccess"),
+							description: t("nftDescription"),
+							ipList: t("nftIpList"),
+							kind: t("nftKind"),
 							kindAllowIp: t("nftKindAllowIp"),
+							kindAllowPort: t("nftKindAllowPort"),
 							kindBlockIp: t("nftKindBlockIp"),
+							kindBlockPort: t("nftKindBlockPort"),
 							kindRateLimit: t("nftKindRateLimit"),
+							noRules: t("nftNoRules"),
+							port: t("nftPort"),
+							priority: t("nftPriority"),
+							protoBoth: t("nftProtoBoth"),
+							protocol: t("nftProtocol"),
 							protoTcp: t("nftProtoTcp"),
 							protoUdp: t("nftProtoUdp"),
-							protoBoth: t("nftProtoBoth"),
+							push: t("nftPush"),
+							pushError: t("nftPushError"),
+							pushSuccess: t("nftPushSuccess"),
+							ratePerMin: t("nftRatePerMin"),
 						}}
 						onCreateRule={createLocalRule.bind(null, agentId)}
 						onDeleteRule={deleteLocalRule.bind(null, agentId)}
@@ -292,8 +270,8 @@ export default async function AgentDetailPage({
 			<div className="rounded-lg border p-4 flex flex-col gap-3">
 				<p className="text-sm font-medium">{t("auditLog")}</p>
 				<Link
-					href={`/${locale}/app/agents/${agent.id}/audit-log`}
 					className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors w-fit"
+					href={`/${locale}/app/agents/${agent.id}/audit-log`}
 				>
 					{t("auditLog")} →
 				</Link>
@@ -302,16 +280,16 @@ export default async function AgentDetailPage({
 			<div className="rounded-lg border border-destructive/30 p-4 flex flex-col gap-3">
 				<AgentDetailActions
 					agentId={agent.id}
-					locale={locale}
 					labels={{
-						reboot: t("reboot"),
-						rebootConfirm: t("rebootConfirm"),
-						rebootSuccess: t("rebootSuccess"),
-						rebootError: t("rebootError"),
 						deleteAgent: t("deleteAgent"),
 						deleteConfirm: t("deleteConfirm"),
 						deleteError: t("deleteError"),
+						reboot: t("reboot"),
+						rebootConfirm: t("rebootConfirm"),
+						rebootError: t("rebootError"),
+						rebootSuccess: t("rebootSuccess"),
 					}}
+					locale={locale}
 				/>
 			</div>
 		</div>

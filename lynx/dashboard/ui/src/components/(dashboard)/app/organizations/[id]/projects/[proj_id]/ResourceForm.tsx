@@ -1,17 +1,18 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
-import { resourceFormSchema, type ResourceFormInput } from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
 import { updateContainerResources } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]";
+import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+	type ResourceFormInput,
+	resourceFormSchema,
+} from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
 
 interface Props {
-	orgId: string;
-	projId: string;
 	labels: {
 		containerName: string;
 		cpus: string;
@@ -20,6 +21,8 @@ interface Props {
 		success: string;
 		error: string;
 	};
+	orgId: string;
+	projId: string;
 }
 
 export function ResourceForm({ orgId, projId, labels }: Props) {
@@ -44,23 +47,18 @@ export function ResourceForm({ orgId, projId, labels }: Props) {
 				return r;
 			}),
 			{
+				error: labels.error,
 				loading: labels.apply,
 				success: labels.success,
-				error: labels.error,
 			},
 		);
 	};
 
 	return (
-		<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+		<form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
 			<Field>
 				<FieldLabel htmlFor="container-name">{labels.containerName}</FieldLabel>
-				<Input
-					id="container-name"
-					{...register("container_name")}
-					placeholder="web"
-					disabled={isSubmitting}
-				/>
+				<Input id="container-name" {...register("container_name")} disabled={isSubmitting} placeholder="web" />
 				<FieldError errors={[errors.container_name]} />
 			</Field>
 
@@ -69,12 +67,12 @@ export function ResourceForm({ orgId, projId, labels }: Props) {
 					<FieldLabel htmlFor="cpus">{labels.cpus}</FieldLabel>
 					<Input
 						id="cpus"
-						type="number"
 						min="0.1"
 						step="0.1"
+						type="number"
 						{...register("cpus")}
-						placeholder="1.0"
 						disabled={isSubmitting}
+						placeholder="1.0"
 					/>
 					<FieldError errors={[errors.cpus]} />
 				</Field>
@@ -82,19 +80,19 @@ export function ResourceForm({ orgId, projId, labels }: Props) {
 					<FieldLabel htmlFor="memory-mb">{labels.memoryMb}</FieldLabel>
 					<Input
 						id="memory-mb"
-						type="number"
 						min="64"
 						step="64"
+						type="number"
 						{...register("memory_mb")}
-						placeholder="512"
 						disabled={isSubmitting}
+						placeholder="512"
 					/>
 					<FieldError errors={[errors.memory_mb]} />
 				</Field>
 			</div>
 
 			<div>
-				<Button type="submit" size="sm" disabled={isSubmitting}>
+				<Button disabled={isSubmitting} size="sm" type="submit">
 					{isSubmitting ? "…" : labels.apply}
 				</Button>
 			</div>

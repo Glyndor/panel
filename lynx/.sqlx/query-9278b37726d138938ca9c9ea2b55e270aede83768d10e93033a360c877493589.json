@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT agents_total, agents_confirmed FROM migration_state WHERE id=1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "agents_total",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "agents_confirmed",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9278b37726d138938ca9c9ea2b55e270aede83768d10e93033a360c877493589"
+}

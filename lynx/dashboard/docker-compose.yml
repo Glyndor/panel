@@ -1,27 +1,40 @@
 services:
   frontend:
     container_name: lynx-dashboard-frontend
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-      target: runner
+    image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    working_dir: /etc/lynx/frontend
+    command: ["/etc/lynx/frontend/lynx-dashboard-frontend"]
     ports:
       - "19443:3000"
     environment:
       - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
       - BACKEND_URL=http://lynx-dashboard-backend:8080
+      - NEXT_TELEMETRY_DISABLED=1
+    volumes:
+      - /etc/lynx/frontend:/etc/lynx/frontend:ro
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
     networks:
       - lynx-dashboard-app
 
   backend:
     container_name: lynx-dashboard-backend
-    build:
-      context: ./server
-      dockerfile: Dockerfile
+    image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    command: ["/etc/lynx/bin/lynx-dashboard-backend"]
+    volumes:
+      - /etc/lynx/bin:/etc/lynx/bin
+      - /etc/lynx/frontend:/etc/lynx/frontend
+      - /run/podman/podman.sock:/run/podman/podman.sock
     environment:
       - DATABASE_URL_FILE=/run/secrets/lynx-dashboard-database-url
       - REDIS_URL_FILE=/run/secrets/lynx-dashboard-redis-url
@@ -55,7 +68,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5

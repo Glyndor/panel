@@ -21,16 +21,32 @@ pub async fn frontend_metrics_ws(
 ) -> Result<impl IntoResponse, AppError> {
     super::events_ws::validate_ws_origin(&state, &headers).await?;
 
-    let exists = sqlx::query_scalar!("SELECT id FROM agents WHERE id = $1", agent_id)
+    // 404 for both "not found" and "no access" — prevents enumeration of agent IDs.
+    let agent_exists = sqlx::query_scalar!("SELECT id FROM agents WHERE id = $1", agent_id)
         .fetch_optional(&state.db)
         .await?
         .is_some();
 
-    if !exists {
+    if !agent_exists {
         return Err(AppError::NotFound);
     }
 
-    let _ = user;
+    // Require at least vps:read permission to subscribe to any agent's metrics.
+    let has_access: bool = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE ur.user_id = $1 AND p.key IN ('vps:read','vps:*','*:*')
+        ) AS "exists!""#,
+        user.user_id
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    if !has_access {
+        return Err(AppError::NotFound);
+    }
 
     Ok(ws.on_upgrade(move |socket| handle_frontend_socket(state, agent_id, socket)))
 }

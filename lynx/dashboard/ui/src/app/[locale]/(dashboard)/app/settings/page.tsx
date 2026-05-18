@@ -1,54 +1,54 @@
-import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
-import { BACKEND_URL } from "@/lib/api";
-import { SessionList } from "@/components/(dashboard)/app/settings/SessionList";
-import { SessionListSkeleton } from "@/components/(dashboard)/app/settings/SessionListSkeleton";
-import { RotateButton } from "@/components/(dashboard)/app/settings/RotateButton";
+import { Suspense } from "react";
+import { getMigrationStatus } from "@/actions/(dashboard)/app/settings/migration";
+import { getMe } from "@/actions/(dashboard)/app/settings/profile";
 import { BrandingForm } from "@/components/(dashboard)/app/settings/BrandingForm";
-import { UpdateSection } from "@/components/(dashboard)/app/settings/UpdateSection";
+import { ChangePasswordForm } from "@/components/(dashboard)/app/settings/ChangePasswordForm";
 import { DomainSection } from "@/components/(dashboard)/app/settings/DomainSection";
 import { MigrationSection } from "@/components/(dashboard)/app/settings/MigrationSection";
-import { getMigrationStatus } from "@/actions/(dashboard)/app/settings/migration";
-import { ChangePasswordForm } from "@/components/(dashboard)/app/settings/ChangePasswordForm";
-import { SingleSessionToggle } from "@/components/(dashboard)/app/settings/SingleSessionToggle";
-import { getMe } from "@/actions/(dashboard)/app/settings/profile";
+import { RotateButton } from "@/components/(dashboard)/app/settings/RotateButton";
 import { RotationLog } from "@/components/(dashboard)/app/settings/RotationLog";
+import { SessionList } from "@/components/(dashboard)/app/settings/SessionList";
+import { SessionListSkeleton } from "@/components/(dashboard)/app/settings/SessionListSkeleton";
+import { SingleSessionToggle } from "@/components/(dashboard)/app/settings/SingleSessionToggle";
+import { UpdateSection } from "@/components/(dashboard)/app/settings/UpdateSection";
+import { BACKEND_URL } from "@/lib/api";
 
 interface Branding {
+	accent_color: string;
 	company_name: string;
 	logo_url: string | null;
 	primary_color: string;
 	secondary_color: string;
-	accent_color: string;
 }
 
 interface DomainConfig {
-	domain: string | null;
-	cert_type: string;
 	cert_expires_at: string | null;
+	cert_type: string;
+	domain: string | null;
+	error_message: string | null;
 	hsts_enabled: boolean;
 	port_19443_open: boolean;
 	status: string;
-	error_message: string | null;
 }
 
 const BRANDING_DEFAULTS: Branding = {
+	accent_color: "#6366f1",
 	company_name: "Lynx",
 	logo_url: null,
 	primary_color: "#0f172a",
 	secondary_color: "#38bdf8",
-	accent_color: "#6366f1",
 };
 
 const DOMAIN_DEFAULTS: DomainConfig = {
-	domain: null,
-	cert_type: "self_signed",
 	cert_expires_at: null,
+	cert_type: "self_signed",
+	domain: null,
+	error_message: null,
 	hsts_enabled: false,
 	port_19443_open: true,
 	status: "unconfigured",
-	error_message: null,
 };
 
 async function fetchBranding(): Promise<Branding> {
@@ -66,8 +66,8 @@ async function fetchBranding(): Promise<Branding> {
 async function fetchDomainConfig(token: string): Promise<DomainConfig> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/domain`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) return DOMAIN_DEFAULTS;
 		return (await res.json()) as DomainConfig;
@@ -76,9 +76,7 @@ async function fetchDomainConfig(token: string): Promise<DomainConfig> {
 	}
 }
 
-export default async function SettingsPage({
-	params,
-}: { params: Promise<{ locale: string }> }) {
+export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
 	const { locale } = await params;
 	const [t, jar, branding] = await Promise.all([
 		getTranslations({ locale, namespace: "app.settings" }),
@@ -109,25 +107,25 @@ export default async function SettingsPage({
 						<div className="border-t pt-4">
 							<p className="text-sm font-medium mb-3">{t("changePassword")}</p>
 							<ChangePasswordForm
-								locale={locale}
 								labels={{
-									currentPassword: t("currentPassword"),
-									newPassword: t("newPassword"),
 									btn: t("changePasswordBtn"),
+									currentPassword: t("currentPassword"),
+									error: t("changePasswordError"),
+									newPassword: t("newPassword"),
 									success: t("changePasswordSuccess"),
 									wrong: t("changePasswordWrong"),
-									error: t("changePasswordError"),
 								}}
+								locale={locale}
 							/>
 						</div>
 						<div className="border-t pt-4">
 							<SingleSessionToggle
 								initial={me.single_session}
 								labels={{
-									label: t("singleSession"),
 									desc: t("singleSessionDesc"),
-									success: t("singleSessionSuccess"),
 									error: t("singleSessionError"),
+									label: t("singleSession"),
+									success: t("singleSessionSuccess"),
 								}}
 							/>
 						</div>
@@ -136,128 +134,110 @@ export default async function SettingsPage({
 			)}
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("domain")}
-				</h2>
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("domain")}</h2>
 				<div className="rounded-lg border p-4">
 					<DomainSection
 						initial={domainCfg}
 						labels={{
-							desc: t("domainDesc"),
-							current: t("domainCurrent"),
-							none: t("domainNone"),
-							input: t("domainInput"),
-							email: t("domainEmail"),
-							setup: t("domainSetup"),
-							pending: t("domainPending"),
 							active: t("domainActive"),
-							error: t("domainError"),
-							unconfigured: t("domainUnconfigured"),
-							verify: t("domainVerify"),
-							dnsOk: t("domainDnsOk"),
-							dnsFail: t("domainDnsFail"),
-							verifyError: t("domainVerifyError"),
-							setupError: t("domainSetupError"),
-							hsts: t("domainHsts"),
-							hstsDesc: t("domainHstsDesc"),
-							hstsEnable: t("domainHstsEnable"),
-							hstsDisable: t("domainHstsDisable"),
-							hstsSuccess: t("domainHstsSuccess"),
-							hstsError: t("domainHstsError"),
-							closePort: t("domainClosePort"),
-							closePortDesc: t("domainClosePortDesc"),
-							closePortBtn: t("domainClosePortBtn"),
-							closePortConfirm: t("domainClosePortConfirm"),
-							closePortSuccess: t("domainClosePortSuccess"),
-							closePortError: t("domainClosePortError"),
 							cert: t("domainCert"),
-							certSelfSigned: t("domainCertSelfSigned"),
-							certLE: t("domainCertLE"),
 							certCloudflare: t("domainCertCloudflare"),
 							certCustom: t("domainCertCustom"),
 							certExpires: t("domainCertExpires"),
+							certKeyOptional: t("domainCertKeyOptional"),
+							certKeyPem: t("domainCertKeyPem"),
+							certKeyPemPlaceholder: t("domainCertKeyPemPlaceholder"),
+							certLE: t("domainCertLE"),
+							certPem: t("domainCertPem"),
+							certPemPlaceholder: t("domainCertPemPlaceholder"),
+							certSelfSigned: t("domainCertSelfSigned"),
 							certUpload: t("domainCertUpload"),
 							certUploadCloudflare: t("domainCertUploadCloudflare"),
 							certUploadCustom: t("domainCertUploadCustom"),
-							certPem: t("domainCertPem"),
-							certPemPlaceholder: t("domainCertPemPlaceholder"),
-							certKeyPem: t("domainCertKeyPem"),
-							certKeyPemPlaceholder: t("domainCertKeyPemPlaceholder"),
-							certKeyOptional: t("domainCertKeyOptional"),
-							certUploadSuccess: t("domainCertUploadSuccess"),
 							certUploadError: t("domainCertUploadError"),
+							certUploadSuccess: t("domainCertUploadSuccess"),
+							closePort: t("domainClosePort"),
+							closePortBtn: t("domainClosePortBtn"),
+							closePortConfirm: t("domainClosePortConfirm"),
+							closePortDesc: t("domainClosePortDesc"),
+							closePortError: t("domainClosePortError"),
+							closePortSuccess: t("domainClosePortSuccess"),
+							current: t("domainCurrent"),
+							desc: t("domainDesc"),
+							dnsFail: t("domainDnsFail"),
+							dnsOk: t("domainDnsOk"),
+							email: t("domainEmail"),
+							error: t("domainError"),
+							hsts: t("domainHsts"),
+							hstsDesc: t("domainHstsDesc"),
+							hstsDisable: t("domainHstsDisable"),
+							hstsEnable: t("domainHstsEnable"),
+							hstsError: t("domainHstsError"),
+							hstsSuccess: t("domainHstsSuccess"),
+							input: t("domainInput"),
+							none: t("domainNone"),
+							pending: t("domainPending"),
+							setup: t("domainSetup"),
+							setupError: t("domainSetupError"),
+							unconfigured: t("domainUnconfigured"),
+							verify: t("domainVerify"),
+							verifyError: t("domainVerifyError"),
 						}}
 					/>
 				</div>
 			</section>
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("security")}
-				</h2>
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("security")}</h2>
 				<div className="rounded-lg border p-4 flex items-center justify-between gap-4">
 					<div className="min-w-0">
 						<p className="text-sm font-medium">{t("rotateKeys")}</p>
-						<p className="mt-0.5 text-xs text-muted-foreground">
-							{t("rotateKeysDesc")}
-						</p>
+						<p className="mt-0.5 text-xs text-muted-foreground">{t("rotateKeysDesc")}</p>
 					</div>
-					<RotateButton
-						locale={locale}
-						label={t("rotateKeysBtn")}
-						confirmMsg={t("rotateKeysConfirm")}
-					/>
+					<RotateButton confirmMsg={t("rotateKeysConfirm")} label={t("rotateKeysBtn")} locale={locale} />
 				</div>
 				<div className="flex flex-col gap-2 mt-2">
-					<p className="text-xs font-medium text-muted-foreground">
-						{t("rotationLog")}
-					</p>
+					<p className="text-xs font-medium text-muted-foreground">{t("rotationLog")}</p>
 					<Suspense fallback={<div className="rounded-lg border h-20 animate-pulse bg-muted/30" />}>
-						<RotationLog token={token} locale={locale} />
+						<RotationLog locale={locale} token={token} />
 					</Suspense>
 				</div>
 			</section>
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("updates")}
-				</h2>
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("updates")}</h2>
 				<div className="rounded-lg border p-4">
-					<p className="text-sm text-muted-foreground mb-3">
-						{t("updatesDesc")}
-					</p>
+					<p className="text-sm text-muted-foreground mb-3">{t("updatesDesc")}</p>
 					<UpdateSection
 						labels={{
 							checkBtn: t("updateCheck"),
+							checkError: t("updateCheckError"),
 							current: t("updateCurrent"),
 							latest: t("updateLatest"),
-							upToDate: t("updateUpToDate"),
-							updateAvailable: t("updateAvailable"),
 							triggerBtn: t("updateTrigger"),
-							triggerSuccess: t("updateTriggerSuccess"),
 							triggerError: t("updateTriggerError"),
-							checkError: t("updateCheckError"),
+							triggerSuccess: t("updateTriggerSuccess"),
+							updateAvailable: t("updateAvailable"),
+							upToDate: t("updateUpToDate"),
 						}}
 					/>
 				</div>
 			</section>
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("branding")}
-				</h2>
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("branding")}</h2>
 				<div className="rounded-lg border p-4">
 					<BrandingForm
 						initial={branding}
 						labels={{
+							accentColor: t("brandingAccentColor"),
 							companyName: t("brandingCompanyName"),
+							error: t("brandingError"),
 							logoUrl: t("brandingLogoUrl"),
 							primaryColor: t("brandingPrimaryColor"),
-							secondaryColor: t("brandingSecondaryColor"),
-							accentColor: t("brandingAccentColor"),
 							save: t("brandingSave"),
 							saved: t("brandingSaved"),
-							error: t("brandingError"),
+							secondaryColor: t("brandingSecondaryColor"),
 						}}
 					/>
 				</div>
@@ -272,36 +252,39 @@ export default async function SettingsPage({
 						<MigrationSection
 							initial={migrationState}
 							labels={{
-								title: t("migration"),
-								desc: t("migrationDesc"),
-								sourceTitle: t("migrationSourceTitle"),
-								sourceDesc: t("migrationSourceDesc"),
-								targetUrl: t("migrationTargetUrl"),
-								token: t("migrationToken"),
-								startMigration: t("migrationStart"),
-								targetTitle: t("migrationTargetTitle"),
-								targetDesc: t("migrationTargetDesc"),
-								prepareBtn: t("migrationPrepare"),
-								preparedToken: t("migrationPreparedToken"),
-								copyToken: t("migrationCopyToken"),
 								abortBtn: t("migrationAbort"),
+								abortError: t("migrationAbortError"),
+								abortSuccess: t("migrationAbortSuccess"),
+								agentsProgress: t("migrationAgentsProgress", {
+									confirmed: "{confirmed}",
+									total: "{total}",
+								}),
 								confirmShutdown: t("migrationConfirmShutdown"),
 								confirmShutdownMsg: t("migrationConfirmShutdownMsg"),
+								copyToken: t("migrationCopyToken"),
+								desc: t("migrationDesc"),
+								error: t("migrationStatusError"),
+								prepareBtn: t("migrationPrepare"),
+								preparedToken: t("migrationPreparedToken"),
+								prepareError: t("migrationPrepareError"),
+								shutdownError: t("migrationShutdownError"),
+								sourceDesc: t("migrationSourceDesc"),
+								sourceTitle: t("migrationSourceTitle"),
+								startError: t("migrationStartError"),
+								startMigration: t("migrationStart"),
+								statusAborted: t("migrationStatusAborted"),
+								statusCompleted: t("migrationStatusCompleted"),
+								statusError: t("migrationStatusError"),
 								statusIdle: t("migrationStatusIdle"),
+								statusNotifying: t("migrationStatusNotifying"),
 								statusPreparing: t("migrationStatusPreparing"),
 								statusTransferring: t("migrationStatusTransferring"),
-								statusNotifying: t("migrationStatusNotifying"),
 								statusWaiting: t("migrationStatusWaiting"),
-								statusCompleted: t("migrationStatusCompleted"),
-								statusAborted: t("migrationStatusAborted"),
-								statusError: t("migrationStatusError"),
-								agentsProgress: t("migrationAgentsProgress", { confirmed: "{confirmed}", total: "{total}" }),
-								error: t("migrationStatusError"),
-								prepareError: t("migrationPrepareError"),
-								startError: t("migrationStartError"),
-								abortSuccess: t("migrationAbortSuccess"),
-								abortError: t("migrationAbortError"),
-								shutdownError: t("migrationShutdownError"),
+								targetDesc: t("migrationTargetDesc"),
+								targetTitle: t("migrationTargetTitle"),
+								targetUrl: t("migrationTargetUrl"),
+								title: t("migration"),
+								token: t("migrationToken"),
 							}}
 						/>
 					</div>
@@ -309,11 +292,9 @@ export default async function SettingsPage({
 			)}
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("sessions")}
-				</h2>
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("sessions")}</h2>
 				<Suspense fallback={<SessionListSkeleton />}>
-					<SessionList token={token} locale={locale} />
+					<SessionList locale={locale} token={token} />
 				</Suspense>
 			</section>
 		</div>

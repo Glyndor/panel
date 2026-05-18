@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'disconnected', NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "27170bba17f0a3741d6675957c6e6d25ecec938882b5221440a0797c67eb3c36"
+}

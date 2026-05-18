@@ -1,9 +1,9 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { rotateKeys } from "@/actions/(dashboard)/app/settings";
+import { Button } from "@/components/ui/button";
 
 type Props = {
 	locale: string;
@@ -23,7 +23,7 @@ export function RotateButton({ locale, label, confirmMsg }: Props) {
 	}
 
 	return (
-		<Button variant="destructive" size="sm" disabled={pending} onClick={handleRotate}>
+		<Button disabled={pending} onClick={handleRotate} size="sm" variant="destructive">
 			{label}
 		</Button>
 	);

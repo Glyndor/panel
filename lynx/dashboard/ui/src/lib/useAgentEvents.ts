@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AgentEventKind =
 	| "connected"
@@ -13,10 +13,10 @@ export type AgentEventKind =
 	| "conflicting_software_detected";
 
 export interface AgentEvent {
-	type: "agent_event";
 	agent_id: string;
-	event: AgentEventKind;
 	detail: string | null;
+	event: AgentEventKind;
+	type: "agent_event";
 }
 
 export type EventsStatus = "connecting" | "open" | "closed";
@@ -42,7 +42,10 @@ export function useAgentEvents({ onEvent }: UseAgentEventsOptions = {}) {
 		wsRef.current = ws;
 
 		ws.onopen = () => {
-			if (!mountedRef.current) { ws.close(); return; }
+			if (!mountedRef.current) {
+				ws.close();
+				return;
+			}
 			backoffRef.current = BACKOFF_BASE;
 			setStatus("open");
 		};

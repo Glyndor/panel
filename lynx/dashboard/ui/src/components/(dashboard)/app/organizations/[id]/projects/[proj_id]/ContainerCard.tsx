@@ -2,20 +2,18 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { containerAction } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]/containers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { containerAction } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]/containers";
 
 interface Container {
-	Names: string[];
 	Image: string;
-	Status: string;
+	Names: string[];
 	State: string;
+	Status: string;
 }
 
 interface Props {
-	orgId: string;
-	projId: string;
 	container: Container;
 	labels: {
 		start: string;
@@ -25,6 +23,8 @@ interface Props {
 		success: string;
 		error: string;
 	};
+	orgId: string;
+	projId: string;
 }
 
 function stateVariant(state: string): "default" | "secondary" | "destructive" {
@@ -54,22 +54,20 @@ export function ContainerCard({ orgId, projId, container, labels }: Props) {
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					<span className="text-sm font-medium font-mono truncate">{name}</span>
-					<Badge variant={stateVariant(container.State)} className="shrink-0">
+					<Badge className="shrink-0" variant={stateVariant(container.State)}>
 						{container.State}
 					</Badge>
 				</div>
-				<p className="text-xs text-muted-foreground truncate mt-0.5">
-					{container.Image}
-				</p>
+				<p className="text-xs text-muted-foreground truncate mt-0.5">{container.Image}</p>
 			</div>
 			<div className="flex gap-1 shrink-0">
 				{!isRunning && (
 					<Button
-						size="sm"
-						variant="outline"
 						className="h-7 text-xs"
 						disabled={isPending}
 						onClick={() => handle("start")}
+						size="sm"
+						variant="outline"
 					>
 						{labels.start}
 					</Button>
@@ -77,31 +75,31 @@ export function ContainerCard({ orgId, projId, container, labels }: Props) {
 				{isRunning && (
 					<>
 						<Button
-							size="sm"
-							variant="outline"
 							className="h-7 text-xs"
 							disabled={isPending}
 							onClick={() => handle("restart")}
+							size="sm"
+							variant="outline"
 						>
 							{labels.restart}
 						</Button>
 						<Button
-							size="sm"
-							variant="outline"
 							className="h-7 text-xs"
 							disabled={isPending}
 							onClick={() => handle("stop")}
+							size="sm"
+							variant="outline"
 						>
 							{labels.stop}
 						</Button>
 					</>
 				)}
 				<Button
-					size="sm"
-					variant="ghost"
 					className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
 					disabled={isPending}
 					onClick={() => handle("remove")}
+					size="sm"
+					variant="ghost"
 				>
 					{labels.remove}
 				</Button>

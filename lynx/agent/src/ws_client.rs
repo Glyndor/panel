@@ -49,6 +49,7 @@ pub async fn run_ws_client(state: AppState) {
             Ok((ws_stream, _)) => {
                 backoff = BACKOFF_BASE;
                 tracing::info!("dashboard WS connected");
+                record_dashboard_contact(&state);
                 run_session(&state, ws_stream).await;
                 tracing::warn!("dashboard WS session ended — reconnecting");
             }
@@ -115,6 +116,7 @@ async fn run_session(
                 #[allow(clippy::collapsible_match)]
                 match msg {
                     Some(Ok(Message::Text(text))) => {
+                        record_dashboard_contact(state);
                         let reply = handle_message(state, text.as_str()).await;
                         if let Some(frame) = reply {
                             let text = serde_json::to_string(&frame).unwrap_or_default();
@@ -138,11 +140,26 @@ async fn run_session(
     }
 }
 
+fn record_dashboard_contact(state: &AppState) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    state
+        .last_dashboard_contact
+        .store(now, std::sync::atomic::Ordering::SeqCst);
+}
+
 fn heartbeat_payload(state: &AppState) -> Value {
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        a => a,
+    };
     json!({
         "type": "heartbeat",
         "agent_id": state.config.agent_id,
         "version": state.config.version,
+        "arch": arch,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "status": if state.lockdown.load(Ordering::SeqCst) { "lockdown" } else { "online" },
         "nonce": Uuid::now_v7(),

@@ -181,10 +181,16 @@ async fn handle_agent_message(
                 .get("version")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let arch = msg
+                .data
+                .get("arch")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             sqlx::query!(
-                "UPDATE agents SET status=$1, last_heartbeat=NOW(), version=$2 WHERE id=$3",
+                "UPDATE agents SET status=$1, last_heartbeat=NOW(), version=$2, arch=$3 WHERE id=$4",
                 status,
                 version,
+                arch,
                 agent_id
             )
             .execute(&state.db)
@@ -368,6 +374,7 @@ pub async fn is_connected(state: &AppState, agent_id: Uuid) -> bool {
 
 /// Push current global rules to an agent that has pending unsynced entries.
 /// Called on WS connect — catches up agents that were offline during a global push.
+/// Sends both input chain (lynx-global) and output chain (lynx-global-output).
 async fn push_pending_global_sync(state: &AppState, agent_id: Uuid) {
     let has_pending = sqlx::query_scalar!(
         "SELECT 1 FROM global_rule_sync WHERE agent_id = $1 AND synced_at IS NULL LIMIT 1",
@@ -383,12 +390,16 @@ async fn push_pending_global_sync(state: &AppState, agent_id: Uuid) {
         return;
     }
 
-    // Generate current global chain body from all enabled global rules.
-    let rules = match sqlx::query!(
-        r#"SELECT kind, port, protocol, ip_list, rate_per_min, priority
-           FROM nftables_rules
-           WHERE scope = 'global' AND enabled = true
-           ORDER BY priority ASC, created_at ASC"#
+    let rules = match sqlx::query_as!(
+        crate::nftables::NftRule,
+        r#"
+        SELECT id, scope, agent_id, kind, port, port_end, protocol,
+               ip_list, ip_version, rate_per_min, description,
+               priority, enabled, direction, created_by, created_at, updated_at
+        FROM nftables_rules
+        WHERE scope = 'global' AND enabled = true
+        ORDER BY priority ASC, created_at ASC
+        "#
     )
     .fetch_all(&state.db)
     .await
@@ -400,40 +411,37 @@ async fn push_pending_global_sync(state: &AppState, agent_id: Uuid) {
         }
     };
 
-    // Convert DB rows to nft chain body text.
-    let body = rules
-        .iter()
-        .map(|r| {
-            crate::nftables::rule_line(
-                &r.kind,
-                r.port.map(|p| p as u16),
-                r.protocol.as_deref(),
-                &r.ip_list,
-                r.rate_per_min.map(|r| r as u32),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let input_body = crate::nftables::rules_to_nft_chain(&rules);
+    let output_body = crate::nftables::rules_to_nft_output_chain(&rules);
 
-    let signed = match crate::crypto::cmd::sign_command_system(
-        &state.config,
-        agent_id,
-        "write",
-        &serde_json::json!({
-            "type": "nftables.apply",
-            "chain": "lynx-global",
-            "rules": body,
-        }),
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(agent_id = %agent_id, error = %e, "pending_sync: sign failed");
-            return;
-        }
+    let sign = |chain: &str, body: &str| {
+        crate::crypto::cmd::sign_command_system(
+            &state.config,
+            agent_id,
+            "write",
+            &serde_json::json!({
+                "type": "nftables.apply",
+                "chain": chain,
+                "rules": body,
+            }),
+        )
     };
 
-    let signed_val = serde_json::to_value(&signed).unwrap_or_default();
-    if push_command(state, agent_id, signed_val).await.is_some() {
+    let (Ok(signed_in), Ok(signed_out)) = (
+        sign("lynx-global", &input_body),
+        sign("lynx-global-output", &output_body),
+    ) else {
+        tracing::warn!(agent_id = %agent_id, "pending_sync: sign failed");
+        return;
+    };
+
+    let in_val = serde_json::to_value(&signed_in).unwrap_or_default();
+    let out_val = serde_json::to_value(&signed_out).unwrap_or_default();
+
+    let sent_in = push_command(state, agent_id, in_val).await.is_some();
+    let sent_out = push_command(state, agent_id, out_val).await.is_some();
+
+    if sent_in && sent_out {
         let _ = sqlx::query!(
             "UPDATE global_rule_sync SET synced_at = NOW() WHERE agent_id = $1 AND synced_at IS NULL",
             agent_id
