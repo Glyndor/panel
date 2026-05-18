@@ -232,18 +232,10 @@ jobs:
 
       # --- Frontend -----------------------------------------------------------
 
-      - name: Install bun (x64 for execution)
-        working-directory: ${{ github.workspace }}
-        run: |
-          VERSION=$(curl -s "https://api.github.com/repos/oven-sh/bun/releases/latest" \
-            | grep '"tag_name"' | head -1 | cut -d'"' -f4)
-          BASE_URL="https://github.com/oven-sh/bun/releases/download/${VERSION}"
-          curl -sL "${BASE_URL}/bun-linux-x64-musl.zip" -o bun-linux-x64-musl.zip
-          curl -sL "${BASE_URL}/SHASUMS256.txt" -o SHASUMS256.txt
-          grep "bun-linux-x64-musl.zip" SHASUMS256.txt | sha256sum -c -
-          unzip -q bun-linux-x64-musl.zip
-          sudo mv "bun-linux-x64-musl/bun" /usr/local/bin/bun
-          bun --version
+      - name: Install bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
 
       - name: Install frontend deps
         working-directory: lynx/dashboard/ui
