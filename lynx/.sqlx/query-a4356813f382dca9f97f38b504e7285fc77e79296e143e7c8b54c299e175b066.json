@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE migration_state SET status='error', error_message=$1, updated_at=NOW() WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4356813f382dca9f97f38b504e7285fc77e79296e143e7c8b54c299e175b066"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE agents SET status=$1, last_heartbeat=NOW() WHERE id=$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "663d3a4b8d35369a26a87babe28e095cd58598ec1fe4bd737b6d97420ff0595b"
+}

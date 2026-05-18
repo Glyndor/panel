@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE migration_state SET status='aborted', updated_at=NOW() WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2927ed8c7aee5fc5b89fc57d3560d82f6f10ed965f9f30bd872dfb94e7377080"
+}

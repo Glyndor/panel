@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE migration_state SET status='waiting_agents', updated_at=NOW() WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2a4fdddd31c59d96ebce2d15307c1b681ea95e5ccfd77691b07aad740f17b932"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE data_plane_tunnels SET status='active', updated_at=NOW() WHERE id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c30e55d43c427acce4c7f21d86435b7e4fcf5b0252d8b73f0692ff1e20b99af"
+}
