@@ -281,8 +281,10 @@ jobs:
         env:
           RELEASE_SIGN_KEY: ${{ secrets.RELEASE_SIGN_KEY }}
         run: |
-          BIN="lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}"
-          ASSETS="lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz"
+          cp "lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}" .
+          cp "lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz" .
+          BIN="lynx-dashboard-frontend-linux-${{ matrix.arch }}"
+          ASSETS="lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz"
           python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$BIN"
           python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ASSETS"
 
@@ -295,10 +297,10 @@ jobs:
           path: |
             lynx-dashboard-backend-linux-${{ matrix.arch }}
             lynx-dashboard-backend-linux-${{ matrix.arch }}.sig
-            lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}
-            lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}.sig
-            lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz
-            lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz.sig
+            lynx-dashboard-frontend-linux-${{ matrix.arch }}
+            lynx-dashboard-frontend-linux-${{ matrix.arch }}.sig
+            lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz
+            lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz.sig
           retention-days: 1
 
   release:
