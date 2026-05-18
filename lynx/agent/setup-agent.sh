@@ -69,43 +69,6 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# --- Detect existing installation -------------------------------------------
-
-log_section "Checking for existing installation"
-
-existing=false
-if [[ -d "$LYNX_DIR" ]] || id "$LYNX_AGENT_USER" &>/dev/null || \
-   systemctl list-unit-files lynx-agent.service &>/dev/null 2>&1 | grep -q lynx-agent; then
-    existing=true
-fi
-
-if $existing; then
-    log_warn "Existing agent installation detected."
-    echo ""
-    echo -e "  ${BOLD}1)${RESET} Abort (default)"
-    echo -e "  ${BOLD}2)${RESET} Reinstall clean → destroys all agent data"
-    echo ""
-    read -rp "Choice [1/2]: " choice
-    choice="${choice:-1}"
-
-    case "$choice" in
-        2)
-            echo ""
-            log_warn "This will permanently destroy all agent data on this machine."
-            read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
-            if [[ "$confirm" != "reinstall lynx-agent" ]]; then
-                log_error "Confirmation phrase mismatch. Aborting."
-                exit 1
-            fi
-            _cleanup_existing
-            ;;
-        *)
-            log_info "Aborting. No changes made."
-            exit 0
-            ;;
-    esac
-fi
-
 # --- Cleanup function -------------------------------------------------------
 
 _cleanup_existing() {
@@ -144,6 +107,150 @@ _cleanup_existing() {
     log_ok "Cleanup complete"
 }
 
+# --- RAM check --------------------------------------------------------------
+
+log_section "Checking system resources"
+
+TOTAL_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
+if [[ "$TOTAL_RAM_MB" -lt 512 ]]; then
+    log_error "Insufficient RAM: ${TOTAL_RAM_MB} MB detected, minimum 512 MB required"
+    log_info  "Lynx Agent requires at least 512 MB RAM for the local PostgreSQL container"
+    exit 1
+fi
+log_ok "RAM: ${TOTAL_RAM_MB} MB (minimum 512 MB satisfied)"
+
+# --- Incompatible software --------------------------------------------------
+
+log_section "Checking for incompatible software"
+
+log_info "Lynx uses Podman for containers and nftables for firewall."
+log_info "The following software is incompatible and will be removed if found:"
+log_info "  Docker, containerd (standalone), firewalld, ufw, iptables (legacy)"
+log_info "Reason: these programs add their own firewall/network rules outside"
+log_info "        table inet lynx-agent, silently exposing ports Lynx considers closed."
+
+_detect_distro() {
+    if command -v apt-get &>/dev/null;   then echo "debian"
+    elif command -v dnf &>/dev/null;     then echo "rhel"
+    elif command -v yum &>/dev/null;     then echo "rhel"
+    else                                      echo "unknown"
+    fi
+}
+
+DISTRO=$(_detect_distro)
+
+_pkg_installed() {
+    local pkg="$1"
+    case "$DISTRO" in
+        debian) dpkg -l "$pkg" 2>/dev/null | grep -q '^ii' ;;
+        rhel)   rpm -q "$pkg" &>/dev/null ;;
+        *)      return 1 ;;
+    esac
+}
+
+_remove_pkg() {
+    local pkg="$1" reason="$2"
+    log_warn "Removing incompatible package: ${pkg}"
+    log_info "  Reason: ${reason}"
+    case "$DISTRO" in
+        debian) apt-get purge -y "$pkg" 2>/dev/null || true ;;
+        rhel)   { dnf remove -y "$pkg" 2>/dev/null || yum remove -y "$pkg" 2>/dev/null; } || true ;;
+        *)      log_warn "Unknown distro — remove ${pkg} manually before continuing" ;;
+    esac
+    log_ok "Removed: $pkg"
+}
+
+_incompatible_found=false
+
+_check_remove() {
+    local pkg="$1" reason="$2"
+    if _pkg_installed "$pkg"; then
+        _incompatible_found=true
+        _remove_pkg "$pkg" "$reason"
+    fi
+}
+
+_REASON_DOCKER="manages own container network and firewall, bypasses lynx-agent nftables"
+_REASON_CTR="manages own container network, conflicts with Podman network isolation"
+_REASON_FW="manages own firewall rules outside table inet lynx-agent"
+
+for pkg in docker-ce docker-ce-cli docker.io docker-compose-plugin moby-engine; do
+    _check_remove "$pkg" "$_REASON_DOCKER"
+done
+
+for pkg in containerd containerd.io; do
+    _check_remove "$pkg" "$_REASON_CTR"
+done
+
+_check_remove firewalld "$_REASON_FW"
+_check_remove ufw       "$_REASON_FW"
+
+# iptables — only block the legacy binary, not the nftables compat layer (iptables-nft)
+if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q 'nf_tables'; then
+    _incompatible_found=true
+    log_warn "Removing incompatible: iptables (legacy binary, not nftables-compat)"
+    log_info "  Reason: ${_REASON_FW}"
+    case "$DISTRO" in
+        debian) apt-get purge -y iptables 2>/dev/null || true ;;
+        rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
+        *)      log_warn "Unknown distro — remove iptables manually" ;;
+    esac
+    log_ok "Removed: iptables (legacy)"
+fi
+
+if $_incompatible_found; then
+    if command -v iptables-legacy &>/dev/null; then
+        iptables-legacy -F              2>/dev/null || true
+        iptables-legacy -X              2>/dev/null || true
+        iptables-legacy -t nat    -F    2>/dev/null || true
+        iptables-legacy -t nat    -X    2>/dev/null || true
+        iptables-legacy -t mangle -F    2>/dev/null || true
+        iptables-legacy -t mangle -X    2>/dev/null || true
+    fi
+    log_ok "Incompatible software removed — residual firewall rules cleared"
+else
+    log_ok "No incompatible software found"
+fi
+
+unset _REASON_DOCKER _REASON_CTR _REASON_FW
+
+# --- Detect existing installation -------------------------------------------
+
+log_section "Checking for existing installation"
+
+existing=false
+if [[ -d "$LYNX_DIR" ]] || id "$LYNX_AGENT_USER" &>/dev/null || \
+   systemctl list-unit-files lynx-agent.service &>/dev/null 2>&1 | grep -q lynx-agent; then
+    existing=true
+fi
+
+if $existing; then
+    log_warn "Existing agent installation detected."
+    echo ""
+    echo -e "  ${BOLD}1)${RESET} Abort (default)"
+    echo -e "  ${BOLD}2)${RESET} Reinstall clean → destroys all agent data"
+    echo ""
+    read -rp "Choice [1/2]: " choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+        2)
+            echo ""
+            log_warn "This will permanently destroy all agent data on this machine."
+            read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
+            if [[ "$confirm" != "reinstall lynx-agent" ]]; then
+                log_error "Confirmation phrase mismatch. Aborting."
+                exit 1
+            fi
+            _cleanup_existing
+            ;;
+        *)
+            log_info "Aborting. No changes made."
+            exit 0
+            ;;
+    esac
+fi
+
 # --- Check dependencies -----------------------------------------------------
 
 log_section "Checking system dependencies"
@@ -162,6 +269,39 @@ _require_cmd nft       "apt install nftables"
 _require_cmd wg        "apt install wireguard-tools"
 _require_cmd wg-quick  "apt install wireguard-tools"
 _require_cmd systemctl "systemd required"
+_require_cmd free      "procps required"
+
+# --- NTP synchronization check ----------------------------------------------
+#
+# The 30s timestamp window on signed agent commands requires synchronized clocks.
+# Clock drift >30s causes all commands to be rejected (effective lockdown).
+
+log_section "Checking NTP synchronization"
+
+_ntp_active=false
+
+if systemctl is-active --quiet systemd-timesyncd 2>/dev/null; then
+    _ntp_active=true
+    log_ok "systemd-timesyncd is active"
+elif systemctl is-active --quiet chronyd 2>/dev/null; then
+    _ntp_active=true
+    log_ok "chronyd is active"
+fi
+
+if ! $_ntp_active; then
+    log_warn "No NTP service detected — enabling systemd-timesyncd..."
+    if systemctl enable --now systemd-timesyncd 2>/dev/null; then
+        sleep 2
+        _ntp_active=true
+        log_ok "systemd-timesyncd enabled and started"
+    else
+        log_warn "Could not enable systemd-timesyncd automatically"
+        log_warn "Install chrony (apt install chrony) or enable systemd-timesyncd before adding agents"
+        log_warn "Without NTP: agent commands will be rejected once clock drifts >30s"
+    fi
+fi
+
+unset _ntp_active
 
 # --- Collect dashboard bootstrap data ---------------------------------------
 
@@ -438,17 +578,53 @@ log_section "Configuring WireGuard tunnel (agent ↔ dashboard)"
 AGENT_PRIV=$(wg genkey)
 AGENT_PUB=$(printf '%s' "$AGENT_PRIV" | wg pubkey)
 
+# --- NAT detection ---
+# Extract the dashboard host (strip port if present)
+DASHBOARD_HOST="${DASHBOARD_ENDPOINT%%:*}"
+
+# IP of the local interface that would route to the dashboard
+LOCAL_IFACE_IP=$(ip route get "$DASHBOARD_HOST" 2>/dev/null | grep -oP 'src \K\S+' | head -1)
+
+# Public IP as seen from the internet
+PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || \
+            curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+
+NAT_DETECTED=false
+KEEPALIVE_LINE=""
+
+if [[ -n "$LOCAL_IFACE_IP" && -n "$PUBLIC_IP" && "$LOCAL_IFACE_IP" != "$PUBLIC_IP" ]]; then
+    NAT_DETECTED=true
+    KEEPALIVE_LINE="PersistentKeepalive = 25"
+    log_info "NAT detected (interface IP: ${LOCAL_IFACE_IP}, public IP: ${PUBLIC_IP})"
+    log_info "Enabling PersistentKeepalive = 25 to maintain NAT table entry"
+    log_warn "If your provider's NAT timeout is < 25s or blocks persistent UDP, the tunnel may be unstable"
+elif [[ -z "$PUBLIC_IP" ]]; then
+    # Cannot determine — enable keepalive as safe default
+    NAT_DETECTED=true
+    KEEPALIVE_LINE="PersistentKeepalive = 25"
+    log_warn "Could not determine public IP — enabling PersistentKeepalive = 25 as safe default"
+else
+    log_info "No NAT detected (interface IP matches public IP: ${PUBLIC_IP})"
+fi
+
+# Build WireGuard peer block
+WG_PEER_BLOCK="[Peer]
+PublicKey = ${DASHBOARD_PUBKEY}
+PresharedKey = ${PSK}
+Endpoint = ${DASHBOARD_ENDPOINT}
+AllowedIPs = ${DASHBOARD_WG_IP}/32"
+
+if [[ -n "$KEEPALIVE_LINE" ]]; then
+    WG_PEER_BLOCK="${WG_PEER_BLOCK}
+${KEEPALIVE_LINE}"
+fi
+
 cat > "$WG_CONF" << EOF
 [Interface]
 PrivateKey = ${AGENT_PRIV}
 Address = ${AGENT_WG_IP}/24
 
-[Peer]
-PublicKey = ${DASHBOARD_PUBKEY}
-PresharedKey = ${PSK}
-Endpoint = ${DASHBOARD_ENDPOINT}
-AllowedIPs = ${DASHBOARD_WG_IP}/32
-PersistentKeepalive = 25
+${WG_PEER_BLOCK}
 EOF
 
 chmod 600 "$WG_CONF"

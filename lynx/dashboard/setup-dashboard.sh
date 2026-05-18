@@ -63,6 +63,162 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# --- Cleanup function (used by reinstall) -----------------------------------
+
+_cleanup_existing() {
+    log_section "Removing existing installation"
+
+    # Stop and remove containers
+    for ctr in lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-redis; do
+        if podman container exists "$ctr" 2>/dev/null; then
+            log_info "Removing container: $ctr"
+            podman rm -f "$ctr" 2>/dev/null || true
+        fi
+    done
+
+    # Remove volumes
+    podman volume rm lynx-dashboard_postgres_data 2>/dev/null || true
+
+    # Remove networks
+    for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
+        podman network rm "$net" 2>/dev/null || true
+    done
+
+    # Remove secrets
+    for secret in lynx-dashboard-pg-root lynx-dashboard-pg-pass lynx-dashboard-redis-pass \
+                  lynx-dashboard-database-url lynx-dashboard-redis-url \
+                  lynx-dashboard-api-token lynx-dashboard-kek lynx-dashboard-pepper \
+                  lynx-dashboard-jwt-sign-private lynx-dashboard-jwt-sign-public \
+                  lynx-dashboard-jwt-enc-private lynx-dashboard-jwt-enc-public \
+                  lynx-dashboard-ca-private lynx-dashboard-ca-public \
+                  lynx-dashboard-setup-token \
+                  lynx-dashboard-local-agent-psk; do
+        podman secret rm "$secret" 2>/dev/null || true
+    done
+
+    # Remove WireGuard interface
+    if ip link show wg-lynx-dashboard &>/dev/null; then
+        ip link delete wg-lynx-dashboard 2>/dev/null || true
+    fi
+    rm -f "$WG_DIR/wg-lynx-dashboard.conf"
+
+    # Remove systemd units
+    systemctl disable --now lynx-dashboard-rotate-certs.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/lynx-dashboard-rotate-certs.{service,timer}
+    systemctl daemon-reload
+
+    rm -rf "$LYNX_DIR"
+    log_ok "Cleanup complete"
+}
+
+# --- RAM check --------------------------------------------------------------
+
+log_section "Checking system resources"
+
+TOTAL_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
+if [[ "$TOTAL_RAM_MB" -lt 512 ]]; then
+    log_error "Insufficient RAM: ${TOTAL_RAM_MB} MB detected, minimum 512 MB required"
+    log_info  "Lynx Dashboard requires at least 512 MB RAM for PostgreSQL to operate correctly"
+    exit 1
+fi
+log_ok "RAM: ${TOTAL_RAM_MB} MB (minimum 512 MB satisfied)"
+
+# --- Incompatible software --------------------------------------------------
+
+log_section "Checking for incompatible software"
+
+log_info "Lynx manages containers via Podman and firewall via nftables."
+log_info "The following software is incompatible and will be removed if found:"
+log_info "  Docker / Docker Engine, containerd (standalone), firewalld, ufw, iptables (legacy)"
+log_info "Reason: these programs add their own firewall/network rules outside"
+log_info "        table inet lynx-agent, silently exposing ports Lynx considers closed."
+
+_detect_distro() {
+    if command -v apt-get &>/dev/null;   then echo "debian"
+    elif command -v dnf &>/dev/null;     then echo "rhel"
+    elif command -v yum &>/dev/null;     then echo "rhel"
+    else                                      echo "unknown"
+    fi
+}
+
+DISTRO=$(_detect_distro)
+
+_pkg_installed() {
+    local pkg="$1"
+    case "$DISTRO" in
+        debian) dpkg -l "$pkg" 2>/dev/null | grep -q '^ii' ;;
+        rhel)   rpm -q "$pkg" &>/dev/null ;;
+        *)      return 1 ;;
+    esac
+}
+
+_remove_pkg() {
+    local pkg="$1" reason="$2"
+    log_warn "Removing incompatible package: ${pkg}"
+    log_info "  Reason: ${reason}"
+    case "$DISTRO" in
+        debian) apt-get purge -y "$pkg" 2>/dev/null || true ;;
+        rhel)   { dnf remove -y "$pkg" 2>/dev/null || yum remove -y "$pkg" 2>/dev/null; } || true ;;
+        *)      log_warn "Unknown distro — remove ${pkg} manually before continuing" ;;
+    esac
+    log_ok "Removed: $pkg"
+}
+
+_incompatible_found=false
+
+_check_remove() {
+    local pkg="$1" reason="$2"
+    if _pkg_installed "$pkg"; then
+        _incompatible_found=true
+        _remove_pkg "$pkg" "$reason"
+    fi
+}
+
+_REASON_DOCKER="manages own container network and firewall, bypasses lynx-agent nftables"
+_REASON_CTR="manages own container network, conflicts with Podman network isolation"
+_REASON_FW="manages own firewall rules outside table inet lynx-agent"
+
+for pkg in docker-ce docker-ce-cli docker.io docker-compose-plugin moby-engine; do
+    _check_remove "$pkg" "$_REASON_DOCKER"
+done
+
+for pkg in containerd containerd.io; do
+    _check_remove "$pkg" "$_REASON_CTR"
+done
+
+_check_remove firewalld "$_REASON_FW"
+_check_remove ufw       "$_REASON_FW"
+
+# iptables — only block the legacy binary, not the nftables compat layer (iptables-nft)
+if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q 'nf_tables'; then
+    _incompatible_found=true
+    log_warn "Removing incompatible: iptables (legacy binary, not nftables-compat)"
+    log_info "  Reason: ${_REASON_FW}"
+    case "$DISTRO" in
+        debian) apt-get purge -y iptables 2>/dev/null || true ;;
+        rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
+        *)      log_warn "Unknown distro — remove iptables manually" ;;
+    esac
+    log_ok "Removed: iptables (legacy)"
+fi
+
+if $_incompatible_found; then
+    # Flush any residual kernel rules left behind by Docker / iptables
+    if command -v iptables-legacy &>/dev/null; then
+        iptables-legacy -F              2>/dev/null || true
+        iptables-legacy -X              2>/dev/null || true
+        iptables-legacy -t nat    -F    2>/dev/null || true
+        iptables-legacy -t nat    -X    2>/dev/null || true
+        iptables-legacy -t mangle -F    2>/dev/null || true
+        iptables-legacy -t mangle -X    2>/dev/null || true
+    fi
+    log_ok "Incompatible software removed — residual firewall rules cleared"
+else
+    log_ok "No incompatible software found"
+fi
+
+unset _REASON_DOCKER _REASON_CTR _REASON_FW
+
 # --- Detect existing installation -------------------------------------------
 
 log_section "Checking for existing installation"
@@ -120,54 +276,6 @@ if $existing; then
     esac
 fi
 
-# --- Cleanup function (used by reinstall) -----------------------------------
-
-_cleanup_existing() {
-    log_section "Removing existing installation"
-
-    # Stop and remove containers
-    for ctr in lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-redis; do
-        if podman container exists "$ctr" 2>/dev/null; then
-            log_info "Removing container: $ctr"
-            podman rm -f "$ctr" 2>/dev/null || true
-        fi
-    done
-
-    # Remove volumes
-    podman volume rm lynx-dashboard_postgres_data 2>/dev/null || true
-
-    # Remove networks
-    for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
-        podman network rm "$net" 2>/dev/null || true
-    done
-
-    # Remove secrets
-    for secret in lynx-dashboard-pg-root lynx-dashboard-pg-pass lynx-dashboard-redis-pass \
-                  lynx-dashboard-database-url lynx-dashboard-redis-url \
-                  lynx-dashboard-api-token lynx-dashboard-kek lynx-dashboard-pepper \
-                  lynx-dashboard-jwt-sign-private lynx-dashboard-jwt-sign-public \
-                  lynx-dashboard-jwt-enc-private lynx-dashboard-jwt-enc-public \
-                  lynx-dashboard-ca-private lynx-dashboard-ca-public \
-                  lynx-dashboard-setup-token \
-                  lynx-dashboard-local-agent-psk; do
-        podman secret rm "$secret" 2>/dev/null || true
-    done
-
-    # Remove WireGuard interface
-    if ip link show wg-lynx-dashboard &>/dev/null; then
-        ip link delete wg-lynx-dashboard 2>/dev/null || true
-    fi
-    rm -f "$WG_DIR/wg-lynx-dashboard.conf"
-
-    # Remove systemd units
-    systemctl disable --now lynx-dashboard-rotate-certs.timer 2>/dev/null || true
-    rm -f /etc/systemd/system/lynx-dashboard-rotate-certs.{service,timer}
-    systemctl daemon-reload
-
-    rm -rf "$LYNX_DIR"
-    log_ok "Cleanup complete"
-}
-
 # --- Check dependencies -----------------------------------------------------
 
 log_section "Checking system dependencies"
@@ -187,6 +295,39 @@ _require_cmd nft       "apt install nftables"
 _require_cmd wg        "apt install wireguard-tools"
 _require_cmd curl      "apt install curl"
 _require_cmd systemctl "systemd required"
+_require_cmd free      "procps required"
+
+# --- NTP synchronization check ----------------------------------------------
+#
+# The 30s timestamp window on signed agent commands requires synchronized clocks.
+# Clock drift >30s causes all commands to be rejected (effective lockdown).
+
+log_section "Checking NTP synchronization"
+
+_ntp_active=false
+
+if systemctl is-active --quiet systemd-timesyncd 2>/dev/null; then
+    _ntp_active=true
+    log_ok "systemd-timesyncd is active"
+elif systemctl is-active --quiet chronyd 2>/dev/null; then
+    _ntp_active=true
+    log_ok "chronyd is active"
+fi
+
+if ! $_ntp_active; then
+    log_warn "No NTP service detected — enabling systemd-timesyncd..."
+    if systemctl enable --now systemd-timesyncd 2>/dev/null; then
+        sleep 2
+        _ntp_active=true
+        log_ok "systemd-timesyncd enabled and started"
+    else
+        log_warn "Could not enable systemd-timesyncd automatically"
+        log_warn "Install chrony (apt install chrony) or enable systemd-timesyncd before adding agents"
+        log_warn "Without NTP: agent commands will be rejected once clock drifts >30s"
+    fi
+fi
+
+unset _ntp_active
 
 # --- Create directories -----------------------------------------------------
 

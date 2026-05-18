@@ -100,6 +100,44 @@ jobs:
       - name: clippy
         run: cargo clippy --package lynx-agent -- -D warnings
 
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lynx_ci
+          POSTGRES_PASSWORD: lynx_ci
+          POSTGRES_DB: lynx_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+      - name: Run agent migrations
+        run: sqlx migrate run --source agent/migrations
+
+      - name: test
+        run: cargo test --package lynx-agent --bin lynx-agent
+
   # Integration tests require nftables + Podman — self-hosted runner only.
   # Uncomment when self-hosted runner is configured.
   # integration:
