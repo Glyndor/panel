@@ -123,7 +123,10 @@ fn load_or_gen_ed25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {
     tracing::warn!("JWT signing keys not configured — using ephemeral keys (dev only)");
 
     let mut seed = [0u8; 32];
-    { use rand::Rng; rand::rng().fill_bytes(&mut seed); }
+    {
+        use rand::Rng;
+        rand::rng().fill_bytes(&mut seed);
+    }
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let pub_bytes = signing_key.verifying_key().to_bytes();
 
@@ -149,7 +152,10 @@ fn load_or_gen_x25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {
     tracing::warn!("JWT encryption keys not configured — using ephemeral keys (dev only)");
 
     let mut priv_bytes = [0u8; 32];
-    { use rand::Rng; rand::rng().fill_bytes(&mut priv_bytes); }
+    {
+        use rand::Rng;
+        rand::rng().fill_bytes(&mut priv_bytes);
+    }
     let secret = x25519_dalek::StaticSecret::from(priv_bytes);
     let public = x25519_dalek::PublicKey::from(&secret);
 
@@ -189,7 +195,10 @@ fn load_or_gen_ca_ed25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {
     tracing::warn!("CA keypair not configured — using ephemeral CA (dev only, agents will reject certs on restart)");
 
     let mut seed = [0u8; 32];
-    { use rand::Rng; rand::rng().fill_bytes(&mut seed); }
+    {
+        use rand::Rng;
+        rand::rng().fill_bytes(&mut seed);
+    }
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let pub_bytes = signing_key.verifying_key().to_bytes();
     Ok((Zeroizing::new(seed), pub_bytes))
