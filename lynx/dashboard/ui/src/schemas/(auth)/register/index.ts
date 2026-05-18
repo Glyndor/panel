@@ -5,20 +5,20 @@ const RESERVED = ["admin", "root", "system", "lynx", "support", "api", "null", "
 export const registerSchema = z.object({
 	username: z
 		.string()
-		.min(3)
-		.max(32)
-		.regex(/^[a-z0-9_-]+$/)
-		.refine((v) => !/^[-_]|[-_]$/.test(v))
-		.refine((v) => !RESERVED.includes(v)),
-	email: z.string().email(),
+		.min(3, "Username must be at least 3 characters")
+		.max(32, "Username cannot exceed 32 characters")
+		.regex(/^[a-z0-9_-]+$/, "Only lowercase letters, numbers, - and _ allowed")
+		.refine((v) => !/^[-_]|[-_]$/.test(v), "Cannot start or end with - or _")
+		.refine((v) => !RESERVED.includes(v), "This username is reserved"),
+	email: z.string().email("Enter a valid email address"),
 	password: z
 		.string()
-		.min(12)
-		.max(30)
-		.regex(/[A-Z]/)
-		.regex(/[a-z]/)
-		.regex(/[0-9]/)
-		.regex(/[^A-Za-z0-9]/),
+		.min(12, "Password must be at least 12 characters")
+		.max(30, "Password cannot exceed 30 characters")
+		.regex(/[A-Z]/, "Must contain at least one uppercase letter")
+		.regex(/[a-z]/, "Must contain at least one lowercase letter")
+		.regex(/[0-9]/, "Must contain at least one number")
+		.regex(/[^A-Za-z0-9]/, "Must contain at least one special character"),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

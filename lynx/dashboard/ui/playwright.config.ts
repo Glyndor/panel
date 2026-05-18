@@ -24,10 +24,12 @@ export default defineConfig({
 				reuseExistingServer: false,
 				timeout: 120_000,
 		  }
-		: {
+		: process.env.PLAYWRIGHT_NO_SERVER
+		  ? undefined
+		  : {
 				command: "bun run dev",
 				url: "http://localhost:3000",
 				reuseExistingServer: true,
 				timeout: 120_000,
-		  },
+		    },
 });

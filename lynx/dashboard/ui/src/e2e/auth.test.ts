@@ -29,14 +29,11 @@ test.describe("Login page", () => {
 	test("submit button is disabled while submitting", async ({ page }) => {
 		await page.goto("/en/login");
 
-		// Mock the server action response so the submit doesn't hang
+		// Delay POST so we can observe the submitting state before the response
 		await page.route("**/en/login", async (route) => {
 			if (route.request().method() === "POST") {
-				await route.fulfill({
-					status: 200,
-					contentType: "text/x-component",
-					body: "",
-				});
+				await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+				await route.continue();
 			} else {
 				await route.continue();
 			}
@@ -44,13 +41,10 @@ test.describe("Login page", () => {
 
 		await page.getByLabel("Username").fill("testuser");
 		await page.getByLabel("Password").fill("password123");
+		await page.getByRole("button", { name: "Sign in" }).click();
 
-		const button = page.getByRole("button", { name: /Sign in/i });
-		await button.click();
-
-		// Button should show "Signing in..." or be disabled momentarily
-		// We just verify it's still there (submit triggered)
-		await expect(button).toBeVisible();
+		// During the network delay, button shows submitting state
+		await expect(page.getByRole("button", { name: "Signing in..." })).toBeVisible();
 	});
 
 	test("password field masks input", async ({ page }) => {
