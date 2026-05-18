@@ -9,7 +9,11 @@
 		"check": "biome check",
 		"check:fix": "biome check --write",
 		"typecheck": "tsc --noEmit",
-		"audit": "bun audit"
+		"audit": "bun audit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:e2e": "playwright test",
+		"test:e2e:ui": "playwright test --ui"
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.4.1",
@@ -40,13 +44,20 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.15",
+		"@playwright/test": "^1.52.0",
 		"@tailwindcss/postcss": "^4.3.0",
+		"@testing-library/jest-dom": "6.9.1",
+		"@testing-library/react": "16.3.2",
+		"@testing-library/user-event": "14.6.1",
 		"@types/node": "^24.12.4",
 		"@types/react": "^19.2.14",
 		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "6.0.2",
 		"babel-plugin-react-compiler": "^1.0.0",
+		"jsdom": "29.1.1",
 		"tailwindcss": "^4.3.0",
-		"typescript": "^6.0.3"
+		"typescript": "^6.0.3",
+		"vitest": "4.1.6"
 	},
 	"trustedDependencies": [
 		"sharp",
