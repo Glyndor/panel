@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use crate::state::AppState;
 use std::sync::atomic::Ordering;
 use tokio::time::{interval, Duration};
@@ -68,10 +69,9 @@ async fn check_and_apply(state: &AppState) -> anyhow::Result<()> {
 }
 
 async fn fetch_latest_agent_version() -> anyhow::Result<String> {
-    let client = reqwest::Client::builder()
-        .user_agent(format!("lynx-agent/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()?;
+    let client = super::build_ssrf_safe_client(GITHUB_API)
+        .await
+        .context("SSRF check for GitHub API")?;
 
     let releases: serde_json::Value = client
         .get(GITHUB_API)

@@ -15,19 +15,19 @@ pub async fn perform_update(version: &str, download_url: &str, sig_url: &str) ->
 
     tracing::info!(version, "starting self-update");
 
-    let client = reqwest::Client::builder()
-        .user_agent(format!("lynx-agent/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .context("build HTTP client")?;
+    // Build separate SSRF-safe clients per URL: resolves DNS once, validates
+    // the resolved IP is not RFC1918/loopback, then pins the hostname to that
+    // IP for the actual request (prevents DNS TOCTOU rebinding attacks).
+    let bin_client = build_ssrf_safe_client(download_url).await.context("SSRF check for binary URL")?;
+    let sig_client = build_ssrf_safe_client(sig_url).await.context("SSRF check for sig URL")?;
 
     // Download binary
-    let binary_bytes = download_bytes(&client, download_url)
+    let binary_bytes = download_bytes(&bin_client, download_url)
         .await
         .context("download binary")?;
 
     // Download signature
-    let sig_bytes = download_bytes(&client, sig_url)
+    let sig_bytes = download_bytes(&sig_client, sig_url)
         .await
         .context("download signature")?;
 
@@ -131,5 +131,61 @@ fn validate_github_url(url: &str) -> Result<()> {
         Ok(())
     } else {
         anyhow::bail!("download URL not on allowed domain: {url}")
+    }
+}
+
+/// Builds an HTTP client with SSRF protection:
+/// 1. Resolves the hostname of `url` via DNS (once).
+/// 2. Rejects if any resolved IP is RFC1918, loopback, or link-local.
+/// 3. Pins the hostname to the validated IP so reqwest never re-resolves it
+///    (prevents DNS rebinding / TOCTOU attacks).
+async fn build_ssrf_safe_client(url: &str) -> Result<reqwest::Client> {
+    let parsed = url::Url::parse(url).context("parse URL for SSRF check")?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("URL has no host: {url}"))?
+        .to_string();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| anyhow::anyhow!("URL has unknown port: {url}"))?;
+
+    let addrs: Vec<std::net::SocketAddr> =
+        tokio::net::lookup_host(format!("{host}:{port}"))
+            .await
+            .with_context(|| format!("DNS lookup for {host}"))?
+            .collect();
+
+    if addrs.is_empty() {
+        anyhow::bail!("DNS lookup for {host} returned no addresses");
+    }
+
+    for addr in &addrs {
+        if is_private_ip(addr.ip()) {
+            anyhow::bail!(
+                "SSRF protection: {host} resolved to private/reserved IP {}",
+                addr.ip()
+            );
+        }
+    }
+
+    reqwest::Client::builder()
+        .user_agent(format!("lynx-agent/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(300))
+        .resolve(&host, addrs[0])
+        .build()
+        .context("build SSRF-safe HTTP client")
+}
+
+fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00  // fc00::/7 ULA
+                || (v6.segments()[0] & 0xff00) == 0xfe80  // fe80::/10 link-local
+        }
     }
 }
