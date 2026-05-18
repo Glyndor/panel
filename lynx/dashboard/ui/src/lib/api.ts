@@ -1,10 +1,16 @@
 export const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8080";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 
 export function validateId(id: string): string {
 	if (!UUID_RE.test(id)) throw new Error("invalid_id");
 	return id;
+}
+
+export function validateName(name: string): string {
+	if (!CONTAINER_NAME_RE.test(name)) throw new Error("invalid_name");
+	return name;
 }
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string; retryAfter?: number | undefined };

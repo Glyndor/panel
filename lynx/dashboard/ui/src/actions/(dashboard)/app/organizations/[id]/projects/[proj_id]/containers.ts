@@ -2,32 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { BACKEND_URL, validateId } from "@/lib/api";
+import { BACKEND_URL, validateId, validateName } from "@/lib/api";
 
 async function token(): Promise<string> {
 	const jar = await cookies();
 	return jar.get("access_token")?.value ?? "";
 }
 
-function base(orgId: string, projId: string) {
-	return `${BACKEND_URL}/organizations/${validateId(orgId)}/projects/${validateId(projId)}/containers`;
-}
-
-async function post(url: string): Promise<{ ok: boolean; error?: string }> {
-	try {
-		const res = await fetch(url, {
-			headers: { Authorization: `Bearer ${await token()}` },
-			method: "POST",
-		});
-		if (!res.ok) {
-			const body = (await res.json()) as { error?: string; detail?: string };
-			return { error: body.detail ?? body.error ?? "server_error", ok: false };
-		}
-		return { ok: true };
-	} catch {
-		return { error: "network_error", ok: false };
-	}
-}
+const ACTIONS = ["start", "stop", "restart", "remove"] as const;
 
 export async function containerAction(
 	orgId: string,
@@ -35,11 +17,24 @@ export async function containerAction(
 	name: string,
 	action: "start" | "stop" | "restart" | "remove",
 ): Promise<{ ok: boolean; error?: string }> {
-	const result = await post(`${base(orgId, projId)}/${name}/${action}`);
-	if (result.ok) {
+	try {
+		const oid = validateId(orgId);
+		const pid = validateId(projId);
+		const cname = validateName(name);
+		if (!ACTIONS.includes(action)) return { error: "invalid_action", ok: false };
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/projects/${pid}/containers/${cname}/${action}`, {
+			headers: { Authorization: `Bearer ${await token()}` },
+			method: "POST",
+		});
+		if (!res.ok) {
+			const body = (await res.json()) as { error?: string; detail?: string };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
+		}
 		revalidatePath(`/[locale]/app/organizations/${orgId}/projects/${projId}`, "page");
+		return { ok: true };
+	} catch {
+		return { error: "network_error", ok: false };
 	}
-	return result;
 }
 
 export async function deployContainer(
@@ -55,7 +50,9 @@ export async function deployContainer(
 	},
 ): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(base(orgId, projId), {
+		const oid = validateId(orgId);
+		const pid = validateId(projId);
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/projects/${pid}/containers`, {
 			body: JSON.stringify(payload),
 			headers: {
 				Authorization: `Bearer ${await token()}`,
