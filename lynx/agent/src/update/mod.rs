@@ -188,7 +188,7 @@ fn is_private_ip(ip: std::net::IpAddr) -> bool {
             v6.is_loopback()
                 || v6.is_unspecified()
                 || (v6.segments()[0] & 0xfe00) == 0xfc00  // fc00::/7 ULA
-                || (v6.segments()[0] & 0xff00) == 0xfe80 // fe80::/10 link-local
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
         }
     }
 }
