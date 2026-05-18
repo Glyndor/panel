@@ -55,6 +55,8 @@ jobs:
         run: cargo install cross --locked
 
       - name: Build agent (musl static)
+        env:
+          SQLX_OFFLINE: "true"
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release \
