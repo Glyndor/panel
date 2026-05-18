@@ -1,0 +1,17 @@
+name: release-agent-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "tag=${{ inputs.tag }}"
