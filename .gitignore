@@ -34,7 +34,8 @@ CLAUDE.md
 # Playwright
 **/playwright-report/
 **/test-results/
-**/.playwright-mcp-*/
+.playwright-mcp/
+**/.playwright-mcp/
 
 # FUSE filesystem temp files (Linux file manager / gvfs)
 .fuse_hidden*
