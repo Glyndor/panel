@@ -13,8 +13,9 @@ mod watch;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use bollard::container::{
-    ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions, StartContainerOptions,
+use bollard::container::LogOutput;
+use bollard::query_parameters::{
+    ListContainersOptions, LogsOptions, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
@@ -168,7 +169,7 @@ impl Engine {
 
                 let _ = self
                     .docker
-                    .stop_container(&container_name, Some(StopContainerOptions { t: 10 }))
+                    .stop_container(&container_name, Some(StopContainerOptions { t: Some(10), ..Default::default() }))
                     .await;
 
                 let _ = self
@@ -198,9 +199,9 @@ impl Engine {
 
         let containers = self
             .docker
-            .list_containers(Some(ListContainersOptions::<String> {
+            .list_containers(Some(ListContainersOptions {
                 all: true,
-                filters,
+                filters: Some(filters),
                 ..Default::default()
             }))
             .await?;
@@ -257,7 +258,7 @@ impl Engine {
         for container_name in targets {
             let mut stream = self.docker.logs(
                 &container_name,
-                Some(LogsOptions::<String> {
+                Some(LogsOptions {
                     stdout: true,
                     stderr: true,
                     follow,
@@ -334,7 +335,7 @@ impl Engine {
     /// Services with `attach: false` are excluded. Respects the compose spec:
     /// when not detaching, all attached services have their output forwarded.
     pub async fn attach_logs(&self, file: &ComposeFile) -> Result<()> {
-        use bollard::container::LogsOptions;
+        use bollard::query_parameters::LogsOptions;
         use futures::StreamExt;
 
         let attached: Vec<(String, String)> = file
@@ -354,7 +355,7 @@ impl Engine {
                 let prefix = name.clone();
                 let mut stream = self.docker.logs(
                     cname,
-                    Some(LogsOptions::<String> {
+                    Some(LogsOptions {
                         stdout: true,
                         stderr: true,
                         follow: true,
@@ -393,9 +394,9 @@ impl Engine {
 
         let running = self
             .docker
-            .list_containers(Some(ListContainersOptions::<String> {
+            .list_containers(Some(ListContainersOptions {
                 all: true,
-                filters,
+                filters: Some(filters),
                 ..Default::default()
             }))
             .await?;
@@ -459,11 +460,11 @@ impl Engine {
 
             let _ = self
                 .docker
-                .stop_container(&container_name, Some(StopContainerOptions { t: 10 }))
+                .stop_container(&container_name, Some(StopContainerOptions { t: Some(10), ..Default::default() }))
                 .await;
 
             self.docker
-                .start_container(&container_name, None::<StartContainerOptions<String>>)
+                .start_container(&container_name, None::<StartContainerOptions>)
                 .await?;
 
             info!("restarted {container_name}");
@@ -474,11 +475,11 @@ impl Engine {
                     let dep_container = self.container_name(dep_name, dep_service);
                     let _ = self
                         .docker
-                        .stop_container(&dep_container, Some(StopContainerOptions { t: 10 }))
+                        .stop_container(&dep_container, Some(StopContainerOptions { t: Some(10), ..Default::default() }))
                         .await;
                     if let Err(e) = self
                         .docker
-                        .start_container(&dep_container, None::<StartContainerOptions<String>>)
+                        .start_container(&dep_container, None::<StartContainerOptions>)
                         .await
                     {
                         tracing::warn!("cascade restart of {dep_name} failed: {e}");
