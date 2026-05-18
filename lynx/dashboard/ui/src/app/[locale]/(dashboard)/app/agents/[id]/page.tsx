@@ -282,9 +282,9 @@ export default async function AgentDetailPage({
 							protoUdp: t("nftProtoUdp"),
 							protoBoth: t("nftProtoBoth"),
 						}}
-						onCreateRule={(payload) => createLocalRule(agentId, payload)}
-						onDeleteRule={(ruleId) => deleteLocalRule(agentId, ruleId)}
-						onPush={() => pushLocalRules(agentId)}
+						onCreateRule={createLocalRule.bind(null, agentId)}
+						onDeleteRule={deleteLocalRule.bind(null, agentId)}
+						onPush={pushLocalRules.bind(null, agentId)}
 					/>
 				</div>
 			</div>
