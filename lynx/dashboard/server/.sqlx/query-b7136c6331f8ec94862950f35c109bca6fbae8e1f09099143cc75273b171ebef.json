@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO update_log (id, triggered_by, version, channel, scope, agent_id, status)\n        VALUES ($1, NULL, $2, 'stable', 'dashboard', NULL, 'pending')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7136c6331f8ec94862950f35c109bca6fbae8e1f09099143cc75273b171ebef"
+}

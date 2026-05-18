@@ -15,8 +15,8 @@ async function fetchSessions(token: string): Promise<Session[]> {
 	if (!token) return [];
 	try {
 		const res = await fetch(`${BACKEND_URL}/admin/sessions`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) return [];
 		return res.json();
@@ -38,13 +38,7 @@ function shortUA(ua: string | null): string {
 	return ua.slice(0, 57) + "…";
 }
 
-export async function SessionList({
-	token,
-	locale,
-}: {
-	token: string;
-	locale: string;
-}) {
+export async function SessionList({ token, locale }: { token: string; locale: string }) {
 	const sessions = await fetchSessions(token);
 	const t = await getTranslations({ locale, namespace: "app.settings" });
 
@@ -59,26 +53,19 @@ export async function SessionList({
 	return (
 		<div className="flex flex-col gap-2">
 			{sessions.map((s) => (
-				<div
-					key={s.id}
-					className="rounded-lg border p-4 flex items-start justify-between gap-4"
-				>
+				<div className="rounded-lg border p-4 flex items-start justify-between gap-4" key={s.id}>
 					<div className="min-w-0 flex-1 space-y-0.5">
-						<p className="text-sm font-medium truncate">
-							{s.ip ?? "—"}
-						</p>
-						<p className="text-xs text-muted-foreground truncate">
-							{shortUA(s.user_agent)}
-						</p>
+						<p className="text-sm font-medium truncate">{s.ip ?? "—"}</p>
+						<p className="text-xs text-muted-foreground truncate">{shortUA(s.user_agent)}</p>
 						<p className="text-xs text-muted-foreground">
 							{t("lastUsed")} {formatDate(s.last_used_at)}
 						</p>
 					</div>
 					<RevokeButton
-						sessionId={s.id}
-						label={t("revoke")}
-						successMsg={t("revokeSuccess")}
 						errorMsg={t("revokeError")}
+						label={t("revoke")}
+						sessionId={s.id}
+						successMsg={t("revokeSuccess")}
 					/>
 				</div>
 			))}

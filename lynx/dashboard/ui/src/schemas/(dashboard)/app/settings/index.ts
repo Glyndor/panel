@@ -13,11 +13,23 @@ export const changePasswordSchema = z.object({
 });
 
 export const brandingSchema = z.object({
+	accent_color: z
+		.string()
+		.regex(/^#[0-9a-fA-F]{6}$/)
+		.optional()
+		.or(z.literal("")),
 	company_name: z.string().max(80).optional(),
 	logo_url: z.string().optional(),
-	primary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().or(z.literal("")),
-	secondary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().or(z.literal("")),
-	accent_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().or(z.literal("")),
+	primary_color: z
+		.string()
+		.regex(/^#[0-9a-fA-F]{6}$/)
+		.optional()
+		.or(z.literal("")),
+	secondary_color: z
+		.string()
+		.regex(/^#[0-9a-fA-F]{6}$/)
+		.optional()
+		.or(z.literal("")),
 });
 
 export const domainSetupSchema = z.object({
@@ -26,19 +38,19 @@ export const domainSetupSchema = z.object({
 });
 
 export const migrationStartSchema = z.object({
-	target_url: z.string().url(),
 	migration_token: z.string().min(1),
+	target_url: z.string().url(),
 });
 
 const MAX_CERT_BYTES = 64 * 1024;
 
 export const certUploadSchema = z.object({
-	cert_type: z.enum(["cloudflare", "custom"]),
 	cert_pem: z
 		.string()
 		.min(1)
 		.refine((s) => s.length <= MAX_CERT_BYTES, "Certificate exceeds 64 KB limit")
 		.refine((s) => s.includes("-----BEGIN"), "Must be PEM format"),
+	cert_type: z.enum(["cloudflare", "custom"]),
 	key_pem: z
 		.string()
 		.refine((s) => s.length <= MAX_CERT_BYTES, "Key exceeds 64 KB limit")

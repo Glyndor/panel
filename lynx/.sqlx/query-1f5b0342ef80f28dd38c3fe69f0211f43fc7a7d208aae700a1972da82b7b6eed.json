@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO session_logs (id, session_id, reason) VALUES ($1, $2, 'mass_logout')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f5b0342ef80f28dd38c3fe69f0211f43fc7a7d208aae700a1972da82b7b6eed"
+}

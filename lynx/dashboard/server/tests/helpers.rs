@@ -43,6 +43,17 @@ pub async fn test_state() -> AppState {
     let redis = redis::Client::open(redis_url.as_str()).expect("open redis");
     let redis_manager = ConnectionManager::new(redis).await.expect("connect redis");
 
+    // Flush testadmin's per-username rate-limit key before each test.
+    // With --test-threads=1 tests run serially within a binary, so this reset
+    // fires before every test that calls test_state(), keeping the counter at 0
+    // and preventing the 10/15min per-username limit from being exhausted by
+    // multiple parallel test binaries all logging in as testadmin.
+    {
+        use redis::AsyncCommands;
+        let mut r = redis_manager.clone();
+        let _: redis::RedisResult<()> = r.del("rl:login:u:testadmin").await;
+    }
+
     let sign_seed = [0x42u8; 32];
     let signing = SigningKey::from_bytes(&sign_seed);
     let sign_pub = signing.verifying_key().to_bytes();

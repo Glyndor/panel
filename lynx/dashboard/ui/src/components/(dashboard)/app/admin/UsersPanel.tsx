@@ -1,17 +1,18 @@
 "use client";
 
+import { MoreHorizontal, ShieldAlert, Trash2, UserPlus } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
 	addUserRoleAction,
 	deleteUserAction,
 	forcePasswordChangeAction,
-	removeUserRoleAction,
 	type RoleRow,
+	removeUserRoleAction,
 	type UserRow,
 } from "@/actions/(dashboard)/app/admin/users";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -19,14 +20,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import { MoreHorizontal, ShieldAlert, Trash2, UserPlus } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Props = {
 	initial: UserRow[];
@@ -71,11 +65,7 @@ export function UsersPanel({ initial, roles, labels }: Props) {
 		startTransition(async () => {
 			const { success } = await forcePasswordChangeAction(userId);
 			if (success) {
-				setUsers((prev) =>
-					prev.map((u) =>
-						u.id === userId ? { ...u, force_password_change: true } : u,
-					),
-				);
+				setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, force_password_change: true } : u)));
 				toast.success(labels.forcePasswordChangeSuccess);
 			} else {
 				toast.error(labels.forcePasswordChangeError);
@@ -91,9 +81,7 @@ export function UsersPanel({ initial, roles, labels }: Props) {
 			if (success) {
 				setUsers((prev) =>
 					prev.map((u) =>
-						u.id === userId
-							? { ...u, roles: [...u.roles, { id: role.id, name: role.name }] }
-							: u,
+						u.id === userId ? { ...u, roles: [...u.roles, { id: role.id, name: role.name }] } : u,
 					),
 				);
 				toast.success(labels.addRoleSuccess);
@@ -108,11 +96,7 @@ export function UsersPanel({ initial, roles, labels }: Props) {
 			const { success } = await removeUserRoleAction(userId, roleId);
 			if (success) {
 				setUsers((prev) =>
-					prev.map((u) =>
-						u.id === userId
-							? { ...u, roles: u.roles.filter((r) => r.id !== roleId) }
-							: u,
-					),
+					prev.map((u) => (u.id === userId ? { ...u, roles: u.roles.filter((r) => r.id !== roleId) } : u)),
 				);
 				toast.success(labels.removeRoleSuccess);
 			} else {
@@ -124,9 +108,7 @@ export function UsersPanel({ initial, roles, labels }: Props) {
 	return (
 		<div className="rounded-lg border divide-y">
 			{users.map((user) => {
-				const assignableRoles = roles.filter(
-					(r) => !user.roles.some((ur) => ur.id === r.id),
-				);
+				const assignableRoles = roles.filter((r) => !user.roles.some((ur) => ur.id === r.id));
 				return (
 					<div className="flex flex-col gap-2 px-4 py-3" key={user.id}>
 						<div className="flex items-center gap-2">
@@ -138,11 +120,7 @@ export function UsersPanel({ initial, roles, labels }: Props) {
 							)}
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
-									<Button
-										className="h-7 w-7 cursor-pointer select-none"
-										size="icon"
-										variant="ghost"
-									>
+									<Button className="h-7 w-7 cursor-pointer select-none" size="icon" variant="ghost">
 										<MoreHorizontal className="size-4" />
 									</Button>
 								</DropdownMenuTrigger>

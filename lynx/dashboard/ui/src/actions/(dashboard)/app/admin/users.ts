@@ -1,7 +1,7 @@
 "use server";
 
-import { apiFetch } from "@/lib/api";
 import { cookies } from "next/headers";
+import { apiFetch } from "@/lib/api";
 
 async function token(): Promise<string> {
 	const jar = await cookies();
@@ -38,17 +38,17 @@ export async function listUsersAction(): Promise<UserRow[]> {
 export async function deleteUserAction(userId: string): Promise<{ success: boolean; error?: string }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/users/${userId}`, {
-		method: "DELETE",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "DELETE",
 	});
-	return res.ok ? { success: true } : { success: false, error: (res as { ok: false; error: string }).error };
+	return res.ok ? { success: true } : { error: (res as { ok: false; error: string }).error, success: false };
 }
 
 export async function forcePasswordChangeAction(userId: string): Promise<{ success: boolean }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/users/${userId}/force-password-change`, {
-		method: "POST",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "POST",
 	});
 	return { success: res.ok };
 }
@@ -56,8 +56,8 @@ export async function forcePasswordChangeAction(userId: string): Promise<{ succe
 export async function addUserRoleAction(userId: string, roleId: string): Promise<{ success: boolean }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/users/${userId}/roles/${roleId}`, {
-		method: "POST",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "POST",
 	});
 	return { success: res.ok };
 }
@@ -65,8 +65,8 @@ export async function addUserRoleAction(userId: string, roleId: string): Promise
 export async function removeUserRoleAction(userId: string, roleId: string): Promise<{ success: boolean }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/users/${userId}/roles/${roleId}`, {
-		method: "DELETE",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "DELETE",
 	});
 	return { success: res.ok };
 }
@@ -92,37 +92,40 @@ export async function listPermissionsAction(): Promise<PermRef[]> {
 export async function createRoleAction(name: string): Promise<{ success: boolean; id?: string; error?: string }> {
 	const tok = await token();
 	const res = await apiFetch<{ id: string; name: string }>("/admin/roles", {
-		method: "POST",
-		headers: { Authorization: `Bearer ${tok}` },
 		body: JSON.stringify({ name }),
+		headers: { Authorization: `Bearer ${tok}` },
+		method: "POST",
 	});
-	if (res.ok) return { success: true, id: res.data.id };
-	return { success: false, error: (res as { ok: false; error: string }).error };
+	if (res.ok) return { id: res.data.id, success: true };
+	return { error: (res as { ok: false; error: string }).error, success: false };
 }
 
 export async function deleteRoleAction(roleId: string): Promise<{ success: boolean; error?: string }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/roles/${roleId}`, {
-		method: "DELETE",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "DELETE",
 	});
-	return res.ok ? { success: true } : { success: false, error: (res as { ok: false; error: string }).error };
+	return res.ok ? { success: true } : { error: (res as { ok: false; error: string }).error, success: false };
 }
 
 export async function addRolePermissionAction(roleId: string, permId: string): Promise<{ success: boolean }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/roles/${roleId}/permissions/${permId}`, {
-		method: "POST",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "POST",
 	});
 	return { success: res.ok };
 }
 
-export async function removeRolePermissionAction(roleId: string, permId: string): Promise<{ success: boolean; error?: string }> {
+export async function removeRolePermissionAction(
+	roleId: string,
+	permId: string,
+): Promise<{ success: boolean; error?: string }> {
 	const tok = await token();
 	const res = await apiFetch(`/admin/roles/${roleId}/permissions/${permId}`, {
-		method: "DELETE",
 		headers: { Authorization: `Bearer ${tok}` },
+		method: "DELETE",
 	});
-	return res.ok ? { success: true } : { success: false, error: (res as { ok: false; error: string }).error };
+	return res.ok ? { success: true } : { error: (res as { ok: false; error: string }).error, success: false };
 }

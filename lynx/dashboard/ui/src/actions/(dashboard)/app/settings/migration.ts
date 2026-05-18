@@ -20,8 +20,8 @@ export async function getMigrationStatus(): Promise<{
 	const tok = await authToken();
 	try {
 		const res = await fetch(`${BACKEND_URL}/migration`, {
-			headers: { Authorization: `Bearer ${tok}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${tok}` },
 		});
 		if (!res.ok) return null;
 		return res.json();
@@ -38,14 +38,14 @@ export async function prepareMigration(): Promise<{
 	const tok = await authToken();
 	try {
 		const res = await fetch(`${BACKEND_URL}/migration/prepare`, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${tok}` },
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: `${res.status}` };
+		if (!res.ok) return { error: `${res.status}`, ok: false };
 		const data = (await res.json()) as { migration_token: string };
-		return { ok: true, migration_token: data.migration_token };
+		return { migration_token: data.migration_token, ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -56,17 +56,17 @@ export async function startMigration(
 	const tok = await authToken();
 	try {
 		const res = await fetch(`${BACKEND_URL}/migration/start`, {
-			method: "POST",
+			body: JSON.stringify({ migration_token: migrationToken, target_url: targetUrl }),
 			headers: {
-				"Content-Type": "application/json",
 				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ target_url: targetUrl, migration_token: migrationToken }),
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: `${res.status}` };
+		if (!res.ok) return { error: `${res.status}`, ok: false };
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -74,13 +74,13 @@ export async function abortMigration(): Promise<{ ok: boolean; error?: string }>
 	const tok = await authToken();
 	try {
 		const res = await fetch(`${BACKEND_URL}/migration/abort`, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${tok}` },
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: `${res.status}` };
+		if (!res.ok) return { error: `${res.status}`, ok: false };
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }
 
@@ -91,12 +91,12 @@ export async function confirmMigrationShutdown(): Promise<{
 	const tok = await authToken();
 	try {
 		const res = await fetch(`${BACKEND_URL}/migration/confirm-shutdown`, {
-			method: "POST",
 			headers: { Authorization: `Bearer ${tok}` },
+			method: "POST",
 		});
-		if (!res.ok) return { ok: false, error: `${res.status}` };
+		if (!res.ok) return { error: `${res.status}`, ok: false };
 		return { ok: true };
 	} catch {
-		return { ok: false, error: "network_error" };
+		return { error: "network_error", ok: false };
 	}
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET force_password_change = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6d5dc21c6a9e2864fca14e3babe32f70a23626f102a4055a47d154f0e8c8e52a"
+}

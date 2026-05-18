@@ -1,20 +1,20 @@
 "use client";
 
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
-import Image from "next/image";
+import { updateLocaleAction } from "@/actions/(dashboard)/app/settings/preferences";
+import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import { updateLocaleAction } from "@/actions/(dashboard)/app/settings/preferences";
 
 const LOCALES: { code: string; label: string; flag: string }[] = [
-	{ code: "en", label: "English", flag: "/flags/en.svg" },
-	{ code: "es", label: "Español", flag: "/flags/es.svg" },
+	{ code: "en", flag: "/flags/en.svg", label: "English" },
+	{ code: "es", flag: "/flags/es.svg", label: "Español" },
 ];
 
 type Props = { locale: string };
@@ -40,32 +40,26 @@ export function LocaleSwitcher({ locale }: Props) {
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<Button
+					aria-label="Switch language"
 					className="h-7 w-7 cursor-pointer select-none p-0"
 					size="icon"
 					variant="ghost"
-					aria-label="Switch language"
 				>
 					<Image
-						src={current.flag}
 						alt={current.label}
-						width={18}
-						height={18}
 						className="rounded-full object-cover"
+						height={18}
+						src={current.flag}
+						width={18}
 					/>
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				{LOCALES.map(({ code, label, flag }) => (
-					<DropdownMenuItem
-						className="gap-2 cursor-pointer"
-						key={code}
-						onClick={() => handleSelect(code)}
-					>
-						<Image src={flag} alt={label} width={16} height={16} className="rounded-full" />
+					<DropdownMenuItem className="gap-2 cursor-pointer" key={code} onClick={() => handleSelect(code)}>
+						<Image alt={label} className="rounded-full" height={16} src={flag} width={16} />
 						{label}
-						{locale === code && (
-							<span className="ml-auto text-xs text-muted-foreground">✓</span>
-						)}
+						{locale === code && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
 					</DropdownMenuItem>
 				))}
 			</DropdownMenuContent>

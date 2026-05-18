@@ -1,26 +1,20 @@
 "use client";
 
+import { Plus, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
 	addRolePermissionAction,
 	createRoleAction,
 	deleteRoleAction,
-	removeRolePermissionAction,
 	type PermRef,
 	type RoleRow,
+	removeRolePermissionAction,
 } from "@/actions/(dashboard)/app/admin/users";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import { Plus, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Props = {
 	initial: RoleRow[];
@@ -85,9 +79,7 @@ export function RolesPanel({ initial, allPerms, labels }: Props) {
 			if (success) {
 				setRoles((prev) =>
 					prev.map((r) =>
-						r.id === roleId
-							? { ...r, permissions: [...r.permissions, { id: perm.id, key: perm.key }] }
-							: r,
+						r.id === roleId ? { ...r, permissions: [...r.permissions, { id: perm.id, key: perm.key }] } : r,
 					),
 				);
 				toast.success(labels.addPermissionSuccess);
@@ -103,9 +95,7 @@ export function RolesPanel({ initial, allPerms, labels }: Props) {
 			if (res.success) {
 				setRoles((prev) =>
 					prev.map((r) =>
-						r.id === roleId
-							? { ...r, permissions: r.permissions.filter((p) => p.id !== permId) }
-							: r,
+						r.id === roleId ? { ...r, permissions: r.permissions.filter((p) => p.id !== permId) } : r,
 					),
 				);
 				toast.success(labels.removePermissionSuccess);
@@ -138,9 +128,7 @@ export function RolesPanel({ initial, allPerms, labels }: Props) {
 
 			<div className="rounded-lg border divide-y">
 				{roles.map((role) => {
-					const assignablePerms = allPerms.filter(
-						(p) => !role.permissions.some((rp) => rp.id === p.id),
-					);
+					const assignablePerms = allPerms.filter((p) => !role.permissions.some((rp) => rp.id === p.id));
 					return (
 						<div className="flex flex-col gap-2 px-4 py-3" key={role.id}>
 							<div className="flex items-center gap-2">

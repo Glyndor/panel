@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT wg_ip, api_port, status FROM agents WHERE id=$1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wg_ip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "api_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3a9e69b7c9cae72e08c7fb8094b086789094599f575a6d27b2ad7e15cb71eac6"
+}

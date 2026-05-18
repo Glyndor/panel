@@ -1,63 +1,63 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { AlertTriangle, ArrowRightLeft } from "lucide-react";
 import { useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
-import { ArrowRightLeft, AlertTriangle } from "lucide-react";
-import { migrationStartSchema, type MigrationStartInput } from "@/schemas/(dashboard)/app/settings";
 import {
-	prepareMigration,
-	startMigration,
 	abortMigration,
 	confirmMigrationShutdown,
+	prepareMigration,
+	startMigration,
 } from "@/actions/(dashboard)/app/settings/migration";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { type MigrationStartInput, migrationStartSchema } from "@/schemas/(dashboard)/app/settings";
 
 interface MigrationState {
-	status: string;
-	role: string;
-	target_url: string | null;
-	agents_total: number;
 	agents_confirmed: number;
+	agents_total: number;
 	error_message: string | null;
+	role: string;
 	started_at: string | null;
+	status: string;
+	target_url: string | null;
 }
 
 interface Labels {
-	title: string;
-	desc: string;
-	sourceTitle: string;
-	sourceDesc: string;
-	targetUrl: string;
-	token: string;
-	startMigration: string;
-	targetTitle: string;
-	targetDesc: string;
-	prepareBtn: string;
-	preparedToken: string;
-	copyToken: string;
 	abortBtn: string;
+	abortError: string;
+	abortSuccess: string;
+	agentsProgress: string;
 	confirmShutdown: string;
 	confirmShutdownMsg: string;
+	copyToken: string;
+	desc: string;
+	error: string;
+	prepareBtn: string;
+	preparedToken: string;
+	prepareError: string;
+	shutdownError: string;
+	sourceDesc: string;
+	sourceTitle: string;
+	startError: string;
+	startMigration: string;
+	statusAborted: string;
+	statusCompleted: string;
+	statusError: string;
 	statusIdle: string;
+	statusNotifying: string;
 	statusPreparing: string;
 	statusTransferring: string;
-	statusNotifying: string;
 	statusWaiting: string;
-	statusCompleted: string;
-	statusAborted: string;
-	statusError: string;
-	agentsProgress: string;
-	error: string;
-	prepareError: string;
-	startError: string;
-	abortSuccess: string;
-	abortError: string;
-	shutdownError: string;
+	targetDesc: string;
+	targetTitle: string;
+	targetUrl: string;
+	title: string;
+	token: string;
 }
 
 interface Props {
@@ -66,14 +66,14 @@ interface Props {
 }
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
+	aborted: "secondary",
+	completed: "default",
+	error: "destructive",
 	idle: "secondary",
+	notifying_agents: "secondary",
 	preparing: "secondary",
 	transferring: "secondary",
-	notifying_agents: "secondary",
 	waiting_agents: "secondary",
-	completed: "default",
-	aborted: "secondary",
-	error: "destructive",
 };
 
 export function MigrationSection({ initial, labels }: Props) {
@@ -97,7 +97,7 @@ export function MigrationSection({ initial, labels }: Props) {
 			const r = await prepareMigration();
 			if (r.ok && r.migration_token) {
 				setReceivedToken(r.migration_token);
-				setState((prev) => ({ ...prev, status: "preparing", role: "target" }));
+				setState((prev) => ({ ...prev, role: "target", status: "preparing" }));
 			} else {
 				toast.error(labels.prepareError);
 			}
@@ -110,17 +110,17 @@ export function MigrationSection({ initial, labels }: Props) {
 				if (!r.ok) throw new Error(r.error);
 				setState((prev) => ({
 					...prev,
-					status: "transferring",
 					role: "source",
+					status: "transferring",
 					target_url: data.target_url,
 				}));
 				reset();
 				return r;
 			}),
 			{
+				error: labels.startError,
 				loading: labels.startMigration,
 				success: labels.startMigration,
-				error: labels.startError,
 			},
 		);
 	};
@@ -165,12 +165,12 @@ export function MigrationSection({ initial, labels }: Props) {
 			<div className="flex items-center gap-2 flex-wrap">
 				<ArrowRightLeft className="size-4 text-muted-foreground" />
 				<Badge variant={STATUS_VARIANT[state.status] ?? "secondary"}>
-					{labels[`status${state.status.charAt(0).toUpperCase() + state.status.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).slice(1)}` as keyof typeof labels] ?? state.status}
+					{labels[
+						`status${state.status.charAt(0).toUpperCase() + state.status.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).slice(1)}` as keyof typeof labels
+					] ?? state.status}
 				</Badge>
 				{state.target_url && (
-					<span className="font-mono text-xs text-muted-foreground">
-						→ {state.target_url}
-					</span>
+					<span className="font-mono text-xs text-muted-foreground">→ {state.target_url}</span>
 				)}
 			</div>
 
@@ -196,14 +196,14 @@ export function MigrationSection({ initial, labels }: Props) {
 							<p className="text-sm font-medium">{labels.sourceTitle}</p>
 							<p className="text-xs text-muted-foreground mt-0.5">{labels.sourceDesc}</p>
 						</div>
-						<form onSubmit={handleSubmit(onStart)} className="flex flex-col gap-3">
+						<form className="flex flex-col gap-3" onSubmit={handleSubmit(onStart)}>
 							<Field>
 								<FieldLabel htmlFor="migration-url">{labels.targetUrl}</FieldLabel>
 								<Input
 									id="migration-url"
 									{...register("target_url")}
-									placeholder="https://1.2.3.4:19443"
 									disabled={isSubmitting}
+									placeholder="https://1.2.3.4:19443"
 								/>
 								<FieldError errors={[errors.target_url]} />
 							</Field>
@@ -212,12 +212,12 @@ export function MigrationSection({ initial, labels }: Props) {
 								<Input
 									id="migration-token"
 									{...register("migration_token")}
-									placeholder="migration token from VPS-B"
 									disabled={isSubmitting}
+									placeholder="migration token from VPS-B"
 								/>
 								<FieldError errors={[errors.migration_token]} />
 							</Field>
-							<Button type="submit" size="sm" disabled={isSubmitting}>
+							<Button disabled={isSubmitting} size="sm" type="submit">
 								{isSubmitting ? "…" : labels.startMigration}
 							</Button>
 						</form>
@@ -235,18 +235,13 @@ export function MigrationSection({ initial, labels }: Props) {
 									<code className="text-xs font-mono bg-muted px-2 py-1 rounded break-all">
 										{receivedToken.slice(0, 24)}…
 									</code>
-									<Button size="sm" variant="outline" onClick={copyToken}>
+									<Button onClick={copyToken} size="sm" variant="outline">
 										{labels.copyToken}
 									</Button>
 								</div>
 							</div>
 						) : (
-							<Button
-								size="sm"
-								variant="outline"
-								onClick={handlePrepare}
-								disabled={preparePending}
-							>
+							<Button disabled={preparePending} onClick={handlePrepare} size="sm" variant="outline">
 								{labels.prepareBtn}
 							</Button>
 						)}
@@ -259,21 +254,11 @@ export function MigrationSection({ initial, labels }: Props) {
 					{state.status === "waiting_agents" &&
 						state.agents_confirmed >= state.agents_total &&
 						state.role === "source" && (
-							<Button
-								size="sm"
-								variant="destructive"
-								onClick={handleShutdown}
-								disabled={shutdownPending}
-							>
+							<Button disabled={shutdownPending} onClick={handleShutdown} size="sm" variant="destructive">
 								{labels.confirmShutdown}
 							</Button>
 						)}
-					<Button
-						size="sm"
-						variant="outline"
-						onClick={handleAbort}
-						disabled={abortPending}
-					>
+					<Button disabled={abortPending} onClick={handleAbort} size="sm" variant="outline">
 						{labels.abortBtn}
 					</Button>
 				</div>

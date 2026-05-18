@@ -1,8 +1,9 @@
 "use client";
 
+import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useTransition } from "react";
-import { Moon, Sun, Monitor } from "lucide-react";
+import { updateThemeAction } from "@/actions/(dashboard)/app/settings/preferences";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -10,12 +11,11 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { updateThemeAction } from "@/actions/(dashboard)/app/settings/preferences";
 
 const THEMES = [
-	{ value: "light", icon: Sun, label: "Light" },
-	{ value: "dark", icon: Moon, label: "Dark" },
-	{ value: "system", icon: Monitor, label: "System" },
+	{ icon: Sun, label: "Light", value: "light" },
+	{ icon: Moon, label: "Dark", value: "dark" },
+	{ icon: Monitor, label: "System", value: "system" },
 ] as const;
 
 export function ThemeToggle() {
@@ -34,26 +34,20 @@ export function ThemeToggle() {
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<Button
+					aria-label="Toggle theme"
 					className="h-7 w-7 cursor-pointer select-none text-muted-foreground"
 					size="icon"
 					variant="ghost"
-					aria-label="Toggle theme"
 				>
 					<Icon className="size-4" />
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				{THEMES.map(({ value, icon: ItemIcon, label }) => (
-					<DropdownMenuItem
-						className="gap-2 cursor-pointer"
-						key={value}
-						onClick={() => handleSelect(value)}
-					>
+					<DropdownMenuItem className="gap-2 cursor-pointer" key={value} onClick={() => handleSelect(value)}>
 						<ItemIcon className="size-3.5" />
 						{label}
-						{theme === value && (
-							<span className="ml-auto text-xs text-muted-foreground">✓</span>
-						)}
+						{theme === value && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
 					</DropdownMenuItem>
 				))}
 			</DropdownMenuContent>

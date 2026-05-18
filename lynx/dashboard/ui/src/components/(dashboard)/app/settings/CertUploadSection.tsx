@@ -1,29 +1,29 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { Upload } from "lucide-react";
-import { certUploadSchema, type CertUploadInput } from "@/schemas/(dashboard)/app/settings";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { uploadCert } from "@/actions/(dashboard)/app/settings";
+import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { type CertUploadInput, certUploadSchema } from "@/schemas/(dashboard)/app/settings";
 
 interface Labels {
-	title: string;
-	cloudflareTab: string;
-	customTab: string;
 	certPem: string;
 	certPemPlaceholder: string;
+	cloudflareTab: string;
+	customTab: string;
+	error: string;
+	keyOptional: string;
 	keyPem: string;
 	keyPemPlaceholder: string;
-	keyOptional: string;
-	upload: string;
 	success: string;
-	error: string;
+	title: string;
+	upload: string;
 }
 
 interface Props {
@@ -40,8 +40,8 @@ export function CertUploadSection({ labels, onSuccess }: Props) {
 		reset,
 		formState: { errors, isSubmitting },
 	} = useForm<CertUploadInput>({
-		resolver: zodResolver(certUploadSchema),
 		defaultValues: { cert_type: "cloudflare" },
+		resolver: zodResolver(certUploadSchema),
 	});
 
 	const onSubmit = async (data: CertUploadInput) => {
@@ -63,51 +63,51 @@ export function CertUploadSection({ labels, onSuccess }: Props) {
 			</div>
 
 			<Tabs
-				value={tab}
 				onValueChange={(v) => {
 					setTab(v as "cloudflare" | "custom");
 					reset({ cert_type: v as "cloudflare" | "custom" });
 				}}
+				value={tab}
 			>
 				<TabsList className="w-full">
-					<TabsTrigger value="cloudflare" className="flex-1 select-none cursor-pointer">
+					<TabsTrigger className="flex-1 select-none cursor-pointer" value="cloudflare">
 						{labels.cloudflareTab}
 					</TabsTrigger>
-					<TabsTrigger value="custom" className="flex-1 select-none cursor-pointer">
+					<TabsTrigger className="flex-1 select-none cursor-pointer" value="custom">
 						{labels.customTab}
 					</TabsTrigger>
 				</TabsList>
 
-				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3 mt-3">
+				<form className="flex flex-col gap-3 mt-3" onSubmit={handleSubmit(onSubmit)}>
 					<input type="hidden" {...register("cert_type")} value={tab} />
 
-					<TabsContent value="cloudflare" forceMount className={tab !== "cloudflare" ? "hidden" : ""}>
+					<TabsContent className={tab !== "cloudflare" ? "hidden" : ""} forceMount value="cloudflare">
 						<Field>
 							<FieldLabel htmlFor="cf-cert-pem">{labels.certPem}</FieldLabel>
 							<Textarea
 								id="cf-cert-pem"
 								{...register("cert_pem")}
-								placeholder={labels.certPemPlaceholder}
-								rows={6}
 								className="font-mono text-xs resize-y"
 								disabled={isSubmitting}
+								placeholder={labels.certPemPlaceholder}
+								rows={6}
 							/>
 							<FieldError errors={[errors.cert_pem]} />
 						</Field>
 						<p className="text-xs text-muted-foreground mt-1">{labels.keyOptional}</p>
 					</TabsContent>
 
-					<TabsContent value="custom" forceMount className={tab !== "custom" ? "hidden" : ""}>
+					<TabsContent className={tab !== "custom" ? "hidden" : ""} forceMount value="custom">
 						<div className="flex flex-col gap-3">
 							<Field>
 								<FieldLabel htmlFor="custom-cert-pem">{labels.certPem}</FieldLabel>
 								<Textarea
 									id="custom-cert-pem"
 									{...register("cert_pem")}
-									placeholder={labels.certPemPlaceholder}
-									rows={6}
 									className="font-mono text-xs resize-y"
 									disabled={isSubmitting}
+									placeholder={labels.certPemPlaceholder}
+									rows={6}
 								/>
 								<FieldError errors={[errors.cert_pem]} />
 							</Field>
@@ -116,17 +116,17 @@ export function CertUploadSection({ labels, onSuccess }: Props) {
 								<Textarea
 									id="custom-key-pem"
 									{...register("key_pem")}
-									placeholder={labels.keyPemPlaceholder}
-									rows={6}
 									className="font-mono text-xs resize-y"
 									disabled={isSubmitting}
+									placeholder={labels.keyPemPlaceholder}
+									rows={6}
 								/>
 								<FieldError errors={[errors.key_pem]} />
 							</Field>
 						</div>
 					</TabsContent>
 
-					<Button type="submit" size="sm" disabled={isSubmitting}>
+					<Button disabled={isSubmitting} size="sm" type="submit">
 						{labels.upload}
 					</Button>
 				</form>

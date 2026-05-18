@@ -15,10 +15,14 @@ pub struct AppState {
     pub nft_checksum: Arc<Mutex<Option<String>>>,
     /// Rendered nft ruleset from last successful apply() — used for restore.
     pub nft_last_ruleset: Arc<Mutex<Option<String>>>,
-    /// Body of the lynx-global chain (managed by dashboard global rules).
+    /// Body of the lynx-global chain (input, managed by dashboard global rules).
     pub nft_global_body: Arc<Mutex<String>>,
-    /// Body of the lynx-local chain (managed by dashboard local rules for this agent).
+    /// Body of the lynx-local chain (input, managed by dashboard local rules for this agent).
     pub nft_local_body: Arc<Mutex<String>>,
+    /// Body of the lynx-global-output chain (output, managed by dashboard global rules).
+    pub nft_global_output_body: Arc<Mutex<String>>,
+    /// Body of the lynx-local-output chain (output, managed by dashboard local rules for this agent).
+    pub nft_local_output_body: Arc<Mutex<String>>,
     /// WireGuard port used in the last full nftables apply (stored for chain-only updates).
     pub nft_wg_port: Arc<std::sync::atomic::AtomicU32>,
     /// In-memory command rate limiter: (window_start_secs, count_in_window)
@@ -27,6 +31,9 @@ pub struct AppState {
     pub cmd_rejected_count: Arc<AtomicU64>,
     /// Epoch-second when the current rejection-count minute window started.
     pub cmd_rejected_window: Arc<AtomicU64>,
+    /// Epoch-second of last successful dashboard contact (WS connect or message received).
+    /// 0 = never connected. Used by the fallback updater to detect dashboard absence.
+    pub last_dashboard_contact: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -107,5 +114,21 @@ impl AppState {
 
     pub fn nft_local_body(&self) -> String {
         self.nft_local_body.lock().unwrap().clone()
+    }
+
+    pub fn set_nft_global_output_body(&self, body: String) {
+        *self.nft_global_output_body.lock().unwrap() = body;
+    }
+
+    pub fn nft_global_output_body(&self) -> String {
+        self.nft_global_output_body.lock().unwrap().clone()
+    }
+
+    pub fn set_nft_local_output_body(&self, body: String) {
+        *self.nft_local_output_body.lock().unwrap() = body;
+    }
+
+    pub fn nft_local_output_body(&self) -> String {
+        self.nft_local_output_body.lock().unwrap().clone()
     }
 }

@@ -12,6 +12,7 @@ pub struct NftRule {
     pub agent_id: Option<Uuid>,
     pub kind: String,
     pub port: Option<i32>,
+    pub port_end: Option<i32>,
     pub protocol: Option<String>,
     pub ip_list: Vec<String>,
     pub ip_version: String,
@@ -19,6 +20,7 @@ pub struct NftRule {
     pub description: Option<String>,
     pub priority: i32,
     pub enabled: bool,
+    pub direction: String,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -28,58 +30,48 @@ pub struct NftRule {
 pub struct CreateRuleRequest {
     pub kind: String,
     pub port: Option<i32>,
+    pub port_end: Option<i32>,
     pub protocol: Option<String>,
     pub ip_list: Option<Vec<String>>,
     pub ip_version: Option<String>,
     pub rate_per_min: Option<i32>,
     pub description: Option<String>,
     pub priority: Option<i32>,
+    pub direction: Option<String>,
 }
 
-/// Convert individual rule fields into nft rule lines.
-/// Used for system-level command generation without constructing a full NftRule.
-pub fn rule_line(
-    kind: &str,
-    port: Option<u16>,
-    protocol: Option<&str>,
-    ip_list: &[String],
-    rate_per_min: Option<u32>,
-) -> String {
-    let rule = NftRule {
-        id: Uuid::nil(),
-        scope: "global".into(),
-        agent_id: None,
-        kind: kind.to_string(),
-        port: port.map(|p| p as i32),
-        protocol: protocol.map(|s| s.to_string()),
-        ip_list: ip_list.to_vec(),
-        ip_version: "both".into(),
-        rate_per_min: rate_per_min.map(|r| r as i32),
-        description: None,
-        priority: 0,
-        enabled: true,
-        created_by: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-    rule_to_nft_lines(&rule).join("\n")
-}
-
-/// Convert a list of NftRules into the body of an nftables chain.
-/// Returns lines suitable for insertion inside `chain <name> { ... }`.
+/// Convert a list of NftRules into the body of the input chain (lynx-global / lynx-local).
+/// Filters to direction = 'input', sorted by priority.
 pub fn rules_to_nft_chain(rules: &[NftRule]) -> String {
-    let mut lines: Vec<String> = Vec::new();
-
-    let mut sorted: Vec<&NftRule> = rules.iter().filter(|r| r.enabled).collect();
+    let mut sorted: Vec<&NftRule> = rules
+        .iter()
+        .filter(|r| r.enabled && r.direction == "input")
+        .collect();
     sorted.sort_by_key(|r| r.priority);
 
-    for rule in sorted {
-        for line in rule_to_nft_lines(rule) {
-            lines.push(format!("        {line}"));
-        }
-    }
+    sorted
+        .iter()
+        .flat_map(|r| rule_to_nft_lines(r))
+        .map(|l| format!("        {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
-    lines.join("\n")
+/// Convert a list of NftRules into the body of the output chain (lynx-global-output / lynx-local-output).
+/// Filters to direction = 'output', sorted by priority.
+pub fn rules_to_nft_output_chain(rules: &[NftRule]) -> String {
+    let mut sorted: Vec<&NftRule> = rules
+        .iter()
+        .filter(|r| r.enabled && r.direction == "output")
+        .collect();
+    sorted.sort_by_key(|r| r.priority);
+
+    sorted
+        .iter()
+        .flat_map(|r| rule_to_nft_lines(r))
+        .map(|l| format!("        {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn rule_to_nft_lines(rule: &NftRule) -> Vec<String> {
@@ -87,6 +79,16 @@ fn rule_to_nft_lines(rule: &NftRule) -> Vec<String> {
         "allow_port" | "block_port" => port_rule_lines(rule),
         "allow_ip" | "block_ip" => ip_rule_lines(rule),
         "rate_limit" => rate_limit_lines(rule),
+        "drop_invalid_state" => vec!["ct state invalid drop".into()],
+        "tcp_flag_null" => vec!["tcp flags == 0x0 drop".into()],
+        "tcp_flag_xmas" => vec!["tcp flags & (fin | psh | urg) == fin | psh | urg drop".into()],
+        "tcp_flag_ack_new" => vec!["tcp flags & ack == ack ct state new drop".into()],
+        "icmp_ping_limit" => icmp_ping_limit_lines(rule),
+        "allow_icmp_errors" => allow_icmp_error_lines(rule),
+        "allow_ndp" => vec![
+            "ip6 nexthdr ipv6-icmp icmpv6 type { nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept".into(),
+        ],
+        "block_output_port" => output_port_block_lines(rule),
         _ => vec![],
     }
 }
@@ -119,15 +121,25 @@ fn ip_saddr_matches(rule: &NftRule) -> Vec<String> {
         .collect()
 }
 
+fn port_spec(rule: &NftRule) -> Option<String> {
+    let port = rule.port?;
+    Some(match rule.port_end {
+        Some(end) => format!("{port}-{end}"),
+        None => port.to_string(),
+    })
+}
+
 fn port_rule_lines(rule: &NftRule) -> Vec<String> {
-    let Some(port) = rule.port else { return vec![] };
+    let Some(spec) = port_spec(rule) else {
+        return vec![];
+    };
     let proto = rule.protocol.as_deref().unwrap_or("both");
     let verd = verdict(&rule.kind);
     let mut lines = Vec::new();
 
     for proto_kw in protocol_match(proto) {
         for saddr in ip_saddr_matches(rule) {
-            lines.push(format!("{saddr}{proto_kw} dport {port} {verd}"));
+            lines.push(format!("{saddr}{proto_kw} dport {spec} {verd}"));
         }
     }
     lines
@@ -145,7 +157,9 @@ fn ip_rule_lines(rule: &NftRule) -> Vec<String> {
 }
 
 fn rate_limit_lines(rule: &NftRule) -> Vec<String> {
-    let Some(port) = rule.port else { return vec![] };
+    let Some(spec) = port_spec(rule) else {
+        return vec![];
+    };
     let Some(rate) = rule.rate_per_min else {
         return vec![];
     };
@@ -155,9 +169,63 @@ fn rate_limit_lines(rule: &NftRule) -> Vec<String> {
     for proto_kw in protocol_match(proto) {
         for saddr in ip_saddr_matches(rule) {
             lines.push(format!(
-                "{saddr}{proto_kw} dport {port} limit rate {rate}/minute accept"
+                "{saddr}{proto_kw} dport {spec} limit rate {rate}/minute accept"
             ));
         }
     }
     lines
+}
+
+fn icmp_ping_limit_lines(rule: &NftRule) -> Vec<String> {
+    let rate = rule.rate_per_min.unwrap_or(3);
+    let mut lines = Vec::new();
+    match rule.ip_version.as_str() {
+        "ipv4" => lines.push(format!(
+            "ip protocol icmp icmp type echo-request ct state new limit rate {rate}/second burst 10 packets accept"
+        )),
+        "ipv6" => lines.push(format!(
+            "ip6 nexthdr ipv6-icmp icmpv6 type echo-request ct state new limit rate {rate}/second burst 10 packets accept"
+        )),
+        _ => {
+            lines.push(format!(
+                "ip protocol icmp icmp type echo-request ct state new limit rate {rate}/second burst 10 packets accept"
+            ));
+            lines.push(format!(
+                "ip6 nexthdr ipv6-icmp icmpv6 type echo-request ct state new limit rate {rate}/second burst 10 packets accept"
+            ));
+        }
+    }
+    lines
+}
+
+fn allow_icmp_error_lines(rule: &NftRule) -> Vec<String> {
+    let mut lines = Vec::new();
+    match rule.ip_version.as_str() {
+        "ipv4" => lines.push(
+            "ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept".into(),
+        ),
+        "ipv6" => lines.push(
+            "ip6 nexthdr ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept".into(),
+        ),
+        _ => {
+            lines.push(
+                "ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept".into(),
+            );
+            lines.push(
+                "ip6 nexthdr ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept".into(),
+            );
+        }
+    }
+    lines
+}
+
+fn output_port_block_lines(rule: &NftRule) -> Vec<String> {
+    let Some(spec) = port_spec(rule) else {
+        return vec![];
+    };
+    let proto = rule.protocol.as_deref().unwrap_or("both");
+    protocol_match(proto)
+        .into_iter()
+        .map(|p| format!("{p} dport {spec} drop"))
+        .collect()
 }

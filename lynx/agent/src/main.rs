@@ -11,13 +11,13 @@ mod nginx;
 mod podman;
 mod state;
 mod sync;
-mod update;
+pub mod update;
 mod ws_client;
 
 use anyhow::Context;
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -184,10 +184,13 @@ async fn main() -> anyhow::Result<()> {
         nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
         nft_global_body: Arc::new(std::sync::Mutex::new(String::new())),
         nft_local_body: Arc::new(std::sync::Mutex::new(String::new())),
+        nft_global_output_body: Arc::new(std::sync::Mutex::new(String::new())),
+        nft_local_output_body: Arc::new(std::sync::Mutex::new(String::new())),
         nft_wg_port: Arc::new(std::sync::atomic::AtomicU32::new(51820)),
         cmd_rate: Arc::new(std::sync::Mutex::new((0u64, 0u64))),
         cmd_rejected_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         cmd_rejected_window: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        last_dashboard_contact: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     // Reload nftables state from DB and re-apply on startup (rules don't persist across reboots).
@@ -199,12 +202,16 @@ async fn main() -> anyhow::Result<()> {
         if let Ok(rows) = rows {
             let mut global_body = String::new();
             let mut local_body = String::new();
+            let mut global_output_body = String::new();
+            let mut local_output_body = String::new();
             let mut wg_port = 51820u16;
 
             for row in &rows {
                 match row.chain.as_str() {
                     "lynx-global" => global_body = row.body.clone(),
                     "lynx-local" => local_body = row.body.clone(),
+                    "lynx-global-output" => global_output_body = row.body.clone(),
+                    "lynx-local-output" => local_output_body = row.body.clone(),
                     _ => {}
                 }
                 wg_port = row.wg_port as u16;
@@ -212,6 +219,8 @@ async fn main() -> anyhow::Result<()> {
 
             state.set_nft_global_body(global_body);
             state.set_nft_local_body(local_body);
+            state.set_nft_global_output_body(global_output_body);
+            state.set_nft_local_output_body(local_output_body);
             state.set_nft_wg_port(wg_port);
 
             let ruleset = nftables::Ruleset {
@@ -219,6 +228,8 @@ async fn main() -> anyhow::Result<()> {
                 org_networks: vec![],
                 global_body: state.nft_global_body(),
                 local_body: state.nft_local_body(),
+                global_output_body: state.nft_global_output_body(),
+                local_output_body: state.nft_local_output_body(),
             };
 
             match nftables::apply(&ruleset) {
@@ -261,6 +272,9 @@ async fn main() -> anyhow::Result<()> {
     // WebSocket client — persistent connection to dashboard
     tokio::spawn(ws_client::run_ws_client(state.clone()));
 
+    // Fallback self-updater: polls GitHub directly if dashboard absent for >6h
+    tokio::spawn(update::fallback::run_fallback_updater(state.clone()));
+
     // Audit log sync task (HTTP batch fallback when WS is down)
     tokio::spawn(sync::run_sync_task(state.clone()));
 
@@ -291,19 +305,13 @@ async fn main() -> anyhow::Result<()> {
     // Build TLS acceptor before moving state into router.
     let tls_acceptor = build_tls_acceptor(&state.config);
 
-    // Pass last_heartbeat to the heartbeat route via extension
-    let hb = last_heartbeat.clone();
     let app = Router::new()
         .route("/health", get(handlers::health))
         .route("/cmd", post(handlers::execute_command))
         .route("/metrics/ws", get(handlers::metrics_ws))
-        .route(
-            "/heartbeat",
-            post(move |State(state): State<AppState>, headers: HeaderMap| {
-                let hb = hb.clone();
-                async move { heartbeat_handler(state, headers, hb).await }
-            }),
-        )
+        .route("/heartbeat", post(heartbeat_handler))
+        // Inject last_heartbeat as a layer extension so the handler can access it.
+        .layer(axum::Extension(last_heartbeat.clone()))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
@@ -323,18 +331,36 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn heartbeat_handler(
-    state: AppState,
-    headers: HeaderMap,
-    hb: Arc<std::sync::Mutex<std::time::Instant>>,
+    State(state): State<AppState>,
+    hb: axum::Extension<Arc<std::sync::Mutex<std::time::Instant>>>,
+    Json(signed): Json<auth::SignedCommand>,
 ) -> Response {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
+    // Heartbeat ACK requires a valid Ed25519 signature — bearer token alone is
+    // insufficient so that `internal_token` compromise cannot suppress lockdown.
+    let verified = auth::verify_command(
+        &state.db,
+        &signed,
+        &state.config.dashboard_verify_key,
+        state.config.agent_id,
+    )
+    .await;
 
-    if !auth::verify_bearer(token, &state.config.internal_token) {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let cmd = match verified {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("heartbeat ACK rejected: invalid signature: {e}");
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+    };
+
+    let cmd_type = cmd
+        .command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if cmd_type != "agent.heartbeat_ack" {
+        tracing::warn!("heartbeat endpoint received unexpected command type: {cmd_type}");
+        return StatusCode::BAD_REQUEST.into_response();
     }
 
     *hb.lock().unwrap() = std::time::Instant::now();

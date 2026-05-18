@@ -1,7 +1,7 @@
 "use client";
 
-import { useAgentMetrics } from "@/lib/useAgentMetrics";
 import { Cpu, HardDrive, MemoryStick, Wifi, WifiOff } from "lucide-react";
+import { useAgentMetrics } from "@/lib/useAgentMetrics";
 
 interface Props {
 	agentId: string;
@@ -22,12 +22,7 @@ function pct(used: number, total: number) {
 }
 
 function Bar({ value }: { value: number }) {
-	const color =
-		value >= 90
-			? "bg-destructive"
-			: value >= 70
-				? "bg-yellow-500"
-				: "bg-primary";
+	const color = value >= 90 ? "bg-destructive" : value >= 70 ? "bg-yellow-500" : "bg-primary";
 	return (
 		<div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
 			<div
@@ -42,11 +37,7 @@ export function MetricsPanel({ agentId, labels }: Props) {
 	const { metrics, status } = useAgentMetrics(agentId);
 
 	if (status === "connecting") {
-		return (
-			<p className="text-xs text-muted-foreground animate-pulse select-none">
-				{labels.connecting}
-			</p>
-		);
+		return <p className="text-xs text-muted-foreground animate-pulse select-none">{labels.connecting}</p>;
 	}
 
 	if (status === "agent_offline" || status === "offline") {
@@ -78,9 +69,7 @@ export function MetricsPanel({ agentId, labels }: Props) {
 							<Cpu className="size-3" />
 							{labels.cpu}
 						</span>
-						<span className="font-mono font-medium tabular-nums">
-							{metrics.cpu_percent.toFixed(1)}%
-						</span>
+						<span className="font-mono font-medium tabular-nums">{metrics.cpu_percent.toFixed(1)}%</span>
 					</div>
 					<Bar value={Math.round(metrics.cpu_percent)} />
 				</div>

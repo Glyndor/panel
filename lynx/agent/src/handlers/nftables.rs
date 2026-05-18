@@ -12,7 +12,7 @@ pub async fn handle_nftables_apply(
         ));
     }
 
-    // Chain-specific update: { chain: "lynx-global"|"lynx-local", rules: "..." }
+    // Chain-specific update
     if let Some(chain) = cmd.command.get("chain").and_then(|v| v.as_str()) {
         let rules = cmd
             .command
@@ -24,15 +24,16 @@ pub async fn handle_nftables_apply(
         match chain {
             "lynx-global" => state.set_nft_global_body(rules.clone()),
             "lynx-local" => state.set_nft_local_body(rules.clone()),
+            "lynx-global-output" => state.set_nft_global_output_body(rules.clone()),
+            "lynx-local-output" => state.set_nft_local_output_body(rules.clone()),
             _ => {
                 return Err(AgentError::BadRequest(
-                    "unknown chain: must be lynx-global or lynx-local",
+                    "unknown chain: must be lynx-global, lynx-local, lynx-global-output, or lynx-local-output",
                 ))
             }
         }
 
         let result = apply_current_ruleset(state)?;
-        // Persist chain body so the agent can re-apply after reboot.
         let wg = state.nft_wg_port() as i32;
         let _ = sqlx::query!(
             "UPDATE nftables_state SET body = $1, wg_port = $2, updated_at = NOW() WHERE chain = $3",
@@ -53,7 +54,6 @@ pub async fn handle_nftables_apply(
     state.set_nft_wg_port(wg_port);
 
     let result = apply_current_ruleset(state)?;
-    // Persist wg_port for both chains.
     let wg = wg_port as i32;
     let _ = sqlx::query!(
         "UPDATE nftables_state SET wg_port = $1, updated_at = NOW()",
@@ -70,10 +70,11 @@ fn apply_current_ruleset(state: &AppState) -> std::result::Result<Value, AgentEr
         org_networks: vec![],
         global_body: state.nft_global_body(),
         local_body: state.nft_local_body(),
+        global_output_body: state.nft_global_output_body(),
+        local_output_body: state.nft_local_output_body(),
     };
 
     let rendered = nftables::apply(&ruleset)?;
-    // Checksum from live kernel state — must match current_checksum() in divergence checker.
     let checksum = nftables::current_checksum()?;
     state.set_nft_checksum(checksum);
     state.set_nft_last_ruleset(rendered);

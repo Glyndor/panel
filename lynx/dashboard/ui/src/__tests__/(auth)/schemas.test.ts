@@ -8,15 +8,15 @@ import { registerSchema } from "@/schemas/(auth)/register";
 
 describe("loginSchema", () => {
 	it("accepts valid credentials", () => {
-		expect(loginSchema.safeParse({ username: "alice", password: "secret" }).success).toBe(true);
+		expect(loginSchema.safeParse({ password: "secret", username: "alice" }).success).toBe(true);
 	});
 
 	it("rejects empty username", () => {
-		expect(loginSchema.safeParse({ username: "", password: "secret" }).success).toBe(false);
+		expect(loginSchema.safeParse({ password: "secret", username: "" }).success).toBe(false);
 	});
 
 	it("rejects empty password", () => {
-		expect(loginSchema.safeParse({ username: "alice", password: "" }).success).toBe(false);
+		expect(loginSchema.safeParse({ password: "", username: "alice" }).success).toBe(false);
 	});
 
 	it("rejects missing fields", () => {
@@ -30,9 +30,9 @@ describe("loginSchema", () => {
 
 describe("registerSchema", () => {
 	const valid = {
-		username: "alice42",
 		email: "alice@example.com",
 		password: "ValidP@ss12!",
+		username: "alice42",
 	};
 
 	it("accepts valid registration data", () => {

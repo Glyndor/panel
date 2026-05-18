@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE sessions\n        SET refresh_token_hash = $1, last_used_at = NOW(), last_jti = $4\n        WHERE id = $2 AND refresh_token_hash = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0e32c83a767ed536f34a71493e3d4b195a7b80662e7cfe54c56d63ba2f731a9"
+}

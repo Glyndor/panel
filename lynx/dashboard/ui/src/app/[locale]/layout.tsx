@@ -1,35 +1,39 @@
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata } from "next";
+import { Geist_Mono, Poppins } from "next/font/google";
+import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
-import { notFound } from "next/navigation";
-import { cookies } from "next/headers";
-import type { Metadata } from "next";
-import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
 import { BACKEND_URL } from "@/lib/api";
 import "../globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({
-	variable: "--font-geist-mono",
+const poppins = Poppins({
 	subsets: ["latin"],
+	variable: "--font-sans",
+	weight: ["300", "400", "500", "600", "700"],
+});
+const geistMono = Geist_Mono({
+	subsets: ["latin"],
+	variable: "--font-geist-mono",
 });
 
 interface Branding {
+	accent_color: string;
 	company_name: string;
 	logo_url: string | null;
 	primary_color: string;
 	secondary_color: string;
-	accent_color: string;
 }
 
 const BRANDING_DEFAULTS: Branding = {
+	accent_color: "#6366f1",
 	company_name: "Lynx",
 	logo_url: null,
 	primary_color: "#0f172a",
 	secondary_color: "#38bdf8",
-	accent_color: "#6366f1",
 };
 
 async function fetchBranding(): Promise<Branding> {
@@ -44,17 +48,13 @@ async function fetchBranding(): Promise<Branding> {
 	}
 }
 
-export async function generateMetadata({
-	params,
-}: {
-	params: Promise<{ locale: string }>;
-}): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
 	await params;
 	const branding = await fetchBranding();
 	return {
-		title: branding.company_name,
 		description: "Distributed infrastructure orchestration",
-		robots: { index: false, follow: false },
+		robots: { follow: false, index: false },
+		title: branding.company_name,
 	};
 }
 
@@ -76,22 +76,19 @@ export default async function LocaleLayout({
 	// Falls back to "system" if not set.
 	const defaultTheme = jar.get("theme_preference")?.value ?? "system";
 
-	const [messages, branding] = await Promise.all([
-		getMessages(),
-		fetchBranding(),
-	]);
+	const [messages, branding] = await Promise.all([getMessages(), fetchBranding()]);
 
 	const brandVars = {
+		"--brand-accent": branding.accent_color,
 		"--brand-primary": branding.primary_color,
 		"--brand-secondary": branding.secondary_color,
-		"--brand-accent": branding.accent_color,
 	} as React.CSSProperties;
 
 	return (
 		<html
+			className={`${poppins.variable} ${geistMono.variable} h-full antialiased`}
 			lang={locale}
 			style={brandVars}
-			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
 			suppressHydrationWarning
 		>
 			<body className="min-h-full flex flex-col bg-background text-foreground">

@@ -44,11 +44,18 @@ pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
 }
 
 /// Run a Podman command as a specific tenant user via `runuser`.
+///
+/// Uses `-u` (not `-l -c`) so each argument is passed directly to the OS without
+/// shell interpretation — prevents command injection through container/image names.
+/// Sets HOME and XDG_RUNTIME_DIR so rootless Podman finds its storage and socket.
 pub fn podman_as_tenant(tenant_id: &str, args: &[&str]) -> Result<std::process::Output> {
     let username = format!("lynx-tenant-{tenant_id}");
+    let uid = tenant_uid(tenant_id)?;
     Command::new("runuser")
-        .args(["-l", &username, "-c"])
-        .arg(format!("podman {}", args.join(" ")))
+        .args(["-u", &username, "--", "podman"])
+        .args(args)
+        .env("HOME", format!("/var/lib/lynx/orgs/{tenant_id}"))
+        .env("XDG_RUNTIME_DIR", format!("/run/user/{uid}"))
         .output()
         .context("runuser podman")
 }

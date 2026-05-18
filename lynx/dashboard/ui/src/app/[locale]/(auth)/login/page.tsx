@@ -1,7 +1,6 @@
-
 import { getTranslations } from "next-intl/server";
-import { BACKEND_URL } from "@/lib/api";
 import { LoginForm } from "@/components/(auth)/login/LoginForm";
+import { BACKEND_URL } from "@/lib/api";
 
 async function fetchCompanyName(): Promise<string> {
 	try {
@@ -16,7 +15,7 @@ async function fetchCompanyName(): Promise<string> {
 	}
 }
 
-export default async function LoginPage({ params }: { params: Promise<{ locale: string }>; }) {
+export default async function LoginPage({ params }: { params: Promise<{ locale: string }> }) {
 	const { locale } = await params;
 	const [t, companyName] = await Promise.all([
 		getTranslations({ locale, namespace: "auth.login" }),
@@ -27,9 +26,7 @@ export default async function LoginPage({ params }: { params: Promise<{ locale: 
 		<main className="min-h-screen flex items-center justify-center bg-background px-4">
 			<div className="w-full max-w-sm">
 				<div className="mb-8 text-center">
-					<h1 className="text-2xl font-bold tracking-tight">
-						{t("title", { company: companyName })}
-					</h1>
+					<h1 className="text-2xl font-bold tracking-tight">{t("title", { company: companyName })}</h1>
 					<p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
 				</div>
 
@@ -47,19 +44,19 @@ async function Branding({ locale }: { locale: string }) {
 		<footer className="mt-10 text-center text-xs text-muted-foreground">
 			{t("madeWith")}{" "}
 			<a
-				href="https://github.com/Jaro-c"
-				target="_blank"
-				rel="noopener noreferrer"
 				className="font-medium text-foreground hover:underline"
+				href="https://github.com/Jaro-c"
+				rel="noopener noreferrer"
+				target="_blank"
 			>
 				{t("author")}
 			</a>
 			{" · "}
 			<a
-				href="https://github.com/Jaro-c/Lynx"
-				target="_blank"
-				rel="noopener noreferrer"
 				className="font-medium text-foreground hover:underline"
+				href="https://github.com/Jaro-c/Lynx"
+				rel="noopener noreferrer"
+				target="_blank"
 			>
 				lynx
 			</a>

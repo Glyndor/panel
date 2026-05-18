@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_preferences (user_id, theme, locale)\n           VALUES ($1, COALESCE($2, 'system'), COALESCE($3, 'en'))\n           ON CONFLICT (user_id) DO UPDATE SET\n               theme = COALESCE($2, user_preferences.theme),\n               locale = COALESCE($3, user_preferences.locale),\n               updated_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "388de60f218494e05573b58846255397c6993a77ebdc93fd0c92394b3655012e"
+}

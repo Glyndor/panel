@@ -1,13 +1,11 @@
-import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
+import { Suspense } from "react";
+import { CreateOrgDialog } from "@/components/(dashboard)/app/organizations/CreateOrgDialog";
 import { OrgList } from "@/components/(dashboard)/app/organizations/OrgList";
 import { OrgListSkeleton } from "@/components/(dashboard)/app/organizations/OrgListSkeleton";
-import { CreateOrgDialog } from "@/components/(dashboard)/app/organizations/CreateOrgDialog";
 
-export default async function OrganizationsPage({
-	params,
-}: { params: Promise<{ locale: string }> }) {
+export default async function OrganizationsPage({ params }: { params: Promise<{ locale: string }> }) {
 	const { locale } = await params;
 	const t = await getTranslations({ locale, namespace: "app.organizations" });
 	const jar = await cookies();
@@ -18,15 +16,15 @@ export default async function OrganizationsPage({
 			<div className="flex items-center justify-between">
 				<h1 className="text-xl font-semibold">{t("title")}</h1>
 				<CreateOrgDialog
-					token={token}
+					errorMsg={t("createError")}
 					label={t("create")}
 					slugConflict={t("slugConflict")}
-					errorMsg={t("createError")}
+					token={token}
 				/>
 			</div>
 
 			<Suspense fallback={<OrgListSkeleton />}>
-				<OrgList token={token} locale={locale} />
+				<OrgList locale={locale} token={token} />
 			</Suspense>
 		</div>
 	);

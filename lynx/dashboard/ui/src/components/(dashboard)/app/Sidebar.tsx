@@ -1,22 +1,15 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import {
-	Building2,
-	LayoutDashboard,
-	LogOut,
-	Monitor,
-	Settings,
-	ShieldCheck,
-} from "lucide-react";
-import { useTranslations } from "next-intl";
+import { Building2, LayoutDashboard, LogOut, Monitor, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { logoutAction } from "@/actions/(dashboard)/app/logout";
+import { Button } from "@/components/ui/button";
+import { LocaleSwitcher } from "./LocaleSwitcher";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
-import { LocaleSwitcher } from "./LocaleSwitcher";
 
 type Props = { locale: string; companyName: string; logoUrl: string | null; isAdmin: boolean };
 
@@ -28,27 +21,25 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 	const items = [
 		{
 			href: `/${locale}/app`,
-			label: t("overview"),
 			icon: LayoutDashboard,
+			label: t("overview"),
 		},
 		{
 			href: `/${locale}/app/agents`,
-			label: t("agents"),
 			icon: Monitor,
+			label: t("agents"),
 		},
 		{
 			href: `/${locale}/app/organizations`,
-			label: t("organizations"),
 			icon: Building2,
+			label: t("organizations"),
 		},
 		{
 			href: `/${locale}/app/settings`,
-			label: t("settings"),
 			icon: Settings,
+			label: t("settings"),
 		},
-		...(isAdmin
-			? [{ href: `/${locale}/app/admin`, label: t("admin"), icon: ShieldCheck }]
-			: []),
+		...(isAdmin ? [{ href: `/${locale}/app/admin`, icon: ShieldCheck, label: t("admin") }] : []),
 	];
 
 	return (
@@ -57,7 +48,7 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 				<div className="flex items-center gap-2 flex-1 min-w-0">
 					{logoUrl ? (
 						// eslint-disable-next-line @next/next/no-img-element
-						<img src={logoUrl} alt={companyName} className="h-7 w-auto object-contain" />
+						<img alt={companyName} className="h-7 w-auto object-contain" src={logoUrl} />
 					) : (
 						<span
 							className="text-base font-semibold tracking-tight truncate"
@@ -74,19 +65,16 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 
 			<nav className="flex flex-col gap-0.5 p-2 flex-1">
 				{items.map(({ href, label, icon: Icon }) => {
-					const active =
-						href === `/${locale}/app`
-							? pathname === href
-							: pathname.startsWith(href);
+					const active = href === `/${locale}/app` ? pathname === href : pathname.startsWith(href);
 					return (
 						<Link
-							key={href}
-							href={href}
 							className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
 								active
 									? "bg-accent text-accent-foreground font-medium"
 									: "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
 							}`}
+							href={href}
+							key={href}
 						>
 							<Icon className="size-4 shrink-0" />
 							{label}
@@ -97,12 +85,10 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 
 			<div className="border-t p-2">
 				<Button
-					variant="ghost"
-					size="sm"
 					className="w-full justify-start gap-2.5 text-muted-foreground"
-					onClick={() =>
-						startTransition(() => logoutAction(locale))
-					}
+					onClick={() => startTransition(() => logoutAction(locale))}
+					size="sm"
+					variant="ghost"
 				>
 					<LogOut className="size-4" />
 					{t("signOut")}
@@ -113,19 +99,19 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 				<p className="text-[10px] text-muted-foreground/60 leading-tight">
 					Made with love by{" "}
 					<a
-						href="https://github.com/Jaro-c"
-						target="_blank"
-						rel="noopener noreferrer"
 						className="hover:text-muted-foreground transition-colors"
+						href="https://github.com/Jaro-c"
+						rel="noopener noreferrer"
+						target="_blank"
 					>
 						Jaroc
 					</a>
 					{" · "}
 					<a
-						href="https://github.com/Jaro-c/Lynx"
-						target="_blank"
-						rel="noopener noreferrer"
 						className="hover:text-muted-foreground transition-colors"
+						href="https://github.com/Jaro-c/Lynx"
+						rel="noopener noreferrer"
+						target="_blank"
 					>
 						lynx
 					</a>

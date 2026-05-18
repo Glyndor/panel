@@ -1,77 +1,72 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Globe, Lock, ShieldCheck } from "lucide-react";
 import { useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { closePort19443, configureDomain, setHsts, verifyDomain } from "@/actions/(dashboard)/app/settings";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
-import { Globe, ShieldCheck, Lock } from "lucide-react";
-import { domainSetupSchema, type DomainSetupInput } from "@/schemas/(dashboard)/app/settings";
-import {
-	configureDomain,
-	verifyDomain,
-	setHsts,
-	closePort19443,
-} from "@/actions/(dashboard)/app/settings";
+import { type DomainSetupInput, domainSetupSchema } from "@/schemas/(dashboard)/app/settings";
 import { CertUploadSection } from "./CertUploadSection";
 
 interface DomainConfig {
-	domain: string | null;
-	cert_type: string;
 	cert_expires_at: string | null;
+	cert_type: string;
+	domain: string | null;
+	error_message: string | null;
 	hsts_enabled: boolean;
 	port_19443_open: boolean;
 	status: string;
-	error_message: string | null;
 }
 
 interface Labels {
-	desc: string;
-	current: string;
-	none: string;
-	input: string;
-	email: string;
-	setup: string;
-	pending: string;
 	active: string;
-	error: string;
-	unconfigured: string;
-	verify: string;
-	dnsOk: string;
-	dnsFail: string;
-	verifyError: string;
-	setupError: string;
-	hsts: string;
-	hstsDesc: string;
-	hstsEnable: string;
-	hstsDisable: string;
-	hstsSuccess: string;
-	hstsError: string;
-	closePort: string;
-	closePortDesc: string;
-	closePortBtn: string;
-	closePortConfirm: string;
-	closePortSuccess: string;
-	closePortError: string;
 	cert: string;
-	certSelfSigned: string;
-	certLE: string;
 	certCloudflare: string;
 	certCustom: string;
 	certExpires: string;
+	certKeyOptional: string;
+	certKeyPem: string;
+	certKeyPemPlaceholder: string;
+	certLE: string;
+	certPem: string;
+	certPemPlaceholder: string;
+	certSelfSigned: string;
 	certUpload: string;
 	certUploadCloudflare: string;
 	certUploadCustom: string;
-	certPem: string;
-	certPemPlaceholder: string;
-	certKeyPem: string;
-	certKeyPemPlaceholder: string;
-	certKeyOptional: string;
-	certUploadSuccess: string;
 	certUploadError: string;
+	certUploadSuccess: string;
+	closePort: string;
+	closePortBtn: string;
+	closePortConfirm: string;
+	closePortDesc: string;
+	closePortError: string;
+	closePortSuccess: string;
+	current: string;
+	desc: string;
+	dnsFail: string;
+	dnsOk: string;
+	email: string;
+	error: string;
+	hsts: string;
+	hstsDesc: string;
+	hstsDisable: string;
+	hstsEnable: string;
+	hstsError: string;
+	hstsSuccess: string;
+	input: string;
+	none: string;
+	pending: string;
+	setup: string;
+	setupError: string;
+	unconfigured: string;
+	verify: string;
+	verifyError: string;
 }
 
 interface Props {
@@ -81,17 +76,17 @@ interface Props {
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
 	active: "default",
-	pending: "secondary",
 	error: "destructive",
+	pending: "secondary",
 	unconfigured: "secondary",
 };
 
 function formatExpiry(ts: string | null): string {
 	if (!ts) return "—";
 	return new Date(ts).toLocaleDateString("en-GB", {
-		year: "numeric",
-		month: "short",
 		day: "numeric",
+		month: "short",
+		year: "numeric",
 	});
 }
 
@@ -115,14 +110,14 @@ export function DomainSection({ initial, labels }: Props) {
 		toast.promise(
 			configureDomain(data.domain, data.email).then((r) => {
 				if (!r.ok) throw new Error(r.error);
-				setCfg((prev) => ({ ...prev, status: "pending", domain: data.domain }));
+				setCfg((prev) => ({ ...prev, domain: data.domain, status: "pending" }));
 				reset();
 				return r;
 			}),
 			{
+				error: labels.setupError,
 				loading: labels.setup,
 				success: labels.pending,
-				error: labels.setupError,
 			},
 		);
 	};
@@ -131,7 +126,10 @@ export function DomainSection({ initial, labels }: Props) {
 		setDnsResult(null);
 		startVerify(async () => {
 			const r = await verifyDomain();
-			if (!r.ok) { toast.error(labels.verifyError); return; }
+			if (!r.ok) {
+				toast.error(labels.verifyError);
+				return;
+			}
 			const ok = r.dns_ok ?? false;
 			setDnsResult(ok);
 			toast[ok ? "success" : "error"](ok ? labels.dnsOk : labels.dnsFail);
@@ -141,8 +139,10 @@ export function DomainSection({ initial, labels }: Props) {
 	const handleHsts = (enable: boolean) => {
 		startHsts(async () => {
 			const r = await setHsts(enable);
-			if (r.ok) { setCfg((prev) => ({ ...prev, hsts_enabled: enable })); toast.success(labels.hstsSuccess); }
-			else toast.error(labels.hstsError);
+			if (r.ok) {
+				setCfg((prev) => ({ ...prev, hsts_enabled: enable }));
+				toast.success(labels.hstsSuccess);
+			} else toast.error(labels.hstsError);
 		});
 	};
 
@@ -150,8 +150,10 @@ export function DomainSection({ initial, labels }: Props) {
 		if (!window.confirm(labels.closePortConfirm)) return;
 		startClose(async () => {
 			const r = await closePort19443();
-			if (r.ok) { setCfg((prev) => ({ ...prev, port_19443_open: false })); toast.success(labels.closePortSuccess); }
-			else toast.error(labels.closePortError);
+			if (r.ok) {
+				setCfg((prev) => ({ ...prev, port_19443_open: false }));
+				toast.success(labels.closePortSuccess);
+			} else toast.error(labels.closePortError);
 		});
 	};
 
@@ -181,12 +183,12 @@ export function DomainSection({ initial, labels }: Props) {
 						{labels.cert}{" "}
 						<span className="text-foreground font-medium">
 							{cfg.cert_type === "lets_encrypt"
-						? labels.certLE
-						: cfg.cert_type === "cloudflare"
-						? labels.certCloudflare
-						: cfg.cert_type === "custom"
-						? labels.certCustom
-						: labels.certSelfSigned}
+								? labels.certLE
+								: cfg.cert_type === "cloudflare"
+									? labels.certCloudflare
+									: cfg.cert_type === "custom"
+										? labels.certCustom
+										: labels.certSelfSigned}
 						</span>
 					</span>
 					{cfg.cert_expires_at && (
@@ -198,19 +200,17 @@ export function DomainSection({ initial, labels }: Props) {
 				</div>
 			)}
 
-			{cfg.error_message && (
-				<p className="text-sm text-destructive">{cfg.error_message}</p>
-			)}
+			{cfg.error_message && <p className="text-sm text-destructive">{cfg.error_message}</p>}
 
 			{!isActive && (
-				<form onSubmit={handleSubmit(onSetup)} className="flex flex-col gap-3">
+				<form className="flex flex-col gap-3" onSubmit={handleSubmit(onSetup)}>
 					<Field>
 						<FieldLabel htmlFor="domain-input">{labels.input}</FieldLabel>
 						<Input
 							id="domain-input"
 							{...register("domain")}
-							placeholder="panel.example.com"
 							disabled={isSubmitting || cfg.status === "pending"}
+							placeholder="panel.example.com"
 						/>
 						<FieldError errors={[errors.domain]} />
 					</Field>
@@ -220,12 +220,12 @@ export function DomainSection({ initial, labels }: Props) {
 							id="domain-email"
 							type="email"
 							{...register("email")}
-							placeholder="you@example.com"
 							disabled={isSubmitting || cfg.status === "pending"}
+							placeholder="you@example.com"
 						/>
 						<FieldError errors={[errors.email]} />
 					</Field>
-					<Button type="submit" disabled={isSubmitting || cfg.status === "pending"}>
+					<Button disabled={isSubmitting || cfg.status === "pending"} type="submit">
 						{cfg.status === "pending" ? labels.pending : labels.setup}
 					</Button>
 				</form>
@@ -233,7 +233,7 @@ export function DomainSection({ initial, labels }: Props) {
 
 			{cfg.domain && (
 				<div className="flex items-center gap-2">
-					<Button variant="outline" size="sm" onClick={handleVerify} disabled={verifyPending}>
+					<Button disabled={verifyPending} onClick={handleVerify} size="sm" variant="outline">
 						{labels.verify}
 					</Button>
 					{dnsResult !== null && (
@@ -254,10 +254,10 @@ export function DomainSection({ initial, labels }: Props) {
 						<p className="text-xs text-muted-foreground">{labels.hstsDesc}</p>
 					</div>
 					<Button
-						variant={cfg.hsts_enabled ? "destructive" : "outline"}
-						size="sm"
-						onClick={() => handleHsts(!cfg.hsts_enabled)}
 						disabled={hstsPending}
+						onClick={() => handleHsts(!cfg.hsts_enabled)}
+						size="sm"
+						variant={cfg.hsts_enabled ? "destructive" : "outline"}
 					>
 						{cfg.hsts_enabled ? labels.hstsDisable : labels.hstsEnable}
 					</Button>
@@ -273,7 +273,7 @@ export function DomainSection({ initial, labels }: Props) {
 						</div>
 						<p className="text-xs text-muted-foreground">{labels.closePortDesc}</p>
 					</div>
-					<Button variant="destructive" size="sm" onClick={handleClosePort} disabled={closePending}>
+					<Button disabled={closePending} onClick={handleClosePort} size="sm" variant="destructive">
 						{labels.closePortBtn}
 					</Button>
 				</div>
@@ -289,21 +289,19 @@ export function DomainSection({ initial, labels }: Props) {
 			{isActive && (
 				<CertUploadSection
 					labels={{
-						title: labels.certUpload,
-						cloudflareTab: labels.certUploadCloudflare,
-						customTab: labels.certUploadCustom,
 						certPem: labels.certPem,
 						certPemPlaceholder: labels.certPemPlaceholder,
+						cloudflareTab: labels.certUploadCloudflare,
+						customTab: labels.certUploadCustom,
+						error: labels.certUploadError,
+						keyOptional: labels.certKeyOptional,
 						keyPem: labels.certKeyPem,
 						keyPemPlaceholder: labels.certKeyPemPlaceholder,
-						keyOptional: labels.certKeyOptional,
-						upload: labels.certUpload,
 						success: labels.certUploadSuccess,
-						error: labels.certUploadError,
+						title: labels.certUpload,
+						upload: labels.certUpload,
 					}}
-					onSuccess={() =>
-						setCfg((prev) => ({ ...prev }))
-					}
+					onSuccess={() => setCfg((prev) => ({ ...prev }))}
 				/>
 			)}
 		</div>

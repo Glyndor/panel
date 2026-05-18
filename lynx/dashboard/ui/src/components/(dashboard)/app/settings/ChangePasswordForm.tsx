@@ -1,27 +1,27 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
-import { changePasswordSchema, type ChangePasswordInput } from "@/schemas/(dashboard)/app/settings";
 import { changePassword } from "@/actions/(dashboard)/app/settings/profile";
+import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { type ChangePasswordInput, changePasswordSchema } from "@/schemas/(dashboard)/app/settings";
 
 interface Labels {
-	currentPassword: string;
-	newPassword: string;
 	btn: string;
+	currentPassword: string;
+	error: string;
+	newPassword: string;
 	success: string;
 	wrong: string;
-	error: string;
 }
 
 interface Props {
-	locale: string;
 	labels: Labels;
+	locale: string;
 }
 
 export function ChangePasswordForm({ locale, labels }: Props) {
@@ -43,9 +43,9 @@ export function ChangePasswordForm({ locale, labels }: Props) {
 		});
 
 		toast.promise(promise, {
+			error: (e: Error) => (e.message === "wrong" ? labels.wrong : labels.error),
 			loading: labels.btn,
 			success: labels.success,
-			error: (e: Error) => (e.message === "wrong" ? labels.wrong : labels.error),
 		});
 
 		try {
@@ -58,7 +58,7 @@ export function ChangePasswordForm({ locale, labels }: Props) {
 	};
 
 	return (
-		<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3 max-w-sm">
+		<form className="flex flex-col gap-3 max-w-sm" onSubmit={handleSubmit(onSubmit)}>
 			<Field>
 				<FieldLabel htmlFor="current_password">{labels.currentPassword}</FieldLabel>
 				<Input
@@ -83,7 +83,7 @@ export function ChangePasswordForm({ locale, labels }: Props) {
 				<FieldError errors={[errors.new_password]} />
 			</Field>
 
-			<Button type="submit" disabled={isSubmitting}>
+			<Button disabled={isSubmitting} type="submit">
 				{labels.btn}
 			</Button>
 		</form>

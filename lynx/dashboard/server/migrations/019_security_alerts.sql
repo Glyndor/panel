@@ -1,7 +1,7 @@
 -- Security alerts — written on detection, read by frontend via WS or polling.
 -- All alerts are append-only; acknowledged_at marks admin has seen it.
 CREATE TABLE security_alerts (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
     kind            TEXT        NOT NULL,   -- rate_limit_hit, intercepted, nftables_divergence, etc.
     detail          TEXT,
     agent_id        UUID        REFERENCES agents(id) ON DELETE SET NULL,

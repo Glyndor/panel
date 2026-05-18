@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_config\n           SET cert_type=$1, cert_expires_at=$2, status='active', error_message=NULL, updated_at=NOW()\n           WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "563588298c7a6d7d8c6ba0f81b2ca1757d55a7cc67577fd147527e9a0b036bb0"
+}
