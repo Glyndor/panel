@@ -276,24 +276,50 @@ if $existing; then
     esac
 fi
 
-# --- Check dependencies -----------------------------------------------------
+# --- Install dependencies ---------------------------------------------------
 
 log_section "Checking system dependencies"
 
+_apt_updated=false
+_apt_ensure() {
+    local cmd="$1" pkg="$2"
+    if command -v "$cmd" &>/dev/null; then
+        log_ok "$cmd found"
+        return
+    fi
+    log_info "Installing $pkg..."
+    if ! $_apt_updated; then
+        # Enable universe repo (needed for podman on Ubuntu)
+        if command -v add-apt-repository &>/dev/null; then
+            add-apt-repository -y universe &>/dev/null || true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        _apt_updated=true
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" -qq
+    if command -v "$cmd" &>/dev/null; then
+        log_ok "$cmd installed"
+    else
+        log_error "Failed to install $pkg (command: $cmd)"
+        exit 1
+    fi
+}
+
 _require_cmd() {
     if ! command -v "$1" &>/dev/null; then
-        log_error "Required command not found: $1"
-        log_info  "Install it with: $2"
+        log_error "Required command not found: $1 — $2"
         exit 1
     fi
     log_ok "$1 found"
 }
 
-_require_cmd podman    "apt install podman"
-_require_cmd openssl   "apt install openssl"
-_require_cmd nft       "apt install nftables"
-_require_cmd wg        "apt install wireguard-tools"
-_require_cmd curl      "apt install curl"
+_apt_ensure podman  podman
+_apt_ensure openssl openssl
+_apt_ensure nft     nftables
+_apt_ensure wg      wireguard-tools
+_apt_ensure curl    curl
+_apt_ensure python3 python3
+_apt_ensure pip3    python3-pip
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 
@@ -424,6 +450,152 @@ SETUP_TOKEN=$(openssl rand -hex 32)
 printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token -
 
 log_ok "All secrets generated — values purged from memory"
+
+# --- Download binaries from GitHub Releases ---------------------------------
+#
+# Binaries are signed with Ed25519. Public key is hardcoded in each binary
+# and verified here during install. The private key lives only in GitHub
+# Actions secrets — never in the repo.
+
+log_section "Downloading dashboard binaries"
+
+GITHUB_REPO="Jaro-c/Lynx"
+RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+
+# Detect architecture
+_ARCH=$(uname -m)
+case "$_ARCH" in
+    x86_64)  ARCH="x86_64" ;;
+    aarch64) ARCH="arm64" ;;
+    *)
+        log_error "Unsupported architecture: $_ARCH"
+        exit 1
+        ;;
+esac
+log_info "Architecture: $ARCH"
+
+# Fetch latest dashboard release tag
+log_info "Fetching latest dashboard release..."
+LATEST_TAG=$(curl -fsSL \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+    | python3 -c "
+import sys, json
+releases = json.load(sys.stdin)
+for r in releases:
+    tag = r.get('tag_name', '')
+    if tag.startswith('dashboard@') and not r.get('prerelease'):
+        print(tag)
+        break
+" 2>/dev/null)
+
+if [[ -z "$LATEST_TAG" ]]; then
+    log_error "No dashboard release found in ${GITHUB_REPO}"
+    exit 1
+fi
+log_ok "Latest release: ${LATEST_TAG}"
+
+RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_TAG}"
+BIN_DIR="/etc/lynx/bin"
+FRONTEND_DIR="/etc/lynx/frontend"
+
+mkdir -p "$BIN_DIR" "$FRONTEND_DIR"
+chmod 700 "$BIN_DIR" "$FRONTEND_DIR"
+
+# Verify Ed25519 signature. Args: <file> <sig-file>
+_verify_release_sig() {
+    local file="$1" sig_file="$2"
+    python3 - "$file" "$sig_file" <<'PYEOF'
+import sys, base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
+
+with open(sys.argv[1], "rb") as f:
+    data = f.read()
+with open(sys.argv[2], "rb") as f:
+    sig = f.read()
+try:
+    pub_key.verify(sig, data)
+except Exception as e:
+    print(f"signature invalid: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+# Ensure cryptography lib is available for signature verification
+if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
+    log_info "Installing Python cryptography library..."
+    pip3 install --quiet cryptography
+fi
+
+# Download and verify backend binary
+log_info "Downloading backend binary..."
+BACKEND_FILE="${BIN_DIR}/lynx-dashboard-backend"
+BACKEND_TMP="${BIN_DIR}/lynx-dashboard-backend.new"
+
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-dashboard-backend-linux-${ARCH}" \
+    -o "$BACKEND_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-dashboard-backend-linux-${ARCH}.sig" \
+    -o "${BACKEND_TMP}.sig"
+
+log_info "Verifying backend signature..."
+if ! _verify_release_sig "$BACKEND_TMP" "${BACKEND_TMP}.sig"; then
+    log_error "Backend signature verification FAILED — aborting"
+    rm -f "$BACKEND_TMP" "${BACKEND_TMP}.sig"
+    exit 1
+fi
+rm -f "${BACKEND_TMP}.sig"
+chmod 755 "$BACKEND_TMP"
+mv "$BACKEND_TMP" "$BACKEND_FILE"
+log_ok "Backend installed: ${BACKEND_FILE}"
+
+# Download and verify frontend binary + assets
+log_info "Downloading frontend binary..."
+FRONTEND_BIN_TMP="${FRONTEND_DIR}/lynx-dashboard-frontend.new"
+FRONTEND_ASSETS_TMP="${FRONTEND_DIR}/assets.new.tar.gz"
+
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-dashboard-frontend-linux-${ARCH}" \
+    -o "$FRONTEND_BIN_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-dashboard-frontend-linux-${ARCH}.sig" \
+    -o "${FRONTEND_BIN_TMP}.sig"
+
+log_info "Verifying frontend binary signature..."
+if ! _verify_release_sig "$FRONTEND_BIN_TMP" "${FRONTEND_BIN_TMP}.sig"; then
+    log_error "Frontend binary signature verification FAILED — aborting"
+    rm -f "$FRONTEND_BIN_TMP" "${FRONTEND_BIN_TMP}.sig"
+    exit 1
+fi
+rm -f "${FRONTEND_BIN_TMP}.sig"
+chmod 755 "$FRONTEND_BIN_TMP"
+
+log_info "Downloading frontend assets..."
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-dashboard-frontend-assets-linux-${ARCH}.tar.gz" \
+    -o "$FRONTEND_ASSETS_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-dashboard-frontend-assets-linux-${ARCH}.tar.gz.sig" \
+    -o "${FRONTEND_ASSETS_TMP}.sig"
+
+log_info "Verifying frontend assets signature..."
+if ! _verify_release_sig "$FRONTEND_ASSETS_TMP" "${FRONTEND_ASSETS_TMP}.sig"; then
+    log_error "Frontend assets signature verification FAILED — aborting"
+    rm -f "$FRONTEND_BIN_TMP" "$FRONTEND_ASSETS_TMP" "${FRONTEND_ASSETS_TMP}.sig"
+    exit 1
+fi
+rm -f "${FRONTEND_ASSETS_TMP}.sig"
+
+# Place frontend binary and extract assets into FRONTEND_DIR
+# Binary runs from FRONTEND_DIR so __dirname resolves static assets correctly
+mv "$FRONTEND_BIN_TMP" "${FRONTEND_DIR}/lynx-dashboard-frontend"
+tar -xzf "$FRONTEND_ASSETS_TMP" -C "$FRONTEND_DIR"
+rm -f "$FRONTEND_ASSETS_TMP"
+
+log_ok "Frontend installed: ${FRONTEND_DIR}/"
 
 # --- Start services ---------------------------------------------------------
 
