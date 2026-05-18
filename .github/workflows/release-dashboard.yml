@@ -54,14 +54,12 @@ jobs:
       - name: Run migrations
         env:
           DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
-        run: |
-          sqlx migrate run --source dashboard/server/migrations
-          sqlx migrate run --source agent/migrations
+        run: sqlx migrate run --source dashboard/server/migrations
 
       - name: Verify sqlx cache is up-to-date
         env:
           DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
-        run: cargo sqlx prepare --check --workspace
+        run: cargo sqlx prepare --check --package lynx-dashboard-server
 
   ci-server:
     name: CI server (Rust)
