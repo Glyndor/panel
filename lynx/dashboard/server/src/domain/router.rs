@@ -11,4 +11,5 @@ pub fn router() -> Router<AppState> {
         .route("/verify", post(handlers::verify_domain))
         .route("/hsts", post(handlers::set_hsts))
         .route("/close-port", post(handlers::close_port))
+        .route("/cert/upload", post(handlers::upload_cert))
 }

@@ -1,5 +1,5 @@
-use super::super::{DomainConfig, SetDomainRequest, SetHstsRequest};
-use super::nginx::{nginx_conf, NGINX_IMAGE};
+use super::super::{DomainConfig, SetDomainRequest, SetHstsRequest, UploadCertRequest};
+use super::nginx::{custom_cert_path, custom_key_path, nginx_conf, nginx_conf_with_cert, NGINX_IMAGE};
 use crate::{
     agents::client::build_agent_client,
     auth::middleware::AuthUser,
@@ -281,6 +281,196 @@ pub async fn close_port(
         .await?;
 
     Ok(Json(json!({ "port_19443_open": false })))
+}
+
+/// Upload a Cloudflare Origin Certificate or a custom cert+key pair.
+/// Validates the certificate before sending it to the local agent.
+pub async fn upload_cert(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<UploadCertRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    const MAX_CERT_BYTES: usize = 64 * 1024; // 64 KB
+
+    if !["cloudflare", "custom"].contains(&req.cert_type.as_str()) {
+        return Err(AppError::Validation("cert_type must be 'cloudflare' or 'custom'".into()));
+    }
+
+    if req.cert_pem.len() > MAX_CERT_BYTES {
+        return Err(AppError::Validation("cert_pem exceeds 64 KB limit".into()));
+    }
+
+    if let Some(ref key) = req.key_pem {
+        if key.len() > MAX_CERT_BYTES {
+            return Err(AppError::Validation("key_pem exceeds 64 KB limit".into()));
+        }
+    }
+
+    let cfg = sqlx::query!("SELECT domain, status FROM domain_config WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
+
+    let domain = cfg
+        .domain
+        .ok_or(AppError::Validation("no domain configured".into()))?;
+
+    validate_cert(&req.cert_pem, &domain, req.key_pem.as_deref())?;
+
+    let agent = get_local_agent(&state).await?;
+
+    // Install cert on agent.
+    let mut install_cmd = json!({
+        "type": "nginx.install_cert",
+        "domain": domain,
+        "cert_pem": req.cert_pem,
+    });
+    if let Some(ref key) = req.key_pem {
+        install_cmd["key_pem"] = json!(key);
+    }
+    let resp = send_cmd(&state, &agent, user.user_id, &install_cmd).await?;
+    if !resp.status().is_success() {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "nginx.install_cert failed: {}",
+            resp.status()
+        )));
+    }
+
+    // Update nginx config to use custom cert paths.
+    let cert_path = custom_cert_path(&domain);
+    let key_path = custom_key_path(&domain);
+    let hsts = cfg.status == "active"; // keep existing HSTS if already active
+    let nginx_cfg = nginx_conf_with_cert(&domain, &cert_path, &key_path, false);
+    let update_cmd = json!({
+        "type": "nginx.update_config",
+        "config": nginx_cfg,
+    });
+    let _ = send_cmd(&state, &agent, user.user_id, &update_cmd).await;
+
+    let _ = hsts; // suppress unused warning
+
+    // Detect expiry from cert for DB record.
+    let expires_at = cert_expires_at(&req.cert_pem);
+
+    sqlx::query!(
+        r#"UPDATE domain_config
+           SET cert_type=$1, cert_expires_at=$2, status='active', error_message=NULL, updated_at=NOW()
+           WHERE id=1"#,
+        req.cert_type,
+        expires_at,
+    )
+    .execute(&state.db)
+    .await?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "cert_type": req.cert_type,
+        "expires_at": expires_at,
+    })))
+}
+
+/// Validate a PEM cert (and optional key) before sending to the agent.
+fn validate_cert(
+    cert_pem: &str,
+    domain: &str,
+    key_pem: Option<&str>,
+) -> Result<(), AppError> {
+    use x509_parser::pem::parse_x509_pem;
+    use x509_parser::prelude::*;
+
+    // Parse PEM → X.509 cert in one step.
+    let (_, pem) = parse_x509_pem(cert_pem.as_bytes())
+        .map_err(|_| AppError::Validation("cert_pem is not valid PEM".into()))?;
+    let cert = pem
+        .parse_x509()
+        .map_err(|_| AppError::Validation("cert_pem is not a valid X.509 certificate".into()))?;
+
+    // Check expiry.
+    let now = chrono::Utc::now();
+    let not_before = cert.validity().not_before.to_datetime();
+    let not_after = cert.validity().not_after.to_datetime();
+
+    // x509-parser returns OffsetDateTime; convert to chrono
+    let not_before_ts = chrono::DateTime::from_timestamp(not_before.unix_timestamp(), 0)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    let not_after_ts = chrono::DateTime::from_timestamp(not_after.unix_timestamp(), 0)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+
+    if now < not_before_ts {
+        return Err(AppError::Validation("certificate is not yet valid (not_before in future)".into()));
+    }
+    if now > not_after_ts {
+        return Err(AppError::Validation("certificate has expired".into()));
+    }
+
+    // Check SAN or CN matches domain.
+    let san_ok = cert
+        .subject_alternative_name()
+        .ok()
+        .flatten()
+        .map(|san_ext| {
+            san_ext.value.general_names.iter().any(|name| match name {
+                GeneralName::DNSName(dns) => {
+                    *dns == domain || dns.strip_prefix("*.").map_or(false, |suffix| {
+                        domain.ends_with(suffix) && !domain.trim_end_matches(suffix).trim_end_matches('.').contains('.')
+                    })
+                }
+                _ => false,
+            })
+        })
+        .unwrap_or(false);
+
+    let cn_ok = cert
+        .subject()
+        .iter_common_name()
+        .any(|cn| cn.as_str().map_or(false, |s| s == domain));
+
+    if !san_ok && !cn_ok {
+        return Err(AppError::Validation(
+            format!("certificate SAN/CN does not match domain '{domain}'").into(),
+        ));
+    }
+
+    // For custom certs, verify key pair.
+    if let Some(key_pem_str) = key_pem {
+        verify_key_pair(cert_pem, key_pem_str)
+            .map_err(|e| AppError::Validation(format!("cert/key pair mismatch: {e}").into()))?;
+    }
+
+    Ok(())
+}
+
+/// Extract expiry timestamp from PEM cert.
+fn cert_expires_at(cert_pem: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    use x509_parser::pem::parse_x509_pem;
+    let (_, pem) = parse_x509_pem(cert_pem.as_bytes()).ok()?;
+    let cert = pem.parse_x509().ok()?;
+    let ts = cert.validity().not_after.to_datetime().unix_timestamp();
+    chrono::DateTime::from_timestamp(ts, 0)
+}
+
+/// Verify that cert and key are a matching pair using rcgen round-trip.
+fn verify_key_pair(cert_pem: &str, key_pem: &str) -> Result<(), anyhow::Error> {
+    use rcgen::KeyPair;
+    use x509_parser::pem::parse_x509_pem;
+    use x509_parser::prelude::*;
+
+    let key = KeyPair::from_pem(key_pem)
+        .map_err(|e| anyhow::anyhow!("invalid private key PEM: {e}"))?;
+
+    let (_, pem) = parse_x509_pem(cert_pem.as_bytes())
+        .map_err(|e| anyhow::anyhow!("invalid cert PEM: {e}"))?;
+    let cert = pem
+        .parse_x509()
+        .map_err(|e| anyhow::anyhow!("invalid cert DER: {e}"))?;
+
+    let cert_pubkey = cert.public_key().raw;
+    let key_pubkey = key.public_key_raw();
+
+    if cert_pubkey != key_pubkey {
+        anyhow::bail!("public key in cert does not match private key");
+    }
+
+    Ok(())
 }
 
 async fn check_dns(domain: &str) -> bool {

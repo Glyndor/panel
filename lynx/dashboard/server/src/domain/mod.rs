@@ -27,3 +27,15 @@ pub struct SetDomainRequest {
 pub struct SetHstsRequest {
     pub enabled: bool,
 }
+
+/// Upload a Cloudflare Origin Certificate (cert only, no key required by nginx
+/// since Cloudflare terminates TLS) or a custom cert+key pair.
+#[derive(Debug, Deserialize)]
+pub struct UploadCertRequest {
+    /// PEM-encoded certificate (chain). Max 64 KB.
+    pub cert_pem: String,
+    /// PEM-encoded private key. Required for custom certs; omit for Cloudflare Origin.
+    pub key_pem: Option<String>,
+    /// "cloudflare" or "custom"
+    pub cert_type: String,
+}

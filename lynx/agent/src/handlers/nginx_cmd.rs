@@ -122,6 +122,41 @@ fn reload_nginx() -> std::result::Result<(), AgentError> {
     Ok(())
 }
 
+/// Install an externally-provided TLS certificate (Cloudflare Origin or custom).
+/// Writes cert + optional key to disk, then reloads nginx.
+pub fn handle_nginx_install_cert(
+    _state: &AppState,
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission < PermissionLevel::Write {
+        return Err(AgentError::Forbidden("nginx.install_cert requires write permission"));
+    }
+
+    let domain = require_str(&cmd.command, "domain")?;
+    let cert_pem = require_str(&cmd.command, "cert_pem")?;
+
+    let cert_dir = format!("/etc/lynx/nginx/certs/{domain}");
+    std::fs::create_dir_all(&cert_dir)
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("create cert dir: {e}")))?;
+
+    let cert_path = format!("{cert_dir}/fullchain.pem");
+    let key_path = format!("{cert_dir}/privkey.pem");
+
+    std::fs::write(&cert_path, cert_pem.as_bytes())
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("write cert: {e}")))?;
+
+    if let Some(key_pem) = cmd.command.get("key_pem").and_then(|v| v.as_str()) {
+        std::fs::write(&key_path, key_pem.as_bytes())
+            .map_err(|e| AgentError::Internal(anyhow::anyhow!("write key: {e}")))?;
+    }
+
+    // Reload nginx if the container is running.
+    let _ = reload_nginx();
+
+    tracing::info!(domain, "external TLS cert installed");
+    Ok(json!({ "ok": true, "domain": domain, "cert_path": cert_path }))
+}
+
 /// Obtain a Let's Encrypt certificate via certbot (webroot challenge).
 pub async fn handle_certbot_obtain(
     _state: &AppState,

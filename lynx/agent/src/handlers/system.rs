@@ -22,7 +22,10 @@ use super::{
         handle_container_restart, handle_container_start, handle_container_stop,
         handle_container_update, handle_tenant_ensure,
     },
-    nginx_cmd::{handle_certbot_obtain, handle_close_setup_port, handle_nginx_deploy, handle_nginx_update_config},
+    nginx_cmd::{
+        handle_certbot_obtain, handle_close_setup_port, handle_nginx_deploy,
+        handle_nginx_install_cert, handle_nginx_update_config,
+    },
     nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
     wireguard::{
         handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk,
@@ -140,6 +143,7 @@ async fn dispatch(state: &AppState, cmd: VerifiedCommand) -> Result<Response> {
         "vps.reboot" => handle_vps_reboot(&cmd),
         "nginx.deploy" => handle_nginx_deploy(state, &cmd).await,
         "nginx.update_config" => handle_nginx_update_config(state, &cmd).await,
+        "nginx.install_cert" => Ok(handle_nginx_install_cert(state, &cmd)?),
         "certbot.obtain" => handle_certbot_obtain(state, &cmd).await,
         "nftables.close_setup_port" => Ok(handle_close_setup_port(state, &cmd)?),
         "db.rotate_password" => handle_db_rotate_password(state, &cmd).await,

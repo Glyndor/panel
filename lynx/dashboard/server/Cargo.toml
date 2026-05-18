@@ -41,6 +41,7 @@ base64ct = { workspace = true }
 ed25519-dalek = { workspace = true }
 x25519-dalek = { workspace = true }
 rcgen = { workspace = true }
+x509-parser = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
 
