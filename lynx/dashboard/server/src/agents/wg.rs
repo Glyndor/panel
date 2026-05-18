@@ -20,9 +20,9 @@ fn psk_secret_path(agent_id: Uuid) -> String {
 /// Returns the PSK value (caller must zeroize when done).
 pub fn create_psk(agent_id: Uuid) -> Result<Zeroizing<String>> {
     use base64ct::Encoding as _;
-    use rand::RngCore;
+    use rand::Rng;
     let mut raw = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut raw);
+    rand::rng().fill_bytes(&mut raw);
     let psk = Zeroizing::new(base64ct::Base64::encode_string(&raw));
     raw.fill(0);
 
