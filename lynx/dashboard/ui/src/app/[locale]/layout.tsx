@@ -2,8 +2,10 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import { routing } from "@/i18n/routing";
 import { BACKEND_URL } from "@/lib/api";
 import "../globals.css";
@@ -69,6 +71,11 @@ export default async function LocaleLayout({
 		notFound();
 	}
 
+	const jar = await cookies();
+	// Theme preference is stored in a non-HttpOnly cookie so ThemeProvider can read it.
+	// Falls back to "system" if not set.
+	const defaultTheme = jar.get("theme_preference")?.value ?? "system";
+
 	const [messages, branding] = await Promise.all([
 		getMessages(),
 		fetchBranding(),
@@ -85,12 +92,15 @@ export default async function LocaleLayout({
 			lang={locale}
 			style={brandVars}
 			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+			suppressHydrationWarning
 		>
 			<body className="min-h-full flex flex-col bg-background text-foreground">
-				<NextIntlClientProvider messages={messages}>
-					{children}
-					<Toaster />
-				</NextIntlClientProvider>
+				<ThemeProvider defaultTheme={defaultTheme}>
+					<NextIntlClientProvider messages={messages}>
+						{children}
+						<Toaster />
+					</NextIntlClientProvider>
+				</ThemeProvider>
 			</body>
 		</html>
 	);

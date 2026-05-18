@@ -15,6 +15,7 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { logoutAction } from "@/actions/(dashboard)/app/logout";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "./ThemeToggle";
 
 type Props = { locale: string; companyName: string; logoUrl: string | null; isAdmin: boolean };
 
@@ -65,6 +66,7 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 						</span>
 					)}
 				</div>
+				<ThemeToggle />
 				<NotificationBell />
 			</div>
 

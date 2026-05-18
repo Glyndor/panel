@@ -118,7 +118,9 @@ async fn main() -> anyhow::Result<()> {
 
     let migration_router = migration::router::router().route_layer(auth_layer.clone());
 
-    let nftables_router = nftables::router::router().route_layer(auth_layer);
+    let nftables_router = nftables::router::router().route_layer(auth_layer.clone());
+
+    let auth_protected_router = auth::router::protected_router().route_layer(auth_layer);
 
     // Record setup_token_issued_at on first boot without an admin (24h TTL window).
     record_setup_token_issuance(&state.db).await;
@@ -133,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/branding", get(branding::handlers::get_branding))
         .nest("/auth", auth::router::router())
+        .nest("/auth", auth_protected_router)
         .nest("/agents", agents_router)
         .nest("/agents", agents::router::agent_router())
         .nest("/organizations", orgs_router)
