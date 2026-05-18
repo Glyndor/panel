@@ -252,6 +252,8 @@ jobs:
         run: |
           bun build --compile \
             --target ${{ matrix.bun-target }} \
+            --define 'process.env.NODE_ENV="production"' \
+            --external '@opentelemetry/api' \
             .next/standalone/server.js \
             --outfile "lynx-dashboard-frontend-linux-${{ matrix.arch }}"
 
