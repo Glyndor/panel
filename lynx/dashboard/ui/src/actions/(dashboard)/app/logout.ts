@@ -1,8 +1,8 @@
 "use server";
 
-import { apiFetch } from "@/lib/api";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { apiFetch } from "@/lib/api";
 
 export async function logoutAction(locale: string) {
 	const jar = await cookies();
@@ -10,8 +10,8 @@ export async function logoutAction(locale: string) {
 
 	if (accessToken) {
 		await apiFetch("/auth/logout", {
-			method: "POST",
 			headers: { Authorization: `Bearer ${accessToken}` },
+			method: "POST",
 		});
 	}
 

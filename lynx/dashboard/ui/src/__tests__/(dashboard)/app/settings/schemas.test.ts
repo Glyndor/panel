@@ -90,44 +90,34 @@ describe("certUploadSchema", () => {
 	const validKey = "-----BEGIN PRIVATE KEY-----\nMIIByyy\n-----END PRIVATE KEY-----";
 
 	it("accepts cloudflare cert with valid PEM", () => {
-		expect(
-			certUploadSchema.safeParse({ cert_type: "cloudflare", cert_pem: validPem }).success,
-		).toBe(true);
+		expect(certUploadSchema.safeParse({ cert_pem: validPem, cert_type: "cloudflare" }).success).toBe(true);
 	});
 
 	it("accepts custom cert with cert + key", () => {
 		expect(
 			certUploadSchema.safeParse({
-				cert_type: "custom",
 				cert_pem: validPem,
+				cert_type: "custom",
 				key_pem: validKey,
 			}).success,
 		).toBe(true);
 	});
 
 	it("rejects cert without PEM header", () => {
-		expect(
-			certUploadSchema.safeParse({ cert_type: "cloudflare", cert_pem: "not a cert" }).success,
-		).toBe(false);
+		expect(certUploadSchema.safeParse({ cert_pem: "not a cert", cert_type: "cloudflare" }).success).toBe(false);
 	});
 
 	it("rejects empty cert_pem", () => {
-		expect(
-			certUploadSchema.safeParse({ cert_type: "cloudflare", cert_pem: "" }).success,
-		).toBe(false);
+		expect(certUploadSchema.safeParse({ cert_pem: "", cert_type: "cloudflare" }).success).toBe(false);
 	});
 
 	it("rejects cert exceeding 64 KB", () => {
 		const big = "-----BEGIN CERTIFICATE-----\n" + "A".repeat(65 * 1024);
-		expect(
-			certUploadSchema.safeParse({ cert_type: "cloudflare", cert_pem: big }).success,
-		).toBe(false);
+		expect(certUploadSchema.safeParse({ cert_pem: big, cert_type: "cloudflare" }).success).toBe(false);
 	});
 
 	it("rejects unknown cert_type", () => {
-		expect(
-			certUploadSchema.safeParse({ cert_type: "letsencrypt", cert_pem: validPem }).success,
-		).toBe(false);
+		expect(certUploadSchema.safeParse({ cert_pem: validPem, cert_type: "letsencrypt" }).success).toBe(false);
 	});
 });
 
@@ -136,16 +126,14 @@ describe("certUploadSchema", () => {
 // ---------------------------------------------------------------------------
 
 describe("migrationStartSchema", () => {
-	const valid = { target_url: "https://10.0.0.2:19443", migration_token: "tok-abc123" };
+	const valid = { migration_token: "tok-abc123", target_url: "https://10.0.0.2:19443" };
 
 	it("accepts valid migration start data", () => {
 		expect(migrationStartSchema.safeParse(valid).success).toBe(true);
 	});
 
 	it("rejects non-URL target_url", () => {
-		expect(migrationStartSchema.safeParse({ ...valid, target_url: "not-a-url" }).success).toBe(
-			false,
-		);
+		expect(migrationStartSchema.safeParse({ ...valid, target_url: "not-a-url" }).success).toBe(false);
 	});
 
 	it("rejects empty target_url", () => {

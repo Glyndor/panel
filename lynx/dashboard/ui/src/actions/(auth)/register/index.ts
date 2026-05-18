@@ -3,28 +3,23 @@
 import { apiFetch } from "@/lib/api";
 import type { RegisterInput } from "@/schemas/(auth)/register";
 
-type RegisterResult =
-	| { success: true }
-	| { success: false; error: string };
+type RegisterResult = { success: true } | { success: false; error: string };
 
-export async function registerAction(
-	_locale: string,
-	data: RegisterInput,
-): Promise<RegisterResult> {
+export async function registerAction(_locale: string, data: RegisterInput): Promise<RegisterResult> {
 	const result = await apiFetch<void>("/auth/register", {
-		method: "POST",
 		body: JSON.stringify({
-			username: data.username,
 			email: data.email,
 			password: data.password,
+			username: data.username,
 		}),
+		method: "POST",
 	});
 
 	if (!result.ok) {
 		if (result.error === "conflict") {
-			return { success: false, error: "usernameTaken" };
+			return { error: "usernameTaken", success: false };
 		}
-		return { success: false, error: "serverError" };
+		return { error: "serverError", success: false };
 	}
 
 	return { success: true };

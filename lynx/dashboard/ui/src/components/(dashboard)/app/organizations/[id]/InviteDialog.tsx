@@ -1,25 +1,18 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
-import { inviteMemberSchema, type InviteMemberInput } from "@/schemas/(dashboard)/app/organizations/[id]";
 import { inviteMember } from "@/actions/(dashboard)/app/organizations/[id]";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { type InviteMemberInput, inviteMemberSchema } from "@/schemas/(dashboard)/app/organizations/[id]";
 
 interface Props {
-	orgId: string;
 	labels: {
 		trigger: string;
 		title: string;
@@ -29,6 +22,7 @@ interface Props {
 		success: string;
 		error: string;
 	};
+	orgId: string;
 }
 
 export function InviteDialog({ orgId, labels }: Props) {
@@ -41,8 +35,8 @@ export function InviteDialog({ orgId, labels }: Props) {
 		reset,
 		formState: { errors, isSubmitting },
 	} = useForm<InviteMemberInput>({
-		resolver: zodResolver(inviteMemberSchema),
 		defaultValues: { role: "member" },
+		resolver: zodResolver(inviteMemberSchema),
 	});
 
 	const onSubmit = (data: InviteMemberInput) => {
@@ -54,15 +48,21 @@ export function InviteDialog({ orgId, labels }: Props) {
 				router.refresh();
 			}),
 			{
+				error: labels.error,
 				loading: labels.invite,
 				success: labels.success,
-				error: labels.error,
 			},
 		);
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+		<Dialog
+			onOpenChange={(v) => {
+				setOpen(v);
+				if (!v) reset();
+			}}
+			open={open}
+		>
 			<DialogTrigger asChild>
 				<Button size="sm">{labels.trigger}</Button>
 			</DialogTrigger>
@@ -70,7 +70,7 @@ export function InviteDialog({ orgId, labels }: Props) {
 				<DialogHeader>
 					<DialogTitle>{labels.title}</DialogTitle>
 				</DialogHeader>
-				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 mt-2">
+				<form className="flex flex-col gap-4 mt-2" onSubmit={handleSubmit(onSubmit)}>
 					<Field>
 						<FieldLabel htmlFor="invite-username">{labels.username}</FieldLabel>
 						<Input
@@ -86,8 +86,8 @@ export function InviteDialog({ orgId, labels }: Props) {
 						<select
 							id="invite-role"
 							{...register("role")}
-							disabled={isSubmitting}
 							className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+							disabled={isSubmitting}
 						>
 							<option value="viewer">Viewer</option>
 							<option value="member">Member</option>
@@ -95,7 +95,7 @@ export function InviteDialog({ orgId, labels }: Props) {
 						</select>
 						<FieldError errors={[errors.role]} />
 					</Field>
-					<Button type="submit" disabled={isSubmitting}>
+					<Button disabled={isSubmitting} type="submit">
 						{isSubmitting ? "…" : labels.invite}
 					</Button>
 				</form>

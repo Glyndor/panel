@@ -1,68 +1,60 @@
+import { ChevronRight } from "lucide-react";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { BACKEND_URL } from "@/lib/api";
-import Link from "next/link";
-import { ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { BACKEND_URL } from "@/lib/api";
 
 interface AuditEntry {
-	id: string;
 	agent_id: string;
-	organization_id: string | null;
-	user_id: string | null;
 	command_type: string;
-	result: "success" | "rejected" | "failed";
-	error: string | null;
-	entry_hash: string;
 	created_at: string;
+	entry_hash: string;
+	error: string | null;
+	id: string;
+	organization_id: string | null;
+	result: "success" | "rejected" | "failed";
+	user_id: string | null;
 }
 
 interface AuditResponse {
 	entries: AuditEntry[];
-	total: number;
 	limit: number;
 	offset: number;
+	total: number;
 }
 
-async function fetchAuditLog(
-	token: string,
-	agentId: string,
-	limit = 50,
-	offset = 0,
-): Promise<AuditResponse | null> {
+async function fetchAuditLog(token: string, agentId: string, limit = 50, offset = 0): Promise<AuditResponse | null> {
 	try {
-		const res = await fetch(
-			`${BACKEND_URL}/agents/${agentId}/audit-log?limit=${limit}&offset=${offset}`,
-			{ headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
-		);
+		const res = await fetch(`${BACKEND_URL}/agents/${agentId}/audit-log?limit=${limit}&offset=${offset}`, {
+			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
+		});
 		if (res.status === 404) return null;
-		if (!res.ok) return { entries: [], total: 0, limit, offset };
+		if (!res.ok) return { entries: [], limit, offset, total: 0 };
 		return res.json();
 	} catch {
-		return { entries: [], total: 0, limit, offset };
+		return { entries: [], limit, offset, total: 0 };
 	}
 }
 
-const RESULT_VARIANT: Record<
-	AuditEntry["result"],
-	"default" | "destructive" | "secondary"
-> = {
-	success: "default",
-	rejected: "secondary",
+const RESULT_VARIANT: Record<AuditEntry["result"], "default" | "destructive" | "secondary"> = {
 	failed: "destructive",
+	rejected: "secondary",
+	success: "default",
 };
 
 function formatTime(ts: string): string {
 	const d = new Date(ts);
 	return d.toLocaleString("en-GB", {
-		year: "numeric",
-		month: "short",
 		day: "numeric",
 		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
 		hour12: false,
+		minute: "2-digit",
+		month: "short",
+		second: "2-digit",
+		year: "numeric",
 	});
 }
 
@@ -94,10 +86,7 @@ export default async function AuditLogPage({
 	return (
 		<div className="flex flex-col p-6 gap-6 max-w-5xl">
 			<nav className="flex items-center gap-1 text-sm text-muted-foreground">
-				<Link
-					href={`/${locale}/app/agents`}
-					className="hover:text-foreground transition-colors"
-				>
+				<Link className="hover:text-foreground transition-colors" href={`/${locale}/app/agents`}>
 					{tAgents("title")}
 				</Link>
 				<ChevronRight className="size-3.5" />
@@ -108,9 +97,7 @@ export default async function AuditLogPage({
 
 			<div>
 				<h1 className="text-xl font-semibold">{t("title")}</h1>
-				<p className="text-xs text-muted-foreground mt-0.5">
-					{data.total} entries total
-				</p>
+				<p className="text-xs text-muted-foreground mt-0.5">{data.total} entries total</p>
 			</div>
 
 			{data.entries.length === 0 ? (
@@ -123,17 +110,13 @@ export default async function AuditLogPage({
 								<th className="px-3 py-2 text-left">{t("time")}</th>
 								<th className="px-3 py-2 text-left">{t("command")}</th>
 								<th className="px-3 py-2 text-left">{t("result")}</th>
-								<th className="px-3 py-2 text-left hidden md:table-cell">
-									{t("user")}
-								</th>
-								<th className="px-3 py-2 text-left hidden lg:table-cell">
-									{t("hash")}
-								</th>
+								<th className="px-3 py-2 text-left hidden md:table-cell">{t("user")}</th>
+								<th className="px-3 py-2 text-left hidden lg:table-cell">{t("hash")}</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y">
 							{data.entries.map((e) => (
-								<tr key={e.id} className="hover:bg-muted/20">
+								<tr className="hover:bg-muted/20" key={e.id}>
 									<td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">
 										{formatTime(e.created_at)}
 									</td>
@@ -146,7 +129,7 @@ export default async function AuditLogPage({
 										)}
 									</td>
 									<td className="px-3 py-2">
-										<Badge variant={RESULT_VARIANT[e.result]} className="text-xs">
+										<Badge className="text-xs" variant={RESULT_VARIANT[e.result]}>
 											{t(`result${e.result.charAt(0).toUpperCase() + e.result.slice(1)}`)}
 										</Badge>
 									</td>
@@ -166,16 +149,16 @@ export default async function AuditLogPage({
 			<div className="flex items-center gap-3">
 				{hasPrev && (
 					<Link
-						href={`/${locale}/app/agents/${agentId}/audit-log?offset=${Math.max(0, offset - limit)}`}
 						className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
+						href={`/${locale}/app/agents/${agentId}/audit-log?offset=${Math.max(0, offset - limit)}`}
 					>
 						← Previous
 					</Link>
 				)}
 				{hasMore && (
 					<Link
-						href={`/${locale}/app/agents/${agentId}/audit-log?offset=${offset + limit}`}
 						className="text-sm underline underline-offset-2 hover:text-foreground"
+						href={`/${locale}/app/agents/${agentId}/audit-log?offset=${offset + limit}`}
 					>
 						{t("loadMore")} →
 					</Link>

@@ -1,9 +1,10 @@
 "use client";
 
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,11 +16,10 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { BACKEND_URL } from "@/lib/api";
-import { Plus } from "lucide-react";
-import { createOrgSchema, type CreateOrgInput } from "@/schemas/(dashboard)/app/organizations";
+import { type CreateOrgInput, createOrgSchema } from "@/schemas/(dashboard)/app/organizations";
 
 type Props = {
 	token: string;
@@ -29,7 +29,10 @@ type Props = {
 };
 
 function deriveSlug(n: string) {
-	return n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+	return n
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "");
 }
 
 export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props) {
@@ -49,9 +52,9 @@ export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props)
 	const onSubmit = (data: CreateOrgInput) => {
 		toast.promise(
 			fetch(`${BACKEND_URL}/organizations`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
 				body: JSON.stringify({ name: data.name, slug: data.slug }),
+				headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+				method: "POST",
 			}).then(async (res) => {
 				if (res.status === 409) throw new Error("conflict");
 				if (!res.ok) throw new Error("error");
@@ -60,15 +63,21 @@ export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props)
 				router.refresh();
 			}),
 			{
+				error: (e: Error) => (e.message === "conflict" ? slugConflict : errorMsg),
 				loading: "Creating…",
 				success: label,
-				error: (e: Error) => (e.message === "conflict" ? slugConflict : errorMsg),
 			},
 		);
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+		<Dialog
+			onOpenChange={(v) => {
+				setOpen(v);
+				if (!v) reset();
+			}}
+			open={open}
+		>
 			<DialogTrigger asChild>
 				<Button size="sm">
 					<Plus className="size-4 mr-1" />
@@ -78,11 +87,9 @@ export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props)
 			<DialogContent>
 				<DialogHeader>
 					<DialogTitle>{label}</DialogTitle>
-					<DialogDescription>
-						Create an organization to group projects and containers.
-					</DialogDescription>
+					<DialogDescription>Create an organization to group projects and containers.</DialogDescription>
 				</DialogHeader>
-				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3 py-2">
+				<form className="flex flex-col gap-3 py-2" onSubmit={handleSubmit(onSubmit)}>
 					<Field>
 						<FieldLabel htmlFor="org-name">Name</FieldLabel>
 						<Input
@@ -97,16 +104,11 @@ export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props)
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="org-slug">Slug</FieldLabel>
-						<Input
-							id="org-slug"
-							placeholder="acme-corp"
-							{...register("slug")}
-							disabled={isSubmitting}
-						/>
+						<Input id="org-slug" placeholder="acme-corp" {...register("slug")} disabled={isSubmitting} />
 						<FieldError errors={[errors.slug]} />
 					</Field>
 					<DialogFooter className="mt-2">
-						<Button type="submit" disabled={isSubmitting}>
+						<Button disabled={isSubmitting} type="submit">
 							{isSubmitting ? "Creating…" : "Create"}
 						</Button>
 					</DialogFooter>

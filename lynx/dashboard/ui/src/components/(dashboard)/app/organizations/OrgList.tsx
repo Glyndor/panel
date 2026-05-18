@@ -1,8 +1,8 @@
-import { getTranslations } from "next-intl/server";
-import { BACKEND_URL } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Building2 } from "lucide-react";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BACKEND_URL } from "@/lib/api";
 
 type Org = {
 	id: string;
@@ -27,13 +27,7 @@ async function fetchOrgs(token: string): Promise<Org[]> {
 	}
 }
 
-export async function OrgList({
-	token,
-	locale,
-}: {
-	token: string;
-	locale: string;
-}) {
+export async function OrgList({ token, locale }: { token: string; locale: string }) {
 	const orgs = await fetchOrgs(token);
 	const t = await getTranslations({ locale, namespace: "app.organizations" });
 
@@ -43,9 +37,7 @@ export async function OrgList({
 				<div className="text-center max-w-xs">
 					<Building2 className="mx-auto mb-2 size-8 text-muted-foreground" />
 					<p className="text-sm font-medium">{t("noOrgs")}</p>
-					<p className="mt-1 text-xs text-muted-foreground">
-						{t("noOrgsDesc")}
-					</p>
+					<p className="mt-1 text-xs text-muted-foreground">{t("noOrgsDesc")}</p>
 				</div>
 			</div>
 		);
@@ -54,7 +46,7 @@ export async function OrgList({
 	return (
 		<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{orgs.map((org) => (
-				<Link key={org.id} href={`/${locale}/app/organizations/${org.id}`}>
+				<Link href={`/${locale}/app/organizations/${org.id}`} key={org.id}>
 					<Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
 						<CardHeader className="pb-2">
 							<CardTitle className="text-base truncate flex items-center gap-2">
@@ -64,16 +56,10 @@ export async function OrgList({
 						</CardHeader>
 						<CardContent className="space-y-1 text-sm text-muted-foreground">
 							<p>
-								<span className="font-medium text-foreground">
-									{t("slug")}
-								</span>{" "}
-								{org.slug}
+								<span className="font-medium text-foreground">{t("slug")}</span> {org.slug}
 							</p>
 							<p>
-								<span className="font-medium text-foreground">
-									{t("members")}
-								</span>{" "}
-								{org.member_count}
+								<span className="font-medium text-foreground">{t("members")}</span> {org.member_count}
 							</p>
 							<p className="truncate text-xs opacity-60">{org.id}</p>
 						</CardContent>

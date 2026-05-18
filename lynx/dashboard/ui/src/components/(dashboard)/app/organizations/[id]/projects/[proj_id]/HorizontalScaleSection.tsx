@@ -1,77 +1,67 @@
 "use client";
 
-import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Network, Plus, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import {
+	addHorizontalScale,
+	teardownHorizontalScale,
+} from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]/scale";
 import { Badge } from "@/components/ui/badge";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import { Trash2, Plus, Network } from "lucide-react";
-import { addTunnelSchema, type AddTunnelInput } from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
-import { addHorizontalScale, teardownHorizontalScale } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]/scale";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { type AddTunnelInput, addTunnelSchema } from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
 
 interface Agent {
 	id: string;
 	name: string;
-	wg_ip: string;
 	status: string;
+	wg_ip: string;
 }
 
 interface Tunnel {
-	id: string;
-	agent_b_id: string;
 	agent_a_wg_ip: string;
+	agent_b_id: string;
 	agent_b_wg_ip: string;
+	id: string;
 	replica_count: number;
 	status: string;
 }
 
 interface Labels {
-	title: string;
-	desc: string;
 	addBtn: string;
-	dialogTitle: string;
-	targetAgent: string;
-	image: string;
-	replicas: string;
-	confirm: string;
-	success: string;
-	error: string;
-	teardownSuccess: string;
-	teardownError: string;
-	noTunnels: string;
 	agentB: string;
+	confirm: string;
+	desc: string;
+	dialogTitle: string;
+	error: string;
+	image: string;
+	noTunnels: string;
 	replicaCount: string;
+	replicas: string;
 	status: string;
+	success: string;
+	targetAgent: string;
+	teardownError: string;
+	teardownSuccess: string;
+	title: string;
 }
 
 interface Props {
+	agents: Agent[];
+	labels: Labels;
 	orgId: string;
 	projId: string;
 	tunnels: Tunnel[];
-	agents: Agent[];
-	labels: Labels;
 }
 
 function StatusBadge({ status }: { status: string }) {
-	const variant =
-		status === "active" ? "default" : status === "pending" ? "secondary" : "destructive";
+	const variant = status === "active" ? "default" : status === "pending" ? "secondary" : "destructive";
 	return <Badge variant={variant}>{status}</Badge>;
 }
 
@@ -89,8 +79,6 @@ function TeardownButton({
 	const [pending, startTransition] = useTransition();
 	return (
 		<Button
-			variant="ghost"
-			size="sm"
 			className="text-destructive hover:text-destructive"
 			disabled={pending}
 			onClick={() =>
@@ -100,6 +88,8 @@ function TeardownButton({
 					else toast.error(labels.teardownError);
 				})
 			}
+			size="sm"
+			variant="ghost"
 		>
 			<Trash2 className="size-3.5" />
 		</Button>
@@ -127,32 +117,36 @@ function AddTunnelDialog({
 		reset,
 		formState: { errors, isSubmitting },
 	} = useForm<AddTunnelInput>({
-		resolver: zodResolver(addTunnelSchema),
 		defaultValues: { replica_count: 1 },
+		resolver: zodResolver(addTunnelSchema),
 	});
 
 	const onSubmit = (data: AddTunnelInput) => {
 		toast.promise(
-			addHorizontalScale(orgId, projId, data.target_agent_id, data.image, data.replica_count).then(
-				(r) => {
-					if (!r.ok) throw new Error(r.error);
-					setOpen(false);
-					reset({ replica_count: 1 });
-					return r;
-				},
-			),
+			addHorizontalScale(orgId, projId, data.target_agent_id, data.image, data.replica_count).then((r) => {
+				if (!r.ok) throw new Error(r.error);
+				setOpen(false);
+				reset({ replica_count: 1 });
+				return r;
+			}),
 			{
+				error: labels.error,
 				loading: labels.confirm,
 				success: labels.success,
-				error: labels.error,
 			},
 		);
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset({ replica_count: 1 }); }}>
+		<Dialog
+			onOpenChange={(v) => {
+				setOpen(v);
+				if (!v) reset({ replica_count: 1 });
+			}}
+			open={open}
+		>
 			<DialogTrigger asChild>
-				<Button size="sm" variant="outline" className="gap-1.5">
+				<Button className="gap-1.5" size="sm" variant="outline">
 					<Plus className="size-3.5" />
 					{labels.addBtn}
 				</Button>
@@ -161,7 +155,7 @@ function AddTunnelDialog({
 				<DialogHeader>
 					<DialogTitle>{labels.dialogTitle}</DialogTitle>
 				</DialogHeader>
-				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+				<form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
 					<Field>
 						<FieldLabel>{labels.targetAgent}</FieldLabel>
 						{onlineAgents.length === 0 ? (
@@ -171,7 +165,7 @@ function AddTunnelDialog({
 								control={control}
 								name="target_agent_id"
 								render={({ field }) => (
-									<Select value={field.value} onValueChange={field.onChange} disabled={isSubmitting}>
+									<Select disabled={isSubmitting} onValueChange={field.onChange} value={field.value}>
 										<SelectTrigger>
 											<SelectValue placeholder={labels.targetAgent} />
 										</SelectTrigger>
@@ -193,8 +187,8 @@ function AddTunnelDialog({
 						<Input
 							id="tunnel-image"
 							{...register("image")}
-							placeholder="docker.io/nginx:latest"
 							disabled={isSubmitting}
+							placeholder="docker.io/nginx:latest"
 						/>
 						<FieldError errors={[errors.image]} />
 					</Field>
@@ -202,15 +196,15 @@ function AddTunnelDialog({
 						<FieldLabel htmlFor="tunnel-replicas">{labels.replicas}</FieldLabel>
 						<Input
 							id="tunnel-replicas"
-							type="number"
-							min={1}
 							max={20}
+							min={1}
+							type="number"
 							{...register("replica_count")}
 							disabled={isSubmitting}
 						/>
 						<FieldError errors={[errors.replica_count]} />
 					</Field>
-					<Button type="submit" disabled={isSubmitting || onlineAgents.length === 0}>
+					<Button disabled={isSubmitting || onlineAgents.length === 0} type="submit">
 						{isSubmitting ? "…" : labels.confirm}
 					</Button>
 				</form>
@@ -227,7 +221,7 @@ export function HorizontalScaleSection({ orgId, projId, tunnels, agents, labels 
 					<Network className="size-3.5" />
 					{labels.title}
 				</h2>
-				<AddTunnelDialog orgId={orgId} projId={projId} agents={agents} labels={labels} />
+				<AddTunnelDialog agents={agents} labels={labels} orgId={orgId} projId={projId} />
 			</div>
 			<p className="text-sm text-muted-foreground">{labels.desc}</p>
 			{tunnels.length === 0 ? (
@@ -235,7 +229,7 @@ export function HorizontalScaleSection({ orgId, projId, tunnels, agents, labels 
 			) : (
 				<div className="rounded-lg border divide-y">
 					{tunnels.map((t) => (
-						<div key={t.id} className="flex items-center justify-between p-3 text-sm">
+						<div className="flex items-center justify-between p-3 text-sm" key={t.id}>
 							<div className="flex flex-col gap-0.5">
 								<span className="font-mono text-xs text-muted-foreground">
 									{t.agent_a_wg_ip} → {t.agent_b_wg_ip}
@@ -246,7 +240,7 @@ export function HorizontalScaleSection({ orgId, projId, tunnels, agents, labels 
 							</div>
 							<div className="flex items-center gap-2">
 								<StatusBadge status={t.status} />
-								<TeardownButton orgId={orgId} projId={projId} tunnelId={t.id} labels={labels} />
+								<TeardownButton labels={labels} orgId={orgId} projId={projId} tunnelId={t.id} />
 							</div>
 						</div>
 					))}

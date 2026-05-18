@@ -1,10 +1,10 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { resolveNftables } from "@/actions/(dashboard)/app/agents";
+import { Button } from "@/components/ui/button";
 
 interface Props {
 	agentId: string;
@@ -26,9 +26,7 @@ export function NftablesAlert({ agentId, detail, labels }: Props) {
 		startTransition(async () => {
 			const result = await resolveNftables(agentId, action);
 			if (result.ok) {
-				toast.success(
-					action === "restore" ? labels.restoreSuccess : labels.acceptSuccess,
-				);
+				toast.success(action === "restore" ? labels.restoreSuccess : labels.acceptSuccess);
 			} else {
 				toast.error(labels.error, { description: result.error });
 			}
@@ -41,27 +39,23 @@ export function NftablesAlert({ agentId, detail, labels }: Props) {
 				<AlertTriangle className="size-4 shrink-0" />
 				<p className="text-xs font-medium">{labels.title}</p>
 			</div>
-			{detail && (
-				<p className="text-xs text-orange-600 dark:text-orange-500 font-mono">
-					{detail}
-				</p>
-			)}
+			{detail && <p className="text-xs text-orange-600 dark:text-orange-500 font-mono">{detail}</p>}
 			<div className="flex gap-2">
 				<Button
+					className="text-xs h-7 border-orange-300 dark:border-orange-700"
+					disabled={isPending}
+					onClick={() => handle("restore")}
 					size="sm"
 					variant="outline"
-					disabled={isPending}
-					className="text-xs h-7 border-orange-300 dark:border-orange-700"
-					onClick={() => handle("restore")}
 				>
 					{labels.restore}
 				</Button>
 				<Button
+					className="text-xs h-7 text-muted-foreground"
+					disabled={isPending}
+					onClick={() => handle("accept")}
 					size="sm"
 					variant="ghost"
-					disabled={isPending}
-					className="text-xs h-7 text-muted-foreground"
-					onClick={() => handle("accept")}
 				>
 					{labels.accept}
 				</Button>

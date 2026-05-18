@@ -1,43 +1,40 @@
 "use client";
 
+import { Plus, Send, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import type { CreateRulePayload, NftRule } from "@/actions/(dashboard)/app/agents/nftables";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Plus, Trash2, Send } from "lucide-react";
-import {
-	type NftRule,
-	type CreateRulePayload,
-} from "@/actions/(dashboard)/app/agents/nftables";
+import { Input } from "@/components/ui/input";
 
 interface Labels {
 	addRule: string;
-	kind: string;
-	port: string;
-	protocol: string;
-	ipList: string;
-	ratePerMin: string;
-	description: string;
-	priority: string;
 	create: string;
-	createSuccess: string;
 	createError: string;
-	deleteSuccess: string;
+	createSuccess: string;
 	deleteError: string;
-	push: string;
-	pushSuccess: string;
-	pushError: string;
-	noRules: string;
-	kindAllowPort: string;
-	kindBlockPort: string;
+	deleteSuccess: string;
+	description: string;
+	ipList: string;
+	kind: string;
 	kindAllowIp: string;
+	kindAllowPort: string;
 	kindBlockIp: string;
+	kindBlockPort: string;
 	kindRateLimit: string;
+	noRules: string;
+	port: string;
+	priority: string;
+	protoBoth: string;
+	protocol: string;
 	protoTcp: string;
 	protoUdp: string;
-	protoBoth: string;
+	push: string;
+	pushError: string;
+	pushSuccess: string;
+	ratePerMin: string;
 }
 
 interface Props {
@@ -49,37 +46,31 @@ interface Props {
 }
 
 const KIND_LABELS: Record<string, keyof Labels> = {
-	allow_port: "kindAllowPort",
-	block_port: "kindBlockPort",
 	allow_ip: "kindAllowIp",
+	allow_port: "kindAllowPort",
 	block_ip: "kindBlockIp",
+	block_port: "kindBlockPort",
 	rate_limit: "kindRateLimit",
 };
 
 const PROTO_LABELS: Record<string, keyof Labels> = {
+	both: "protoBoth",
 	tcp: "protoTcp",
 	udp: "protoUdp",
-	both: "protoBoth",
 };
 
 const KIND_BADGE: Record<string, "default" | "destructive" | "secondary"> = {
-	allow_port: "default",
 	allow_ip: "default",
-	block_port: "destructive",
+	allow_port: "default",
 	block_ip: "destructive",
+	block_port: "destructive",
 	rate_limit: "secondary",
 };
 
 const PORT_KINDS = new Set(["allow_port", "block_port", "rate_limit"]);
 const IP_KINDS = new Set(["allow_ip", "block_ip"]);
 
-export function NftRulesPanel({
-	initialRules,
-	labels,
-	onCreateRule,
-	onDeleteRule,
-	onPush,
-}: Props) {
+export function NftRulesPanel({ initialRules, labels, onCreateRule, onDeleteRule, onPush }: Props) {
 	const [rules, setRules] = useState<NftRule[]>(initialRules);
 	const [showForm, setShowForm] = useState(false);
 	const [kind, setKind] = useState("allow_port");
@@ -93,8 +84,8 @@ export function NftRulesPanel({
 
 	const handleCreate = () => {
 		const payload: CreateRulePayload = {
-			kind,
 			description: description.trim() || undefined,
+			kind,
 		};
 		if (PORT_KINDS.has(kind)) {
 			const p = parseInt(port);
@@ -168,15 +159,20 @@ export function NftRulesPanel({
 					<table className="w-full text-sm">
 						<tbody className="divide-y">
 							{rules.map((rule) => (
-								<tr key={rule.id} className="hover:bg-muted/20">
+								<tr className="hover:bg-muted/20" key={rule.id}>
 									<td className="px-3 py-2">
-										<Badge variant={KIND_BADGE[rule.kind] ?? "secondary"} className="text-xs select-none">
+										<Badge
+											className="text-xs select-none"
+											variant={KIND_BADGE[rule.kind] ?? "secondary"}
+										>
 											{labels[KIND_LABELS[rule.kind] ?? "kindAllowPort"]}
 										</Badge>
 									</td>
 									<td className="px-3 py-2 font-mono text-xs">
 										{rule.port != null ? `:${rule.port}` : ""}
-										{rule.protocol ? ` (${labels[PROTO_LABELS[rule.protocol] ?? "protoBoth"]})` : ""}
+										{rule.protocol
+											? ` (${labels[PROTO_LABELS[rule.protocol] ?? "protoBoth"]})`
+											: ""}
 										{rule.ip_list.length > 0 ? ` ${rule.ip_list.join(", ")}` : ""}
 										{rule.rate_per_min != null ? ` ${rule.rate_per_min}/min` : ""}
 									</td>
@@ -185,11 +181,11 @@ export function NftRulesPanel({
 									</td>
 									<td className="px-3 py-2">
 										<Button
-											variant="ghost"
-											size="sm"
 											className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive cursor-pointer"
-											onClick={() => handleDelete(rule.id)}
 											disabled={createPending}
+											onClick={() => handleDelete(rule.id)}
+											size="sm"
+											variant="ghost"
 										>
 											<Trash2 className="size-3.5" />
 										</Button>
@@ -203,21 +199,21 @@ export function NftRulesPanel({
 
 			<div className="flex items-center gap-2">
 				<Button
-					variant="outline"
-					size="sm"
-					onClick={() => setShowForm(!showForm)}
-					disabled={createPending}
 					className="select-none cursor-pointer"
+					disabled={createPending}
+					onClick={() => setShowForm(!showForm)}
+					size="sm"
+					variant="outline"
 				>
 					<Plus className="size-3.5 mr-1.5" />
 					{labels.addRule}
 				</Button>
 				<Button
-					variant="outline"
-					size="sm"
-					onClick={handlePush}
-					disabled={pushPending}
 					className="select-none cursor-pointer"
+					disabled={pushPending}
+					onClick={handlePush}
+					size="sm"
+					variant="outline"
 				>
 					<Send className="size-3.5 mr-1.5" />
 					{labels.push}
@@ -229,9 +225,9 @@ export function NftRulesPanel({
 					<Field>
 						<FieldLabel>{labels.kind}</FieldLabel>
 						<select
-							value={kind}
-							onChange={(e) => setKind(e.target.value)}
 							className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+							onChange={(e) => setKind(e.target.value)}
+							value={kind}
 						>
 							<option value="allow_port">{labels.kindAllowPort}</option>
 							<option value="block_port">{labels.kindBlockPort}</option>
@@ -246,20 +242,20 @@ export function NftRulesPanel({
 							<Field>
 								<FieldLabel>{labels.port}</FieldLabel>
 								<Input
-									type="number"
-									min={1}
 									max={65535}
-									value={port}
+									min={1}
 									onChange={(e) => setPort(e.target.value)}
 									placeholder="80"
+									type="number"
+									value={port}
 								/>
 							</Field>
 							<Field>
 								<FieldLabel>{labels.protocol}</FieldLabel>
 								<select
-									value={protocol}
-									onChange={(e) => setProtocol(e.target.value)}
 									className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+									onChange={(e) => setProtocol(e.target.value)}
+									value={protocol}
 								>
 									<option value="tcp">{labels.protoTcp}</option>
 									<option value="udp">{labels.protoUdp}</option>
@@ -273,9 +269,9 @@ export function NftRulesPanel({
 						<Field>
 							<FieldLabel>{labels.ipList}</FieldLabel>
 							<Input
-								value={ipList}
 								onChange={(e) => setIpList(e.target.value)}
 								placeholder="0.0.0.0/0, ::/0"
+								value={ipList}
 							/>
 						</Field>
 					)}
@@ -284,11 +280,11 @@ export function NftRulesPanel({
 						<Field>
 							<FieldLabel>{labels.ratePerMin}</FieldLabel>
 							<Input
-								type="number"
 								min={1}
-								value={ratePerMin}
 								onChange={(e) => setRatePerMin(e.target.value)}
 								placeholder="100"
+								type="number"
+								value={ratePerMin}
 							/>
 						</Field>
 					)}
@@ -296,17 +292,17 @@ export function NftRulesPanel({
 					<Field>
 						<FieldLabel>{labels.description}</FieldLabel>
 						<Input
-							value={description}
 							onChange={(e) => setDescription(e.target.value)}
 							placeholder="Allow web traffic"
+							value={description}
 						/>
 					</Field>
 
 					<Button
-						size="sm"
-						onClick={handleCreate}
-						disabled={createPending}
 						className="select-none cursor-pointer w-fit"
+						disabled={createPending}
+						onClick={handleCreate}
+						size="sm"
 					>
 						{labels.create}
 					</Button>

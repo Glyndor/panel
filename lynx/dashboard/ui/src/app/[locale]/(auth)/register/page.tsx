@@ -1,10 +1,7 @@
-
 import { getTranslations } from "next-intl/server";
 import { RegisterForm } from "@/components/(auth)/register/RegisterForm";
 
-export default async function RegisterPage({
-	params,
-}: { params: Promise<{ locale: string }>; }) {
+export default async function RegisterPage({ params }: { params: Promise<{ locale: string }> }) {
 	const { locale } = await params;
 	const t = await getTranslations({ locale, namespace: "auth.register" });
 
@@ -30,19 +27,19 @@ async function Branding({ locale }: { locale: string }) {
 		<footer className="mt-10 text-center text-xs text-muted-foreground">
 			{t("madeWith")}{" "}
 			<a
-				href="https://github.com/Jaro-c"
-				target="_blank"
-				rel="noopener noreferrer"
 				className="font-medium text-foreground hover:underline"
+				href="https://github.com/Jaro-c"
+				rel="noopener noreferrer"
+				target="_blank"
 			>
 				{t("author")}
 			</a>
 			{" · "}
 			<a
-				href="https://github.com/Jaro-c/Lynx"
-				target="_blank"
-				rel="noopener noreferrer"
 				className="font-medium text-foreground hover:underline"
+				href="https://github.com/Jaro-c/Lynx"
+				rel="noopener noreferrer"
+				target="_blank"
 			>
 				lynx
 			</a>

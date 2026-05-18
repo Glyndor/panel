@@ -1,19 +1,19 @@
-import { Suspense } from "react";
-import { getTranslations } from "next-intl/server";
-import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { BACKEND_URL } from "@/lib/api";
+import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
+import { Suspense } from "react";
 import {
-	listUsersAction,
-	listRolesAction,
 	listPermissionsAction,
-	type UserRow,
-	type RoleRow,
+	listRolesAction,
+	listUsersAction,
 	type PermRef,
+	type RoleRow,
+	type UserRow,
 } from "@/actions/(dashboard)/app/admin/users";
-import { UsersPanel } from "@/components/(dashboard)/app/admin/UsersPanel";
 import { RolesPanel } from "@/components/(dashboard)/app/admin/RolesPanel";
+import { UsersPanel } from "@/components/(dashboard)/app/admin/UsersPanel";
 import { Skeleton } from "@/components/ui/skeleton";
+import { BACKEND_URL } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Guard: redirect non-admins
@@ -22,8 +22,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 async function assertAdmin(token: string, locale: string) {
 	try {
 		const res = await fetch(`${BACKEND_URL}/auth/me`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) redirect(`/${locale}/app`);
 		const data = (await res.json()) as { is_admin?: boolean };
@@ -47,55 +47,51 @@ async function AdminData({ locale }: { locale: string }) {
 	]);
 
 	const userLabels = {
-		deleteUser: t("deleteUser"),
-		deleteConfirm: t("deleteConfirm"),
-		deleteSuccess: t("deleteSuccess"),
-		deleteError: t("deleteError"),
-		forcePasswordChange: t("forcePasswordChange"),
-		forcePasswordChangeSuccess: t("forcePasswordChangeSuccess"),
-		forcePasswordChangeError: t("forcePasswordChangeError"),
 		addRole: t("addRole"),
-		addRoleSuccess: t("addRoleSuccess"),
 		addRoleError: t("addRoleError"),
-		removeRole: t("removeRole"),
-		removeRoleSuccess: t("removeRoleSuccess"),
-		removeRoleError: t("removeRoleError"),
+		addRoleSuccess: t("addRoleSuccess"),
+		deleteConfirm: t("deleteConfirm"),
+		deleteError: t("deleteError"),
+		deleteSuccess: t("deleteSuccess"),
+		deleteUser: t("deleteUser"),
+		forcePasswordChange: t("forcePasswordChange"),
+		forcePasswordChangeError: t("forcePasswordChangeError"),
+		forcePasswordChangeSuccess: t("forcePasswordChangeSuccess"),
 		noRoles: t("noRoles"),
+		removeRole: t("removeRole"),
+		removeRoleError: t("removeRoleError"),
+		removeRoleSuccess: t("removeRoleSuccess"),
 		selectRole: t("selectRole"),
 	};
 
 	const roleLabels = {
+		addPermission: t("addPermission"),
+		addPermissionError: t("addPermissionError"),
+		addPermissionSuccess: t("addPermissionSuccess"),
 		createRole: t("createRole"),
-		createRoleSuccess: t("createRoleSuccess"),
 		createRoleError: t("createRoleError"),
+		createRoleSuccess: t("createRoleSuccess"),
 		deleteRole: t("deleteRole"),
 		deleteRoleConfirm: t("deleteRoleConfirm"),
-		deleteRoleSuccess: t("deleteRoleSuccess"),
 		deleteRoleError: t("deleteRoleError"),
-		addPermission: t("addPermission"),
-		addPermissionSuccess: t("addPermissionSuccess"),
-		addPermissionError: t("addPermissionError"),
-		removePermission: t("removePermission"),
-		removePermissionSuccess: t("removePermissionSuccess"),
-		removePermissionError: t("removePermissionError"),
-		roleName: t("roleName"),
+		deleteRoleSuccess: t("deleteRoleSuccess"),
 		noPermissions: t("noPermissions"),
+		removePermission: t("removePermission"),
+		removePermissionError: t("removePermissionError"),
+		removePermissionSuccess: t("removePermissionSuccess"),
+		roleName: t("roleName"),
 	};
 
 	return (
 		<>
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("users")}
-				</h2>
-				<UsersPanel initial={users} roles={roles} labels={userLabels} />
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("users")}</h2>
+				<UsersPanel initial={users} labels={userLabels} roles={roles} />
 			</section>
 
 			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					{t("roles")}
-				</h2>
-				<RolesPanel initial={roles} allPerms={perms} labels={roleLabels} />
+				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("roles")}</h2>
+				<RolesPanel allPerms={perms} initial={roles} labels={roleLabels} />
 			</section>
 		</>
 	);
@@ -138,9 +134,7 @@ function AdminSkeleton() {
 // Page
 // ---------------------------------------------------------------------------
 
-export default async function AdminPage({
-	params,
-}: { params: Promise<{ locale: string }> }) {
+export default async function AdminPage({ params }: { params: Promise<{ locale: string }> }) {
 	const { locale } = await params;
 	const t = await getTranslations({ locale, namespace: "admin" });
 

@@ -1,23 +1,22 @@
-
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { BACKEND_URL } from "@/lib/api";
 import { Sidebar } from "@/components/(dashboard)/app/Sidebar";
+import { BACKEND_URL } from "@/lib/api";
 
 interface Branding {
+	accent_color: string;
 	company_name: string;
 	logo_url: string | null;
 	primary_color: string;
 	secondary_color: string;
-	accent_color: string;
 }
 
 const DEFAULTS: Branding = {
+	accent_color: "#6366f1",
 	company_name: "Lynx",
 	logo_url: null,
 	primary_color: "#0f172a",
 	secondary_color: "#38bdf8",
-	accent_color: "#6366f1",
 };
 
 async function fetchBranding(): Promise<Branding> {
@@ -35,8 +34,8 @@ async function fetchBranding(): Promise<Branding> {
 async function fetchIsAdmin(token: string): Promise<boolean> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/auth/me`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) return false;
 		const data = (await res.json()) as { is_admin?: boolean };
@@ -49,7 +48,10 @@ async function fetchIsAdmin(token: string): Promise<boolean> {
 export default async function AppLayout({
 	children,
 	params,
-}: { children: React.ReactNode; params: Promise<{ locale: string }>; }) {
+}: {
+	children: React.ReactNode;
+	params: Promise<{ locale: string }>;
+}) {
 	const { locale } = await params;
 
 	const jar = await cookies();
@@ -68,14 +70,12 @@ export default async function AppLayout({
 	return (
 		<div className="flex h-screen overflow-hidden">
 			<Sidebar
-				locale={locale}
 				companyName={branding.company_name}
-				logoUrl={branding.logo_url}
 				isAdmin={isAdmin}
+				locale={locale}
+				logoUrl={branding.logo_url}
 			/>
-			<main className="flex flex-1 flex-col overflow-y-auto">
-				{children}
-			</main>
+			<main className="flex flex-1 flex-col overflow-y-auto">{children}</main>
 		</div>
 	);
 }

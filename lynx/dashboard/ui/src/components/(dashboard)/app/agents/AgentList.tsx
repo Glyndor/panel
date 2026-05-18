@@ -1,8 +1,8 @@
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { BACKEND_URL } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import Link from "next/link";
+import { BACKEND_URL } from "@/lib/api";
 import { NftablesAlert } from "./NftablesAlert";
 
 type Agent = {
@@ -15,8 +15,8 @@ type Agent = {
 };
 
 interface NftStatus {
-	diverged: boolean;
 	detail?: string | null;
+	diverged: boolean;
 }
 
 async function fetchAgents(token: string): Promise<Agent[]> {
@@ -36,8 +36,8 @@ async function fetchAgents(token: string): Promise<Agent[]> {
 async function fetchNftStatus(token: string, agentId: string): Promise<NftStatus> {
 	try {
 		const res = await fetch(`${BACKEND_URL}/agents/${agentId}/nftables-status`, {
-			headers: { Authorization: `Bearer ${token}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${token}` },
 		});
 		if (!res.ok) return { diverged: false };
 		return res.json();
@@ -46,13 +46,10 @@ async function fetchNftStatus(token: string, agentId: string): Promise<NftStatus
 	}
 }
 
-const STATUS_BADGE: Record<
-	Agent["status"],
-	"default" | "destructive" | "secondary"
-> = {
-	online: "default",
+const STATUS_BADGE: Record<Agent["status"], "default" | "destructive" | "secondary"> = {
 	lockdown: "destructive",
 	offline: "secondary",
+	online: "default",
 };
 
 function formatHeartbeat(ts: string | null): string {
@@ -63,24 +60,13 @@ function formatHeartbeat(ts: string | null): string {
 	return `${Math.floor(diff / 3600)}h ago`;
 }
 
-export async function AgentList({
-	token,
-	locale,
-}: {
-	token: string;
-	locale: string;
-}) {
-	const [agents, t] = await Promise.all([
-		fetchAgents(token),
-		getTranslations({ locale, namespace: "app.agents" }),
-	]);
+export async function AgentList({ token, locale }: { token: string; locale: string }) {
+	const [agents, t] = await Promise.all([fetchAgents(token), getTranslations({ locale, namespace: "app.agents" })]);
 
 	// Fetch nftables divergence status for online agents in parallel
 	const nftStatuses = await Promise.all(
 		agents.map((a) =>
-			a.status === "online"
-				? fetchNftStatus(token, a.id)
-				: Promise.resolve({ diverged: false } as NftStatus),
+			a.status === "online" ? fetchNftStatus(token, a.id) : Promise.resolve({ diverged: false } as NftStatus),
 		),
 	);
 
@@ -89,9 +75,7 @@ export async function AgentList({
 			<div className="flex flex-1 items-center justify-center rounded-lg border border-dashed min-h-64">
 				<div className="text-center max-w-xs">
 					<p className="text-sm font-medium">{t("noAgents")}</p>
-					<p className="mt-1 text-xs text-muted-foreground">
-						{t("noAgentsDesc")}
-					</p>
+					<p className="mt-1 text-xs text-muted-foreground">{t("noAgentsDesc")}</p>
 				</div>
 			</div>
 		);
@@ -105,44 +89,33 @@ export async function AgentList({
 					<Card key={agent.id}>
 						<CardHeader className="pb-2">
 							<div className="flex items-center justify-between gap-2">
-								<CardTitle className="text-base truncate">
-									{agent.name}
-								</CardTitle>
-								<Badge variant={STATUS_BADGE[agent.status]}>
-									{t(`status.${agent.status}`)}
-								</Badge>
+								<CardTitle className="text-base truncate">{agent.name}</CardTitle>
+								<Badge variant={STATUS_BADGE[agent.status]}>{t(`status.${agent.status}`)}</Badge>
 							</div>
 						</CardHeader>
 						<CardContent className="space-y-1 text-sm text-muted-foreground">
 							<p>
-								<span className="font-medium text-foreground">
-									{t("wgIp")}
-								</span>{" "}
-								{agent.wg_ip}
+								<span className="font-medium text-foreground">{t("wgIp")}</span> {agent.wg_ip}
 							</p>
 							<p>
-								<span className="font-medium text-foreground">
-									{t("version")}
-								</span>{" "}
+								<span className="font-medium text-foreground">{t("version")}</span>{" "}
 								{agent.version ?? "—"}
 							</p>
 							<p>
-								<span className="font-medium text-foreground">
-									{t("lastHeartbeat")}
-								</span>{" "}
+								<span className="font-medium text-foreground">{t("lastHeartbeat")}</span>{" "}
 								{formatHeartbeat(agent.last_heartbeat)}
 							</p>
 							<p className="truncate text-xs opacity-60">{agent.id}</p>
 							<div className="flex items-center gap-3 pt-1">
 								<Link
-									href={`/${locale}/app/agents/${agent.id}`}
 									className="text-xs text-foreground underline underline-offset-2 hover:text-muted-foreground transition-colors"
+									href={`/${locale}/app/agents/${agent.id}`}
 								>
 									{t("detailTitle")} →
 								</Link>
 								<Link
-									href={`/${locale}/app/agents/${agent.id}/audit-log`}
 									className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+									href={`/${locale}/app/agents/${agent.id}/audit-log`}
 								>
 									{t("auditLog")}
 								</Link>
@@ -152,12 +125,12 @@ export async function AgentList({
 									agentId={agent.id}
 									detail={nft.detail ?? null}
 									labels={{
-										title: t("nftDiverged"),
-										restore: t("nftRestore"),
 										accept: t("nftAccept"),
-										restoreSuccess: t("nftRestoreSuccess"),
 										acceptSuccess: t("nftAcceptSuccess"),
 										error: t("nftError"),
+										restore: t("nftRestore"),
+										restoreSuccess: t("nftRestoreSuccess"),
+										title: t("nftDiverged"),
 									}}
 								/>
 							)}

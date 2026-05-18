@@ -12,15 +12,15 @@ export async function changePassword(
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/auth/change-password`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${tok}`,
-			},
 			body: JSON.stringify({
 				current_password: currentPassword,
 				new_password: newPassword,
 			}),
+			headers: {
+				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
 		});
 
 		if (res.ok) {
@@ -46,8 +46,8 @@ export async function getMe(): Promise<{
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/auth/me`, {
-			headers: { Authorization: `Bearer ${tok}` },
 			cache: "no-store",
+			headers: { Authorization: `Bearer ${tok}` },
 		});
 		if (!res.ok) return null;
 		return res.json();
@@ -62,12 +62,12 @@ export async function toggleSingleSession(enabled: boolean): Promise<{ ok: boole
 
 	try {
 		const res = await fetch(`${BACKEND_URL}/auth/me/single-session`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${tok}`,
-			},
 			body: JSON.stringify({ enabled }),
+			headers: {
+				Authorization: `Bearer ${tok}`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
 		});
 		return { ok: res.ok };
 	} catch {

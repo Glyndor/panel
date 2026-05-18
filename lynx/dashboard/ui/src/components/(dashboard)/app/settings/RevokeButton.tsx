@@ -1,10 +1,10 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { revokeSession } from "@/actions/(dashboard)/app/settings";
+import { Button } from "@/components/ui/button";
 
 type Props = {
 	sessionId: string;
@@ -13,12 +13,7 @@ type Props = {
 	errorMsg: string;
 };
 
-export function RevokeButton({
-	sessionId,
-	label,
-	successMsg,
-	errorMsg,
-}: Props) {
+export function RevokeButton({ sessionId, label, successMsg, errorMsg }: Props) {
 	const router = useRouter();
 	const [pending, startTransition] = useTransition();
 
@@ -35,12 +30,7 @@ export function RevokeButton({
 	}
 
 	return (
-		<Button
-			variant="outline"
-			size="sm"
-			disabled={pending}
-			onClick={handleRevoke}
-		>
+		<Button disabled={pending} onClick={handleRevoke} size="sm" variant="outline">
 			{label}
 		</Button>
 	);

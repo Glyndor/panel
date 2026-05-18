@@ -1,25 +1,25 @@
 "use client";
 
+import { RotateCcw, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { deleteAgent, rebootAgent } from "@/actions/(dashboard)/app/agents";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Trash2 } from "lucide-react";
-import { rebootAgent, deleteAgent } from "@/actions/(dashboard)/app/agents";
 
 interface Labels {
-	reboot: string;
-	rebootConfirm: string;
-	rebootSuccess: string;
-	rebootError: string;
 	deleteAgent: string;
 	deleteConfirm: string;
 	deleteError: string;
+	reboot: string;
+	rebootConfirm: string;
+	rebootError: string;
+	rebootSuccess: string;
 }
 
 interface Props {
 	agentId: string;
-	locale: string;
 	labels: Labels;
+	locale: string;
 }
 
 export function AgentDetailActions({ agentId, locale, labels }: Props) {
@@ -52,21 +52,21 @@ export function AgentDetailActions({ agentId, locale, labels }: Props) {
 	return (
 		<div className="flex items-center gap-2 flex-wrap">
 			<Button
-				variant="outline"
-				size="sm"
-				onClick={handleReboot}
-				disabled={rebootPending || deleted}
 				className="select-none cursor-pointer"
+				disabled={rebootPending || deleted}
+				onClick={handleReboot}
+				size="sm"
+				variant="outline"
 			>
 				<RotateCcw className="size-3.5 mr-1.5" />
 				{labels.reboot}
 			</Button>
 			<Button
-				variant="destructive"
-				size="sm"
-				onClick={handleDelete}
-				disabled={deletePending || deleted}
 				className="select-none cursor-pointer"
+				disabled={deletePending || deleted}
+				onClick={handleDelete}
+				size="sm"
+				variant="destructive"
 			>
 				<Trash2 className="size-3.5 mr-1.5" />
 				{labels.deleteAgent}
