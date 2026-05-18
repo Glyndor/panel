@@ -45,18 +45,7 @@ pub async fn check_refresh(redis: &mut ConnectionManager, ip: &str) -> Result<()
     .await
 }
 
-/// Returns true when `LYNX_SKIP_RATE_LIMIT=1` — used in CI to avoid parallel
-/// test threads exhausting the per-username Redis counters.
-fn is_disabled() -> bool {
-    std::env::var("LYNX_SKIP_RATE_LIMIT")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
 async fn check(redis: &mut ConnectionManager, key: &str, limit: i64, window: i64) -> Result<()> {
-    if is_disabled() {
-        return Ok(());
-    }
     let count: i64 = redis
         .incr(key, 1i64)
         .await

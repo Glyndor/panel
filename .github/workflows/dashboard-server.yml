@@ -163,8 +163,7 @@ jobs:
           DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
 
       - name: test
-        run: cargo test --package lynx-dashboard-server
+        run: cargo test --package lynx-dashboard-server -- --test-threads=1
         env:
           DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
           REDIS_URL: redis://localhost:6379
-          LYNX_SKIP_RATE_LIMIT: "1"
