@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Poppins } from "next/font/google";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
@@ -10,7 +10,11 @@ import { routing } from "@/i18n/routing";
 import { BACKEND_URL } from "@/lib/api";
 import "../globals.css";
 
-const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const poppins = Poppins({
+	subsets: ["latin"],
+	variable: "--font-sans",
+	weight: ["300", "400", "500", "600", "700"],
+});
 const geistMono = Geist_Mono({
 	subsets: ["latin"],
 	variable: "--font-geist-mono",
@@ -82,7 +86,7 @@ export default async function LocaleLayout({
 
 	return (
 		<html
-			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+			className={`${poppins.variable} ${geistMono.variable} h-full antialiased`}
 			lang={locale}
 			style={brandVars}
 			suppressHydrationWarning
