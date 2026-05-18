@@ -1,11 +1,12 @@
 use crate::error::{AppError, Result};
-use anyhow::Context;
 use redis::{aio::ConnectionManager, AsyncCommands};
 
 const LOGIN_LIMIT: i64 = 5;
 const LOGIN_WINDOW: i64 = 900;
 const REGISTER_LIMIT: i64 = 3;
 const REGISTER_WINDOW: i64 = 3600;
+const REFRESH_LIMIT: i64 = 10;
+const REFRESH_WINDOW: i64 = 300;
 
 pub async fn check_login(redis: &mut ConnectionManager, ip: &str) -> Result<()> {
     check(redis, &format!("rl:login:{ip}"), LOGIN_LIMIT, LOGIN_WINDOW).await
@@ -21,11 +22,24 @@ pub async fn check_register(redis: &mut ConnectionManager, ip: &str) -> Result<(
     .await
 }
 
+pub async fn check_refresh(redis: &mut ConnectionManager, ip: &str) -> Result<()> {
+    check(
+        redis,
+        &format!("rl:refresh:{ip}"),
+        REFRESH_LIMIT,
+        REFRESH_WINDOW,
+    )
+    .await
+}
+
 async fn check(redis: &mut ConnectionManager, key: &str, limit: i64, window: i64) -> Result<()> {
-    let count: i64 = redis.incr(key, 1i64).await.context("redis INCR")?;
+    let count: i64 = redis
+        .incr(key, 1i64)
+        .await
+        .map_err(|_| AppError::ServiceUnavailable)?;
 
     if count == 1 {
-        let _: () = redis.expire(key, window).await.context("redis EXPIRE")?;
+        let _: std::result::Result<(), _> = redis.expire(key, window).await;
     }
 
     if count > limit {

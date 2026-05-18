@@ -8,6 +8,8 @@ pub struct Config {
     pub internal_token: Zeroizing<String>,
     pub kek: Zeroizing<[u8; 32]>,
     pub pepper: Zeroizing<String>,
+    /// One-time bootstrap token for creating the first admin. None after bootstrap completes.
+    pub setup_token: Option<Zeroizing<String>>,
     /// Ed25519 seed (32 bytes) — private signing key
     pub jwt_sign_private_seed: Zeroizing<[u8; 32]>,
     /// Ed25519 public key (32 bytes)
@@ -27,6 +29,7 @@ impl Config {
         let internal_token = load_secret("INTERNAL_API_TOKEN", "INTERNAL_API_TOKEN_FILE")?;
         let kek = load_key32("KEK", "KEK_FILE")?;
         let pepper = load_secret("PEPPER", "PEPPER_FILE")?;
+        let setup_token = load_secret_opt("SETUP_TOKEN", "SETUP_TOKEN_FILE");
         let (jwt_sign_private_seed, jwt_sign_public_bytes) = load_or_gen_ed25519()?;
         let (jwt_enc_private_bytes, jwt_enc_public_bytes) = load_or_gen_x25519()?;
         let (ca_private_seed, ca_public_bytes) = load_or_gen_ca_ed25519()?;
@@ -44,6 +47,7 @@ impl Config {
             internal_token,
             kek,
             pepper,
+            setup_token,
             jwt_sign_private_seed,
             jwt_sign_public_bytes,
             jwt_enc_private_bytes,
@@ -62,6 +66,15 @@ fn load_secret(env: &str, file_env: &str) -> Result<Zeroizing<String>> {
     }
     let val = std::env::var(env).with_context(|| format!("{env} or {file_env} required"))?;
     Ok(Zeroizing::new(val))
+}
+
+fn load_secret_opt(env: &str, file_env: &str) -> Option<Zeroizing<String>> {
+    if let Ok(path) = std::env::var(file_env) {
+        if let Ok(val) = std::fs::read_to_string(&path) {
+            return Some(Zeroizing::new(val.trim().to_string()));
+        }
+    }
+    std::env::var(env).ok().map(|v| Zeroizing::new(v))
 }
 
 fn load_key32(env: &str, file_env: &str) -> Result<Zeroizing<[u8; 32]>> {

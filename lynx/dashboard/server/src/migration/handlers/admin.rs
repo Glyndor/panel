@@ -1,19 +1,13 @@
-use super::{AgentConfirmRequest, MigrationState, PrepareMigrationResponse, StartMigrationRequest};
-use crate::{
-    auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState,
-};
+use super::super::{MigrationState, PrepareMigrationResponse, StartMigrationRequest};
+use crate::{auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState};
 use axum::{
     extract::{Extension, State},
-    http::{header, HeaderMap, StatusCode},
+    http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use serde_json::json;
 use uuid::Uuid;
-
-// --------------------------------------------------------------------------
-// GET /migration — current state (auth-protected)
-// --------------------------------------------------------------------------
 
 pub async fn get_migration_status(
     State(state): State<AppState>,
@@ -31,11 +25,6 @@ pub async fn get_migration_status(
     Ok(Json(ms))
 }
 
-// --------------------------------------------------------------------------
-// POST /migration/prepare — put this dashboard in receive (target) mode.
-// Generates a one-time migration token; admin must copy it to VPS-A.
-// --------------------------------------------------------------------------
-
 pub async fn prepare_receive(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
@@ -50,7 +39,6 @@ pub async fn prepare_receive(
         ));
     }
 
-    // Generate one-time token
     let token_raw = format!(
         "{}{}",
         Uuid::now_v7().to_string().replace('-', ""),
@@ -72,10 +60,6 @@ pub async fn prepare_receive(
         migration_token: token_raw,
     }))
 }
-
-// --------------------------------------------------------------------------
-// POST /migration/start — VPS-A initiates migration to VPS-B.
-// --------------------------------------------------------------------------
 
 pub async fn start_migration(
     State(state): State<AppState>,
@@ -147,10 +131,6 @@ pub async fn start_migration(
     ))
 }
 
-// --------------------------------------------------------------------------
-// POST /migration/abort — cancel in-flight migration (if safe)
-// --------------------------------------------------------------------------
-
 pub async fn abort_migration(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
@@ -171,11 +151,6 @@ pub async fn abort_migration(
 
     Ok(Json(json!({ "status": "aborted" })))
 }
-
-// --------------------------------------------------------------------------
-// POST /migration/confirm-shutdown — VPS-A declares all agents confirmed
-// and the admin is authorizing shutdown.
-// --------------------------------------------------------------------------
 
 pub async fn confirm_shutdown(
     State(state): State<AppState>,
@@ -207,7 +182,6 @@ pub async fn confirm_shutdown(
     .execute(&state.db)
     .await?;
 
-    // Initiate graceful shutdown of this dashboard (VPS-A is done)
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         tracing::info!("migration complete — dashboard shutting down");
@@ -219,167 +193,14 @@ pub async fn confirm_shutdown(
     ))
 }
 
-// --------------------------------------------------------------------------
-// POST /migration/receive — VPS-B receives pg_dump from VPS-A (token-gated)
-// --------------------------------------------------------------------------
-
-pub async fn receive_migration(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Result<impl IntoResponse, AppError> {
-    // Validate migration token from Authorization header
-    let provided_token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Migration "))
-        .unwrap_or("");
-
-    let token_hash = sha256_hex(provided_token.as_bytes());
-
-    let stored_hash =
-        sqlx::query_scalar!("SELECT migration_token_hash FROM migration_state WHERE id=1")
-            .fetch_one(&state.db)
-            .await?;
-
-    let valid = stored_hash
-        .map(|h| {
-            use subtle::ConstantTimeEq;
-            h.as_bytes().ct_eq(token_hash.as_bytes()).into()
-        })
-        .unwrap_or(false);
-
-    if !valid {
-        return Err(AppError::Unauthorized);
-    }
-
-    let status = sqlx::query_scalar!("SELECT status FROM migration_state WHERE id=1")
-        .fetch_one(&state.db)
-        .await?;
-
-    if status != "preparing" {
-        return Err(AppError::Validation(
-            "target not in preparing state — call /migration/prepare first".into(),
-        ));
-    }
-
-    sqlx::query!("UPDATE migration_state SET status='transferring', updated_at=NOW() WHERE id=1")
-        .execute(&state.db)
-        .await?;
-
-    let db = state.db.clone();
-    let dump_bytes = body.to_vec();
-
-    tokio::spawn(async move {
-        if let Err(e) = restore_dump(&dump_bytes).await {
-            tracing::error!("migration restore failed: {e:#}");
-            let _ = sqlx::query!(
-                "UPDATE migration_state SET status='error', error_message=$1, updated_at=NOW() WHERE id=1",
-                e.to_string()
-            )
-            .execute(&db)
-            .await;
-            return;
-        }
-
-        let agent_count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM agents")
-            .fetch_one(&db)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-
-        let _ = sqlx::query!(
-            "UPDATE migration_state SET status='waiting_agents', agents_total=$1, updated_at=NOW() WHERE id=1",
-            agent_count as i32
-        )
-        .execute(&db)
-        .await;
-
-        tracing::info!(
-            "migration restore complete — waiting for {} agents",
-            agent_count
-        );
-    });
-
-    Ok(StatusCode::ACCEPTED)
-}
-
-// --------------------------------------------------------------------------
-// POST /migration/agent-confirm — agent calls this on VPS-B after reconnect
-// --------------------------------------------------------------------------
-
-pub async fn agent_confirm(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<AgentConfirmRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    // Validate agent's sync token
-    let agent_id =
-        Uuid::parse_str(&req.agent_id).map_err(|_| AppError::BadRequest("invalid agent_id"))?;
-
-    let provided_token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-
-    let token_hash = sha256_hex(provided_token.as_bytes());
-
-    let stored = sqlx::query_scalar!("SELECT sync_token_hash FROM agents WHERE id=$1", agent_id)
-        .fetch_optional(&state.db)
-        .await?
-        .flatten();
-
-    let valid = stored
-        .map(|h| {
-            use subtle::ConstantTimeEq;
-            h.as_bytes().ct_eq(token_hash.as_bytes()).into()
-        })
-        .unwrap_or(false);
-
-    if !valid {
-        return Err(AppError::Unauthorized);
-    }
-
-    sqlx::query!(
-        "UPDATE migration_state SET agents_confirmed = agents_confirmed + 1, updated_at=NOW() WHERE id=1"
-    )
-    .execute(&state.db)
-    .await?;
-
-    let ms = sqlx::query!("SELECT agents_total, agents_confirmed FROM migration_state WHERE id=1")
-        .fetch_one(&state.db)
-        .await?;
-
-    tracing::info!(
-        agent_id = %agent_id,
-        confirmed = ms.agents_confirmed,
-        total = ms.agents_total,
-        "agent confirmed migration to this dashboard"
-    );
-
-    Ok(Json(json!({
-        "ok": true,
-        "confirmed": ms.agents_confirmed,
-        "total": ms.agents_total,
-    })))
-}
-
-// --------------------------------------------------------------------------
-// Internal: run migration from VPS-A side
-// --------------------------------------------------------------------------
-
 async fn run_migration(
     db: &sqlx::PgPool,
     cfg: &crate::config::Config,
     target_url: &str,
     migration_token: &str,
 ) -> anyhow::Result<()> {
-    // 1. pg_dump the local database
     let dump = pg_dump(&cfg.database_url).await?;
 
-    // 2. Send dump to VPS-B
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
@@ -396,10 +217,8 @@ async fn run_migration(
         anyhow::bail!("VPS-B rejected migration data: {}", resp.status());
     }
 
-    // 3. Notify all agents to reconnect to VPS-B
     notify_agents_migrate(db, cfg, target_url).await?;
 
-    // 4. Transition to waiting_agents state
     sqlx::query!("UPDATE migration_state SET status='waiting_agents', updated_at=NOW() WHERE id=1")
         .execute(db)
         .await?;
@@ -419,33 +238,6 @@ async fn pg_dump(database_url: &str) -> anyhow::Result<Vec<u8>> {
         String::from_utf8_lossy(&out.stderr)
     );
     Ok(out.stdout)
-}
-
-async fn restore_dump(dump: &[u8]) -> anyhow::Result<()> {
-    use tokio::io::AsyncWriteExt;
-
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://lynx_dashboard_app@localhost/lynx_dashboard".to_string());
-
-    let mut child = tokio::process::Command::new("pg_restore")
-        .args([
-            "--clean",
-            "--if-exists",
-            "--no-owner",
-            "--no-acl",
-            "-d",
-            &db_url,
-        ])
-        .stdin(std::process::Stdio::piped())
-        .spawn()?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(dump).await?;
-    }
-
-    let status = child.wait().await?;
-    anyhow::ensure!(status.success(), "pg_restore failed");
-    Ok(())
 }
 
 async fn notify_agents_migrate(

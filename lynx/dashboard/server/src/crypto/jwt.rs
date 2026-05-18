@@ -7,6 +7,7 @@ use josekit::{
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+use zeroize::ZeroizeOnDrop;
 
 pub struct AccessClaims {
     pub sub: Uuid,
@@ -16,14 +17,17 @@ pub struct AccessClaims {
     pub ua_hash: String,
 }
 
+#[derive(ZeroizeOnDrop)]
 pub struct JwtKeys {
     /// Ed25519 raw seed (32 bytes) — private signing key
     pub sign_private_seed: [u8; 32],
     /// Ed25519 raw public key (32 bytes)
+    #[zeroize(skip)]
     pub sign_public_bytes: [u8; 32],
     /// X25519 raw private key (32 bytes)
     pub enc_private_bytes: [u8; 32],
     /// X25519 raw public key (32 bytes)
+    #[zeroize(skip)]
     pub enc_public_bytes: [u8; 32],
 }
 
@@ -115,6 +119,9 @@ pub fn verify_access_token(keys: &JwtKeys, token: &str) -> Result<AccessClaims> 
 fn validate_claims(c: &serde_json::Value) -> Result<()> {
     if c["iss"].as_str() != Some("lynx-dashboard") {
         anyhow::bail!("invalid issuer");
+    }
+    if c["aud"].as_str() != Some("lynx-dashboard") {
+        anyhow::bail!("invalid audience");
     }
     let now = unix_now();
     let exp = c["exp"].as_u64().context("missing exp")?;

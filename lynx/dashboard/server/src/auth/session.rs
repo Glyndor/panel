@@ -13,6 +13,7 @@ pub struct NewSession {
     pub refresh_token_raw: Vec<u8>,
     pub refresh_token_hash: String,
     pub expires_at: DateTime<Utc>,
+    pub last_jti: Uuid,
 }
 
 pub struct SessionRecord {
@@ -31,8 +32,8 @@ pub fn gen_refresh_token() -> Vec<u8> {
 pub async fn create(db: &PgPool, s: &NewSession) -> Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO sessions (id, user_id, ip, user_agent, refresh_token_hash, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO sessions (id, user_id, ip, user_agent, refresh_token_hash, expires_at, last_jti)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
         s.id,
         s.user_id,
@@ -40,6 +41,7 @@ pub async fn create(db: &PgPool, s: &NewSession) -> Result<()> {
         s.user_agent,
         s.refresh_token_hash,
         s.expires_at,
+        s.last_jti,
     )
     .execute(db)
     .await
@@ -68,16 +70,18 @@ pub async fn rotate_refresh(
     session_id: Uuid,
     old_hash: &str,
     new_hash: &str,
+    new_jti: Uuid,
 ) -> Result<()> {
     sqlx::query!(
         r#"
         UPDATE sessions
-        SET refresh_token_hash = $1, last_used_at = NOW()
+        SET refresh_token_hash = $1, last_used_at = NOW(), last_jti = $4
         WHERE id = $2 AND refresh_token_hash = $3
         "#,
         new_hash,
         session_id,
         old_hash,
+        new_jti,
     )
     .execute(db)
     .await
@@ -134,4 +138,40 @@ pub async fn check_jti_valid(redis: &mut ConnectionManager, jti: Uuid) -> Result
         .await
         .context("check jti")?;
     Ok(exists)
+}
+
+/// Revoke all sessions for a user: flush Redis JTIs, delete DB rows, log reason.
+pub async fn revoke_all_user_sessions(
+    db: &PgPool,
+    redis: &mut ConnectionManager,
+    user_id: Uuid,
+    reason: &str,
+) -> Result<()> {
+    struct Row {
+        id: Uuid,
+        last_jti: Option<Uuid>,
+    }
+
+    let rows = sqlx::query_as!(
+        Row,
+        "SELECT id, last_jti FROM sessions WHERE user_id = $1",
+        user_id
+    )
+    .fetch_all(db)
+    .await
+    .context("fetch user sessions")?;
+
+    for row in &rows {
+        if let Some(jti) = row.last_jti {
+            let _: Result<(), _> = redis.del(format!("access:{jti}")).await;
+        }
+        let _ = log_event(db, row.id, reason).await;
+    }
+
+    sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user_id)
+        .execute(db)
+        .await
+        .context("delete user sessions")?;
+
+    Ok(())
 }

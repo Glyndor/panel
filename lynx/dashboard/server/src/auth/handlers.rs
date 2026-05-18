@@ -15,6 +15,7 @@ use axum::{
 };
 use base64ct::{Base64UrlUnpadded, Encoding};
 use chrono::{Duration, Utc};
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 pub async fn register(
@@ -33,6 +34,67 @@ pub async fn register(
 
     let username = body.username.to_lowercase();
     let email_lower = body.email.to_lowercase();
+
+    // Determine if bootstrap phase (no admin with *:* exists yet)
+    let admin_exists: bool = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE p.key = '*:*'
+        )
+        "#
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(anyhow::Error::from)?
+    .unwrap_or(false);
+
+    let is_bootstrap = !admin_exists;
+
+    if is_bootstrap {
+        // Require setup_token, validate constant-time
+        let provided = body
+            .setup_token
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes();
+        let expected = state
+            .config
+            .setup_token
+            .as_deref()
+            .map(|s| s.as_bytes())
+            .unwrap_or(b"");
+
+        let token_ok: bool = if provided.len() == expected.len() && !expected.is_empty() {
+            provided.ct_eq(expected).into()
+        } else {
+            false
+        };
+
+        if !token_ok {
+            password::zeroize_str(&mut body.password);
+            return Err(AppError::Unauthorized);
+        }
+
+        // Enforce 24-hour TTL on the setup token window.
+        let issued_at: Option<String> = sqlx::query_scalar!(
+            "SELECT value FROM system_config WHERE key = 'setup_token_issued_at'"
+        )
+        .fetch_optional(&state.db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+        if let Some(ts) = issued_at {
+            if let Ok(issued) = ts.parse::<chrono::DateTime<chrono::Utc>>() {
+                if Utc::now() - issued > Duration::hours(24) {
+                    password::zeroize_str(&mut body.password);
+                    return Err(AppError::Unauthorized);
+                }
+            }
+        }
+    }
 
     let taken: bool = sqlx::query_scalar!(
         "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)",
@@ -72,12 +134,14 @@ pub async fn register(
     let email_encrypted =
         kek::encrypt_with_dek(email_lower.as_bytes(), &dek).map_err(anyhow::Error::from)?;
 
+    let user_id = Uuid::now_v7();
+
     sqlx::query!(
         r#"
         INSERT INTO users (id, username, email_hash, email_encrypted, password_hash, dek_encrypted)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
-        Uuid::now_v7(),
+        user_id,
         username,
         email_h,
         email_encrypted,
@@ -88,7 +152,56 @@ pub async fn register(
     .await
     .map_err(anyhow::Error::from)?;
 
+    if is_bootstrap {
+        bootstrap_admin(&state.db, user_id)
+            .await
+            .map_err(anyhow::Error::from)?;
+    }
+
     Ok(StatusCode::CREATED)
+}
+
+/// Create Admin role with *:* permission and assign it to the bootstrap user.
+async fn bootstrap_admin(db: &sqlx::PgPool, user_id: Uuid) -> anyhow::Result<()> {
+    let star_perm_id: Uuid = sqlx::query_scalar!(
+        "SELECT id FROM permissions WHERE key = '*:*'"
+    )
+    .fetch_one(db)
+    .await?;
+
+    let role_id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO roles (id, name, created_by) VALUES ($1, 'Admin', $2)",
+        role_id,
+        user_id,
+    )
+    .execute(db)
+    .await?;
+
+    let rp_id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO role_permissions (id, role_id, permission_id, created_by) VALUES ($1, $2, $3, $4)",
+        rp_id,
+        role_id,
+        star_perm_id,
+        user_id,
+    )
+    .execute(db)
+    .await?;
+
+    let ur_id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO user_roles (id, user_id, role_id, created_by) VALUES ($1, $2, $3, $4)",
+        ur_id,
+        user_id,
+        role_id,
+        user_id,
+    )
+    .execute(db)
+    .await?;
+
+    tracing::info!(user_id = %user_id, "bootstrap admin created");
+    Ok(())
 }
 
 pub async fn login(
@@ -100,18 +213,30 @@ pub async fn login(
     let ua = extract_ua(&headers);
     let mut redis = state.redis.clone();
 
-    rate_limit::check_login(&mut redis, &ip).await?;
+    if let Err(e) = rate_limit::check_login(&mut redis, &ip).await {
+        if matches!(e, AppError::RateLimited { .. }) {
+            crate::alerts::fire(
+                &state.db,
+                "rate_limit_hit",
+                Some(format!("login rate limit exceeded from ip={ip}")),
+                None::<Uuid>,
+            )
+            .await;
+        }
+        return Err(e);
+    }
 
     let username = body.username.to_lowercase();
 
     struct UserRow {
         id: Uuid,
         password_hash: String,
+        force_password_change: bool,
     }
 
     let user = sqlx::query_as!(
         UserRow,
-        "SELECT id, password_hash FROM users WHERE username = $1",
+        "SELECT id, password_hash, force_password_change FROM users WHERE username = $1",
         username
     )
     .fetch_optional(&state.db)
@@ -159,6 +284,7 @@ pub async fn login(
             refresh_token_raw: refresh_raw.clone(),
             refresh_token_hash: refresh_hash,
             expires_at,
+            last_jti: jti,
         },
     )
     .await
@@ -172,6 +298,7 @@ pub async fn login(
         access_token,
         refresh_token: Base64UrlUnpadded::encode_string(&refresh_raw),
         expires_in: 900,
+        force_password_change: u.force_password_change,
     }))
 }
 
@@ -216,6 +343,8 @@ pub async fn refresh(
 ) -> Result<Json<TokenResponse>> {
     let ip = extract_ip(&headers);
     let ua = extract_ua(&headers);
+    let mut redis = state.redis.clone();
+    rate_limit::check_refresh(&mut redis, &ip).await?;
 
     let token_bytes =
         Base64UrlUnpadded::decode_vec(&body.refresh_token).map_err(|_| AppError::Unauthorized)?;
@@ -229,11 +358,11 @@ pub async fn refresh(
     let new_refresh_raw = session::gen_refresh_token();
     let new_refresh_hash = hash::token_hash(&new_refresh_raw, &state.config.pepper);
 
-    session::rotate_refresh(&state.db, record.id, &token_hash, &new_refresh_hash)
+    let jti = Uuid::now_v7();
+
+    session::rotate_refresh(&state.db, record.id, &token_hash, &new_refresh_hash, jti)
         .await
         .map_err(anyhow::Error::from)?;
-
-    let jti = Uuid::now_v7();
     let keys = build_jwt_keys(&state);
     let access_token = jwt::issue_access_token(
         &keys,
@@ -245,7 +374,6 @@ pub async fn refresh(
     )
     .map_err(anyhow::Error::from)?;
 
-    let mut redis = state.redis.clone();
     session::store_access_jti(&mut redis, jti, record.id)
         .await
         .map_err(anyhow::Error::from)?;
@@ -254,6 +382,7 @@ pub async fn refresh(
         access_token,
         refresh_token: Base64UrlUnpadded::encode_string(&new_refresh_raw),
         expires_in: 900,
+        force_password_change: false,
     }))
 }
 
@@ -368,28 +497,14 @@ pub async fn change_password(
     let new_hash = password::hash(&body.new_password).map_err(anyhow::Error::from)?;
 
     sqlx::query!(
-        "UPDATE users SET password_hash = $1 WHERE id = $2",
+        "UPDATE users SET password_hash = $1, force_password_change = FALSE WHERE id = $2",
         new_hash,
         user.id
     )
     .execute(&state.db)
     .await?;
 
-    // Invalidate ALL sessions for this user — password_changed reason
-    let sessions = sqlx::query_scalar!("SELECT id FROM sessions WHERE user_id = $1", user.id)
-        .fetch_all(&state.db)
-        .await?;
-
-    for session_id in &sessions {
-        let _ = session::log_event(&state.db, *session_id, "password_changed").await;
-    }
-
-    sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user.id)
-        .execute(&state.db)
-        .await?;
-
-    // Revoke current access token in Redis
-    session::revoke_access_jti(&mut redis, claims.jti)
+    session::revoke_all_user_sessions(&state.db, &mut redis, user.id, "password_changed")
         .await
         .map_err(anyhow::Error::from)?;
 

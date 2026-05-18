@@ -27,6 +27,10 @@ pub enum AppError {
     BadGateway,
     #[error("agent unavailable")]
     AgentUnavailable,
+    #[error("service unavailable")]
+    ServiceUnavailable,
+    #[error("force password change required")]
+    ForcePasswordChange,
     #[error("internal")]
     Internal(#[from] anyhow::Error),
 }
@@ -50,6 +54,8 @@ impl IntoResponse for AppError {
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::BadGateway => (StatusCode::BAD_GATEWAY, "bad_gateway"),
             AppError::AgentUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "agent_unavailable"),
+            AppError::ServiceUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
+            AppError::ForcePasswordChange => (StatusCode::FORBIDDEN, "force_password_change_required"),
             AppError::Internal(e) => {
                 tracing::error!("internal: {e:#}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")

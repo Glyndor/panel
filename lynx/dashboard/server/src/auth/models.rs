@@ -5,6 +5,8 @@ pub struct RegisterRequest {
     pub username: String,
     pub email: String,
     pub password: String,
+    /// Required only during bootstrap (no admin exists yet)
+    pub setup_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -23,4 +25,5 @@ pub struct TokenResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: u64,
+    pub force_password_change: bool,
 }

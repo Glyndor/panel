@@ -119,10 +119,6 @@ async fn build_ssrf_safe_client(url: &str) -> Result<reqwest::Client> {
         .timeout(std::time::Duration::from_secs(300))
         .resolve(host, std::net::SocketAddr::new(pinned_ip, port));
 
-    // For TLS (GitHub), we still need SNI to use the original hostname.
-    // reqwest handles this correctly when using .resolve().
-    client_builder = client_builder.danger_accept_invalid_certs(false);
-
     client_builder.build().context("build SSRF-safe HTTP client")
 }
 
@@ -177,6 +173,59 @@ async fn download_bytes(url: &str) -> Result<Vec<u8>> {
         anyhow::bail!("download exceeded safety limit");
     }
     Ok(bytes.to_vec())
+}
+
+/// Called at startup to detect a failed update and restore `.prev` if needed.
+/// Spawns a background task: polls `/health` every 2s for 30s.
+/// If still unhealthy → restores `.prev`, writes `/etc/lynx/CRITICAL`, exits.
+pub fn spawn_startup_health_guard() {
+    const CRITICAL_FILE: &str = "/etc/lynx/CRITICAL";
+
+    tokio::spawn(async move {
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        for _ in 0..15 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if client.get("http://127.0.0.1:8080/health").send().await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
+                return; // healthy — nothing to do
+            }
+        }
+
+        // Still unhealthy after 30s — restore .prev
+        tracing::error!("startup health check failed — restoring .prev binary");
+        let target = PathBuf::from(BINARY_PATH);
+        let prev = PathBuf::from(format!("{BINARY_PATH}.prev"));
+
+        let restore_ok = if prev.exists() {
+            std::fs::copy(&prev, &target).is_ok()
+        } else {
+            false
+        };
+
+        let reason = if restore_ok {
+            "new binary failed health check; restored .prev"
+        } else {
+            "new binary failed health check; .prev unavailable — MANUAL RECOVERY REQUIRED"
+        };
+
+        let ts = chrono::Utc::now().to_rfc3339();
+        let _ = std::fs::write(
+            CRITICAL_FILE,
+            format!("timestamp={ts}\ncomponent=lynx-dashboard-backend\nreason={reason}\n"),
+        );
+
+        tracing::error!(reason, "critical state — exiting");
+        std::process::exit(1);
+    });
 }
 
 fn verify_signature(binary: &[u8], sig_bytes: &[u8]) -> Result<()> {

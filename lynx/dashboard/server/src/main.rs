@@ -1,5 +1,6 @@
 mod admin;
 mod agents;
+mod alerts;
 mod auth;
 mod branding;
 mod config;
@@ -15,7 +16,7 @@ mod update;
 use anyhow::Context;
 use axum::{
     extract::State,
-    http::{header, Request, StatusCode},
+    http::{header, HeaderValue, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
@@ -25,6 +26,7 @@ use clap::{Parser, Subcommand};
 use state::AppState;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 
 #[derive(Parser)]
@@ -123,10 +125,23 @@ async fn main() -> anyhow::Result<()> {
         .nest("/domain", domain_router)
         .nest("/migration", migration_router)
         .nest("/migration", migration::router::receive_router())
-        .with_state(state);
+        .with_state(state)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("x-frame-options"),
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("no-referrer"),
+        ));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     info!("listening on 0.0.0.0:8080");
+    update::spawn_startup_health_guard();
     axum::serve(listener, app).await?;
     Ok(())
 }

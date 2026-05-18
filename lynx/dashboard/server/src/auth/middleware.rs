@@ -45,10 +45,31 @@ pub async fn require_auth(
     let expected_ua = crypto::hash::ua_hash(&client_ua);
 
     if claims.ip_hash != expected_ip || claims.ua_hash != expected_ua {
-        // Intercepted: revoke session
         let _ = crate::auth::session::revoke_access_jti(&mut redis, claims.jti).await;
         let _ = crate::auth::session::log_event(&state.db, claims.session_id, "intercepted").await;
+        let _ = crate::auth::session::delete_by_session_id(&state.db, claims.session_id).await;
+        crate::alerts::fire(
+            &state.db,
+            "intercepted",
+            Some(format!("session={} ip_mismatch={}", claims.session_id, claims.ip_hash != expected_ip)),
+            None,
+        )
+        .await;
         return Err(AppError::Unauthorized);
+    }
+
+    // Enforce force_password_change — block all authenticated routes
+    let force_pw: bool = sqlx::query_scalar!(
+        "SELECT force_password_change FROM users WHERE id = $1",
+        claims.sub
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?
+    .unwrap_or(false);
+
+    if force_pw {
+        return Err(AppError::ForcePasswordChange);
     }
 
     req.extensions_mut().insert(AuthUser {
