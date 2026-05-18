@@ -283,10 +283,13 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
 
     // Dollar-quoting ($$...$$) avoids any quote-based injection.
     // new_pass is hex [0-9a-f] so "$$" can never appear inside it.
-    sqlx::query(&format!("ALTER USER lynx_dashboard_app PASSWORD $${}$$", &*new_pass))
-        .execute(&state.db)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+    sqlx::query(&format!(
+        "ALTER USER lynx_dashboard_app PASSWORD $${}$$",
+        &*new_pass
+    ))
+    .execute(&state.db)
+    .await
+    .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
     let status = std::process::Command::new("podman")
         .args([

@@ -1,5 +1,5 @@
-use anyhow::Context as _;
 use crate::state::AppState;
+use anyhow::Context as _;
 use std::sync::atomic::Ordering;
 use tokio::time::{interval, Duration};
 
@@ -58,7 +58,11 @@ async fn check_and_apply(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    tracing::info!(current = current_version, latest, "fallback: applying agent update");
+    tracing::info!(
+        current = current_version,
+        latest,
+        "fallback: applying agent update"
+    );
 
     let download_url = format!(
         "https://github.com/Jaro-c/Lynx/releases/download/agent@{latest}/lynx-agent-linux-{arch}"

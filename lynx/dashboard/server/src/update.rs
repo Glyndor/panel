@@ -73,9 +73,12 @@ async fn run_full_update(
         download_and_verify(backend_url, backend_sig_url, "backend binary").await?;
     let frontend_binary =
         download_and_verify(frontend_url, frontend_sig_url, "frontend binary").await?;
-    let frontend_assets =
-        download_and_verify(frontend_assets_url, frontend_assets_sig_url, "frontend assets")
-            .await?;
+    let frontend_assets = download_and_verify(
+        frontend_assets_url,
+        frontend_assets_sig_url,
+        "frontend assets",
+    )
+    .await?;
 
     tracing::info!(version, "all signatures verified — applying update");
 
@@ -174,7 +177,9 @@ fn extract_assets(data: &[u8], dest: &str) -> Result<()> {
         .context("spawn tar")?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(data).context("write tarball to tar stdin")?;
+        stdin
+            .write_all(data)
+            .context("write tarball to tar stdin")?;
     }
 
     let output = child.wait_with_output().context("wait for tar")?;
@@ -394,8 +399,8 @@ const RELEASE_VERIFY_KEY_B64: &str = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+
 
 fn load_release_verify_key() -> Result<[u8; 32]> {
     use base64ct::{Base64, Encoding};
-    let bytes =
-        Base64::decode_vec(RELEASE_VERIFY_KEY_B64).context("decode hardcoded release verify key")?;
+    let bytes = Base64::decode_vec(RELEASE_VERIFY_KEY_B64)
+        .context("decode hardcoded release verify key")?;
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("release verify key must be 32 bytes"))

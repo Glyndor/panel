@@ -271,7 +271,9 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
     if let Some(ref ips) = req.ip_list {
         for ip_str in ips {
             if !is_valid_ip_or_cidr(ip_str) {
-                return Err(AppError::Validation(format!("invalid IP or CIDR: {ip_str}")));
+                return Err(AppError::Validation(format!(
+                    "invalid IP or CIDR: {ip_str}"
+                )));
             }
         }
     }

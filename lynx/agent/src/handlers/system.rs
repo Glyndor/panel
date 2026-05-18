@@ -321,10 +321,13 @@ async fn handle_db_rotate_password(
 
     // Dollar-quoting ($$...$$) avoids any quote-based injection.
     // new_pass is hex [0-9a-f] so "$$" can never appear inside it.
-    sqlx::query(&format!("ALTER USER lynx_agent_app PASSWORD $${}$$", &*new_pass))
-        .execute(&state.db)
-        .await
-        .map_err(|e| AgentError::Internal(anyhow::anyhow!("ALTER USER: {e}")))?;
+    sqlx::query(&format!(
+        "ALTER USER lynx_agent_app PASSWORD $${}$$",
+        &*new_pass
+    ))
+    .execute(&state.db)
+    .await
+    .map_err(|e| AgentError::Internal(anyhow::anyhow!("ALTER USER: {e}")))?;
 
     let status = std::process::Command::new("podman")
         .args(["secret", "create", "--replace", "lynx-agent-pg-pass", "-"])

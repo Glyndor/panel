@@ -207,17 +207,30 @@ async fn push_both_chains(
         "rules": output_body,
     });
 
-    let Ok(signed_in) = sign_command(state.config.as_ref(), agent_id, user_id, "admin", &input_cmd)
-    else {
+    let Ok(signed_in) = sign_command(
+        state.config.as_ref(),
+        agent_id,
+        user_id,
+        "admin",
+        &input_cmd,
+    ) else {
         return false;
     };
-    let Ok(signed_out) = sign_command(state.config.as_ref(), agent_id, user_id, "admin", &output_cmd)
-    else {
+    let Ok(signed_out) = sign_command(
+        state.config.as_ref(),
+        agent_id,
+        user_id,
+        "admin",
+        &output_cmd,
+    ) else {
         return false;
     };
 
     let in_val = serde_json::to_value(&signed_in).unwrap_or_default();
-    let sent_in = if ws_hub::push_command(state, agent_id, in_val).await.is_some() {
+    let sent_in = if ws_hub::push_command(state, agent_id, in_val)
+        .await
+        .is_some()
+    {
         true
     } else {
         let url = format!("http://{wg_ip}:{api_port}/cmd");
@@ -238,7 +251,10 @@ async fn push_both_chains(
     }
 
     let out_val = serde_json::to_value(&signed_out).unwrap_or_default();
-    if ws_hub::push_command(state, agent_id, out_val).await.is_some() {
+    if ws_hub::push_command(state, agent_id, out_val)
+        .await
+        .is_some()
+    {
         true
     } else {
         let url = format!("http://{wg_ip}:{api_port}/cmd");
@@ -323,7 +339,9 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
     if let Some(ref ips) = req.ip_list {
         for ip_str in ips {
             if !is_valid_ip_or_cidr(ip_str) {
-                return Err(AppError::Validation(format!("invalid IP or CIDR: {ip_str}")));
+                return Err(AppError::Validation(format!(
+                    "invalid IP or CIDR: {ip_str}"
+                )));
             }
         }
     }

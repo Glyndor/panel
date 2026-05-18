@@ -353,7 +353,11 @@ async fn heartbeat_handler(
         }
     };
 
-    let cmd_type = cmd.command.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let cmd_type = cmd
+        .command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if cmd_type != "agent.heartbeat_ack" {
         tracing::warn!("heartbeat endpoint received unexpected command type: {cmd_type}");
         return StatusCode::BAD_REQUEST.into_response();

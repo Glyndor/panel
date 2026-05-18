@@ -136,7 +136,8 @@ async fn poll_agents(state: &AppState) {
                 if let Some(ref target) = latest {
                     if current != target {
                         let arch = agent.arch.as_deref().unwrap_or("x86_64");
-                        dispatch_update(state, id, &agent.wg_ip, agent.api_port, target, arch).await;
+                        dispatch_update(state, id, &agent.wg_ip, agent.api_port, target, arch)
+                            .await;
                     }
                 }
             }
@@ -145,13 +146,16 @@ async fn poll_agents(state: &AppState) {
 }
 
 async fn dispatch_update_ws(state: &AppState, agent_id: Uuid, version: &str) {
-    let arch = sqlx::query_scalar!("SELECT COALESCE(arch, 'x86_64') FROM agents WHERE id = $1", agent_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .flatten()
-        .unwrap_or_else(|| "x86_64".to_string());
+    let arch = sqlx::query_scalar!(
+        "SELECT COALESCE(arch, 'x86_64') FROM agents WHERE id = $1",
+        agent_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .flatten()
+    .unwrap_or_else(|| "x86_64".to_string());
     let github_repo = "Jaro-c/Lynx";
     let download_url = format!(
         "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-{arch}"

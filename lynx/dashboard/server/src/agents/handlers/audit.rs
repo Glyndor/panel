@@ -74,7 +74,10 @@ pub async fn receive_audit_sync(
             crate::alerts::fire(
                 &state,
                 "audit_integrity_failure",
-                Some(format!("agent={id} entry={} hash chain mismatch (HTTP sync)", entry.id)),
+                Some(format!(
+                    "agent={id} entry={} hash chain mismatch (HTTP sync)",
+                    entry.id
+                )),
                 None::<Uuid>,
             )
             .await;

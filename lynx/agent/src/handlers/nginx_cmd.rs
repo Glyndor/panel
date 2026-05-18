@@ -218,7 +218,9 @@ fn validate_domain_for_path(domain: &str) -> std::result::Result<(), AgentError>
         || domain.contains("..")
         || domain.contains('/')
         || domain.contains('\0')
-        || !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        || !domain
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
         || domain.starts_with('.')
         || domain.ends_with('.')
     {

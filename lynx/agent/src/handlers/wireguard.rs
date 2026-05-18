@@ -92,7 +92,9 @@ pub fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<
     let iface_suffix_full = tunnel_id.replace('-', "");
     let iface_suffix = &iface_suffix_full[..iface_suffix_full.len().min(8)];
     if !iface_suffix.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(AgentError::BadRequest("tunnel_id produces invalid interface suffix"));
+        return Err(AgentError::BadRequest(
+            "tunnel_id produces invalid interface suffix",
+        ));
     }
     let interface = format!("wg-lynx-dp-{iface_suffix}");
 
@@ -141,7 +143,9 @@ pub fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<
             .truncate(true)
             .mode(0o600)
             .open(&config_path)
-            .map_err(|e| AgentError::Internal(anyhow::anyhow!("write wg config {config_path}: {e}")))?;
+            .map_err(|e| {
+                AgentError::Internal(anyhow::anyhow!("write wg config {config_path}: {e}"))
+            })?;
         f.write_all(config.as_bytes())
             .map_err(|e| AgentError::Internal(anyhow::anyhow!("write wg config content: {e}")))?;
     }
@@ -180,7 +184,9 @@ pub fn handle_wg_data_plane_teardown(
     let iface_suffix_full = tunnel_id.replace('-', "");
     let iface_suffix = &iface_suffix_full[..iface_suffix_full.len().min(8)];
     if !iface_suffix.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(AgentError::BadRequest("tunnel_id produces invalid interface suffix"));
+        return Err(AgentError::BadRequest(
+            "tunnel_id produces invalid interface suffix",
+        ));
     }
     let interface = format!("wg-lynx-dp-{iface_suffix}");
     let config_path = format!("/etc/wireguard/{interface}.conf");

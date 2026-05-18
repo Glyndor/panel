@@ -48,8 +48,16 @@ pub async fn require_auth(
     // Constant-time comparison — prevents timing side-channels that could reveal
     // which hash (IP vs UA) mismatched. Bitwise OR avoids short-circuit evaluation.
     use subtle::ConstantTimeEq;
-    let ip_ok: bool = claims.ip_hash.as_bytes().ct_eq(expected_ip.as_bytes()).into();
-    let ua_ok: bool = claims.ua_hash.as_bytes().ct_eq(expected_ua.as_bytes()).into();
+    let ip_ok: bool = claims
+        .ip_hash
+        .as_bytes()
+        .ct_eq(expected_ip.as_bytes())
+        .into();
+    let ua_ok: bool = claims
+        .ua_hash
+        .as_bytes()
+        .ct_eq(expected_ua.as_bytes())
+        .into();
     if !ip_ok | !ua_ok {
         let _ = crate::auth::session::revoke_access_jti(&mut redis, claims.jti).await;
         let _ = crate::auth::session::log_event(&state.db, claims.session_id, "intercepted").await;

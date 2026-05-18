@@ -18,8 +18,12 @@ pub async fn perform_update(version: &str, download_url: &str, sig_url: &str) ->
     // Build separate SSRF-safe clients per URL: resolves DNS once, validates
     // the resolved IP is not RFC1918/loopback, then pins the hostname to that
     // IP for the actual request (prevents DNS TOCTOU rebinding attacks).
-    let bin_client = build_ssrf_safe_client(download_url).await.context("SSRF check for binary URL")?;
-    let sig_client = build_ssrf_safe_client(sig_url).await.context("SSRF check for sig URL")?;
+    let bin_client = build_ssrf_safe_client(download_url)
+        .await
+        .context("SSRF check for binary URL")?;
+    let sig_client = build_ssrf_safe_client(sig_url)
+        .await
+        .context("SSRF check for sig URL")?;
 
     // Download binary
     let binary_bytes = download_bytes(&bin_client, download_url)
@@ -105,8 +109,8 @@ const RELEASE_VERIFY_KEY_B64: &str = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+
 
 fn load_verify_key() -> Result<[u8; 32]> {
     use base64ct::{Base64, Encoding};
-    let bytes =
-        Base64::decode_vec(RELEASE_VERIFY_KEY_B64).context("decode hardcoded release verify key")?;
+    let bytes = Base64::decode_vec(RELEASE_VERIFY_KEY_B64)
+        .context("decode hardcoded release verify key")?;
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("release verify key must be 32 bytes"))
@@ -149,11 +153,10 @@ async fn build_ssrf_safe_client(url: &str) -> Result<reqwest::Client> {
         .port_or_known_default()
         .ok_or_else(|| anyhow::anyhow!("URL has unknown port: {url}"))?;
 
-    let addrs: Vec<std::net::SocketAddr> =
-        tokio::net::lookup_host(format!("{host}:{port}"))
-            .await
-            .with_context(|| format!("DNS lookup for {host}"))?
-            .collect();
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host(format!("{host}:{port}"))
+        .await
+        .with_context(|| format!("DNS lookup for {host}"))?
+        .collect();
 
     if addrs.is_empty() {
         anyhow::bail!("DNS lookup for {host} returned no addresses");
@@ -185,7 +188,7 @@ fn is_private_ip(ip: std::net::IpAddr) -> bool {
             v6.is_loopback()
                 || v6.is_unspecified()
                 || (v6.segments()[0] & 0xfe00) == 0xfc00  // fc00::/7 ULA
-                || (v6.segments()[0] & 0xff00) == 0xfe80  // fe80::/10 link-local
+                || (v6.segments()[0] & 0xff00) == 0xfe80 // fe80::/10 link-local
         }
     }
 }

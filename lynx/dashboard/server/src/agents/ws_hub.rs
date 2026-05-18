@@ -427,7 +427,10 @@ async fn push_pending_global_sync(state: &AppState, agent_id: Uuid) {
         )
     };
 
-    let (Ok(signed_in), Ok(signed_out)) = (sign("lynx-global", &input_body), sign("lynx-global-output", &output_body)) else {
+    let (Ok(signed_in), Ok(signed_out)) = (
+        sign("lynx-global", &input_body),
+        sign("lynx-global-output", &output_body),
+    ) else {
         tracing::warn!(agent_id = %agent_id, "pending_sync: sign failed");
         return;
     };
