@@ -21,8 +21,12 @@ install_podman() {
         echo -e "${YELLOW}Podman already installed: ${BOLD}${EXISTING_VERSION}${RESET}"
         echo -e "${CYAN}Skipping installation, applying Lynx configuration...${RESET}"
     else
-        # Update package index
-        eval "$PKG_UPDATE"
+        # Update package index without eval — use PKG_MANAGER directly.
+        case "$PKG_MANAGER" in
+            apt-get) apt-get update -y ;;
+            dnf)     dnf check-update -y || true ;;
+            pacman)  pacman -Sy ;;
+        esac
 
         case "$PKG_MANAGER" in
             apt-get)
