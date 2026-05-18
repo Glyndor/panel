@@ -1,13 +1,18 @@
+pub mod fallback;
+
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::path::{Path, PathBuf};
 
 /// Download new binary, verify Ed25519 signature, atomic swap, then exec into new process.
 ///
-/// The public key used for signature verification is the same Ed25519 key
-/// the dashboard uses to sign commands (DASHBOARD_VERIFY_KEY env var).
-/// Release binaries are signed with the corresponding private key at release time.
+/// The release verify key (`RELEASE_VERIFY_KEY_B64`) is compiled into the binary and is distinct
+/// from the dashboard command-signing key. The corresponding private key lives only in GitHub
+/// Actions secrets — compromising the repo or the dashboard does not allow forging signatures.
 pub async fn perform_update(version: &str, download_url: &str, sig_url: &str) -> Result<()> {
+    validate_github_url(download_url)?;
+    validate_github_url(sig_url)?;
+
     tracing::info!(version, "starting self-update");
 
     let client = reqwest::Client::builder()
@@ -96,21 +101,15 @@ fn verify_signature(binary: &[u8], sig_bytes: &[u8]) -> Result<()> {
         .context("Ed25519 signature invalid")
 }
 
+const RELEASE_VERIFY_KEY_B64: &str = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q=";
+
 fn load_verify_key() -> Result<[u8; 32]> {
     use base64ct::{Base64, Encoding};
-
-    // Reuse DASHBOARD_VERIFY_KEY env / file — same key signs commands and release binaries.
-    let raw = if let Ok(path) = std::env::var("DASHBOARD_VERIFY_KEY_FILE") {
-        std::fs::read_to_string(&path)
-            .with_context(|| format!("read DASHBOARD_VERIFY_KEY_FILE={path}"))?
-    } else {
-        std::env::var("DASHBOARD_VERIFY_KEY").context("DASHBOARD_VERIFY_KEY not configured")?
-    };
-
-    let bytes = Base64::decode_vec(raw.trim()).context("base64 decode DASHBOARD_VERIFY_KEY")?;
+    let bytes =
+        Base64::decode_vec(RELEASE_VERIFY_KEY_B64).context("decode hardcoded release verify key")?;
     bytes
         .try_into()
-        .map_err(|_| anyhow::anyhow!("DASHBOARD_VERIFY_KEY must be 32 bytes"))
+        .map_err(|_| anyhow::anyhow!("release verify key must be 32 bytes"))
 }
 
 fn tmp_path(exe: &Path) -> PathBuf {
@@ -121,4 +120,16 @@ fn tmp_path(exe: &Path) -> PathBuf {
         .unwrap_or("lynx-agent");
     p.set_file_name(format!("{name}.new"));
     p
+}
+
+fn validate_github_url(url: &str) -> Result<()> {
+    let allowed = [
+        "https://github.com/",
+        "https://objects.githubusercontent.com/",
+    ];
+    if allowed.iter().any(|prefix| url.starts_with(prefix)) {
+        Ok(())
+    } else {
+        anyhow::bail!("download URL not on allowed domain: {url}")
+    }
 }

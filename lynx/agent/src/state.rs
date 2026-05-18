@@ -31,6 +31,9 @@ pub struct AppState {
     pub cmd_rejected_count: Arc<AtomicU64>,
     /// Epoch-second when the current rejection-count minute window started.
     pub cmd_rejected_window: Arc<AtomicU64>,
+    /// Epoch-second of last successful dashboard contact (WS connect or message received).
+    /// 0 = never connected. Used by the fallback updater to detect dashboard absence.
+    pub last_dashboard_contact: Arc<AtomicU64>,
 }
 
 impl AppState {

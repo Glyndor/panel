@@ -11,7 +11,7 @@ mod nginx;
 mod podman;
 mod state;
 mod sync;
-mod update;
+pub mod update;
 mod ws_client;
 
 use anyhow::Context;
@@ -190,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
         cmd_rate: Arc::new(std::sync::Mutex::new((0u64, 0u64))),
         cmd_rejected_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         cmd_rejected_window: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        last_dashboard_contact: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     // Reload nftables state from DB and re-apply on startup (rules don't persist across reboots).
@@ -270,6 +271,9 @@ async fn main() -> anyhow::Result<()> {
 
     // WebSocket client — persistent connection to dashboard
     tokio::spawn(ws_client::run_ws_client(state.clone()));
+
+    // Fallback self-updater: polls GitHub directly if dashboard absent for >6h
+    tokio::spawn(update::fallback::run_fallback_updater(state.clone()));
 
     // Audit log sync task (HTTP batch fallback when WS is down)
     tokio::spawn(sync::run_sync_task(state.clone()));
