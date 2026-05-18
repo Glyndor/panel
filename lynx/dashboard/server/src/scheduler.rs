@@ -239,23 +239,27 @@ async fn trigger_dashboard_update(state: &AppState, version: &str) {
 // Scheduled key / cert rotation (every 90 days)
 // ---------------------------------------------------------------------------
 
-async fn check_rotation(state: &AppState) {
+/// Returns true if a scheduled rotation should run.
+///
+/// Both 'scheduled' and 'update' entries reset the 90-day clock.  This
+/// prevents a double JWT rotation when an update-triggered rotation and the
+/// 90-day timer both fire in the same scheduler cycle.
+pub(crate) async fn needs_scheduled_rotation(db: &sqlx::PgPool) -> bool {
     let last = sqlx::query_scalar!(
-        "SELECT MAX(created_at) FROM rotation_log WHERE reason = 'scheduled'"
+        "SELECT MAX(created_at) FROM rotation_log WHERE reason IN ('scheduled', 'update')"
     )
-    .fetch_one(&state.db)
+    .fetch_one(db)
     .await
     .unwrap_or(None);
 
-    let needs_rotation = match last {
+    match last {
         None => true,
-        Some(ts) => {
-            let days_since = (chrono::Utc::now() - ts).num_days();
-            days_since >= ROTATION_INTERVAL_DAYS
-        }
-    };
+        Some(ts) => (chrono::Utc::now() - ts).num_days() >= ROTATION_INTERVAL_DAYS,
+    }
+}
 
-    if !needs_rotation {
+async fn check_rotation(state: &AppState) {
+    if !needs_scheduled_rotation(&state.db).await {
         return;
     }
 
@@ -285,4 +289,92 @@ async fn check_rotation(state: &AppState) {
     .await;
 
     tracing::info!("scheduler: scheduled rotation complete");
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for needs_scheduled_rotation
+//
+// These tests run against the shared integration DB (DATABASE_URL).  Only
+// "expect false" cases are tested inline because inserting a recent entry
+// makes needs_scheduled_rotation deterministically false regardless of other
+// concurrent test entries.  "Expect true" cases (empty table, old entries
+// only) require an isolated DB and are covered by the HTTP-level tests in
+// tests/rotation.rs.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> sqlx::PgPool {
+        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgresql://lynx:lynx_dev@localhost:5433/lynx_dashboard".to_string()
+        });
+        let pool = sqlx::PgPool::connect(&url)
+            .await
+            .expect("connect to test DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrate test DB");
+        pool
+    }
+
+    // Recent 'update' entry → needs_scheduled_rotation returns false.
+    // This is the core bug fix: update rotations must suppress the 90-day
+    // scheduled rotation so JWT keys are not rotated twice in one cycle.
+    #[tokio::test]
+    async fn recent_update_suppresses_scheduled_rotation() {
+        let pool = test_pool().await;
+        let id = Uuid::now_v7();
+
+        sqlx::query!(
+            "INSERT INTO rotation_log (id, triggered_by, reason, scope) \
+             VALUES ($1, NULL, 'update', 'all')",
+            id,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = needs_scheduled_rotation(&pool).await;
+
+        let _ = sqlx::query!("DELETE FROM rotation_log WHERE id = $1", id)
+            .execute(&pool)
+            .await;
+
+        assert!(
+            !result,
+            "recent 'update' entry must suppress the scheduled rotation (prevents double JWT rotation in same cycle)"
+        );
+    }
+
+    // Recent 'scheduled' entry → needs_scheduled_rotation returns false.
+    // Idempotency: calling the scheduler twice in one 90-day window only
+    // rotates once.
+    #[tokio::test]
+    async fn recent_scheduled_suppresses_next_scheduled() {
+        let pool = test_pool().await;
+        let id = Uuid::now_v7();
+
+        sqlx::query!(
+            "INSERT INTO rotation_log (id, triggered_by, reason, scope) \
+             VALUES ($1, NULL, 'scheduled', 'all')",
+            id,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = needs_scheduled_rotation(&pool).await;
+
+        let _ = sqlx::query!("DELETE FROM rotation_log WHERE id = $1", id)
+            .execute(&pool)
+            .await;
+
+        assert!(
+            !result,
+            "recent 'scheduled' entry must suppress the next scheduled rotation (90-day idempotency)"
+        );
+    }
 }
