@@ -247,13 +247,26 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
+      - name: Stub dev-only modules for bun compile
+        working-directory: lynx/dashboard/ui
+        run: |
+          # Next.js conditionally requires dev modules that don't exist in production builds.
+          # Bun's static bundler can't resolve them — stub them so they bundle as empty objects.
+          # They are never called at runtime (NODE_ENV=production guard in Next.js code).
+          NEXT_SERVER=.next/standalone/node_modules/next/dist/server
+          mkdir -p "$NEXT_SERVER/dev" "$NEXT_SERVER/router-utils"
+          for f in \
+            "$NEXT_SERVER/dev/next-dev-server.js" \
+            "$NEXT_SERVER/router-utils/setup-dev-bundler.js"; do
+            [ -f "$f" ] || echo "module.exports = {};" > "$f"
+          done
+
       - name: Compile standalone binary
         working-directory: lynx/dashboard/ui
         run: |
           bun build --compile \
             --target ${{ matrix.bun-target }} \
             --define 'process.env.NODE_ENV="production"' \
-            --external '@opentelemetry/api' \
             .next/standalone/server.js \
             --outfile "lynx-dashboard-frontend-linux-${{ matrix.arch }}"
 
