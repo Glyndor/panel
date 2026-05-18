@@ -123,9 +123,10 @@ jobs:
           BUN_ARCH="${{ matrix.bun-arch }}"
           VERSION=$(curl -s "https://api.github.com/repos/oven-sh/bun/releases/latest" \
             | grep '"tag_name"' | head -1 | cut -d'"' -f4)
-          curl -sL \
-            "https://github.com/oven-sh/bun/releases/download/${VERSION}/bun-linux-${BUN_ARCH}-musl.zip" \
-            -o bun.zip
+          BASE_URL="https://github.com/oven-sh/bun/releases/download/${VERSION}"
+          curl -sL "${BASE_URL}/bun-linux-${BUN_ARCH}-musl.zip" -o bun.zip
+          curl -sL "${BASE_URL}/SHASUMS256.txt" -o SHASUMS256.txt
+          grep "bun-linux-${BUN_ARCH}-musl.zip" SHASUMS256.txt | sha256sum -c -
           unzip -q bun.zip
           sudo mv "bun-linux-${BUN_ARCH}-musl/bun" /usr/local/bin/bun
           bun --version
@@ -170,7 +171,7 @@ jobs:
       # --- Upload artifacts ---------------------------------------------------
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dashboard-${{ matrix.arch }}
           path: |
@@ -189,12 +190,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           files: |
