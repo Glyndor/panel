@@ -48,11 +48,12 @@ pub async fn register_agent(
         + &format!("{}", uuid::Uuid::now_v7()).replace('-', "");
     let sync_token_hash = sha256_hex(sync_token.as_bytes());
 
+    let is_local = req.is_local_agent.unwrap_or(false);
     let agent = sqlx::query_as!(
         Agent,
         r#"
-        INSERT INTO agents (id, name, wg_pubkey, wg_ip, wg_endpoint, api_port, sync_token_hash)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO agents (id, name, wg_pubkey, wg_ip, wg_endpoint, api_port, sync_token_hash, is_local_agent)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id, name, wg_pubkey, wg_ip, wg_endpoint,
                   api_port, status, version, last_heartbeat, created_at
         "#,
@@ -63,6 +64,7 @@ pub async fn register_agent(
         req.wg_endpoint,
         req.api_port.unwrap_or(9090),
         sync_token_hash,
+        is_local,
     )
     .fetch_one(&state.db)
     .await?;

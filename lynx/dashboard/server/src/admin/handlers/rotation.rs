@@ -73,7 +73,7 @@ pub async fn rotate_keys(
     })))
 }
 
-async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
+pub async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
     use redis::AsyncCommands;
     let mut redis = state.redis.clone();
 
@@ -117,7 +117,7 @@ async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(), AppError> {
+pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(), AppError> {
     use crate::agents::wg;
     use std::io::Write;
 

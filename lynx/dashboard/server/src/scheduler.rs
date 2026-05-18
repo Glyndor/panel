@@ -261,13 +261,24 @@ async fn check_rotation(state: &AppState) {
 
     tracing::info!("scheduler: 90-day key rotation triggered");
 
+    // JWT session flush — forces all users to re-login with new tokens.
+    if let Err(e) = rotation::rotate_jwt_sessions(state).await {
+        tracing::warn!("scheduler: JWT session rotation failed: {e}");
+    }
+
+    // WireGuard PSK rotation — coordinated without dropping tunnels.
+    if let Err(e) = rotation::rotate_wireguard_psks(state, Uuid::nil()).await {
+        tracing::warn!("scheduler: WireGuard PSK rotation failed: {e}");
+    }
+
+    // mTLS cert rotation — renews certs expiring within 30 days.
     if let Err(e) = rotation::rotate_expiring_certs(state, 30).await {
         tracing::warn!("scheduler: cert rotation failed: {e}");
     }
 
     let log_id = Uuid::now_v7();
     let _ = sqlx::query!(
-        "INSERT INTO rotation_log (id, triggered_by, reason, scope) VALUES ($1, NULL, 'scheduled', 'certificates')",
+        "INSERT INTO rotation_log (id, triggered_by, reason, scope) VALUES ($1, NULL, 'scheduled', 'all')",
         log_id
     )
     .execute(&state.db)

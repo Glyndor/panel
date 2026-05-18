@@ -32,6 +32,8 @@ pub struct RegisterAgentRequest {
     /// Agent VPS public IP (for WG endpoint display)
     pub wg_endpoint: Option<String>,
     pub api_port: Option<i32>,
+    /// Set to true when registering the agent running on the same VPS as the dashboard.
+    pub is_local_agent: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
