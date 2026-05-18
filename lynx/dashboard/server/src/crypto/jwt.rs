@@ -128,10 +128,15 @@ fn validate_claims(c: &serde_json::Value) -> Result<()> {
     if exp <= now {
         anyhow::bail!("token expired");
     }
-    if let Some(nbf) = c["nbf"].as_u64() {
-        if nbf > now {
-            anyhow::bail!("token not yet valid");
-        }
+    // nbf required — reject tokens that were never issued with this claim.
+    let nbf = c["nbf"].as_u64().context("missing nbf")?;
+    if nbf > now {
+        anyhow::bail!("token not yet valid");
+    }
+    // iat required — must not be in the future (clock skew tolerance: 5s).
+    let iat = c["iat"].as_u64().context("missing iat")?;
+    if iat > now + 5 {
+        anyhow::bail!("token iat in the future");
     }
     Ok(())
 }
