@@ -238,10 +238,10 @@ jobs:
           VERSION=$(curl -s "https://api.github.com/repos/oven-sh/bun/releases/latest" \
             | grep '"tag_name"' | head -1 | cut -d'"' -f4)
           BASE_URL="https://github.com/oven-sh/bun/releases/download/${VERSION}"
-          curl -sL "${BASE_URL}/bun-linux-x64-musl.zip" -o bun.zip
+          curl -sL "${BASE_URL}/bun-linux-x64-musl.zip" -o bun-linux-x64-musl.zip
           curl -sL "${BASE_URL}/SHASUMS256.txt" -o SHASUMS256.txt
           grep "bun-linux-x64-musl.zip" SHASUMS256.txt | sha256sum -c -
-          unzip -q bun.zip
+          unzip -q bun-linux-x64-musl.zip
           sudo mv "bun-linux-x64-musl/bun" /usr/local/bin/bun
           bun --version
 
