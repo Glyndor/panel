@@ -1,0 +1,212 @@
+name: release-dashboard
+
+on:
+  push:
+    tags:
+      - "dashboard@*"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Verify sqlx cache
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: lynx_dashboard
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: lynx
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql://postgres:ci_test@localhost:5432/lynx_dashboard
+        run: sqlx migrate run --source dashboard/server/migrations
+
+      - name: Verify sqlx cache is up-to-date
+        env:
+          DATABASE_URL: postgresql://postgres:ci_test@localhost:5432/lynx_dashboard
+        run: cargo sqlx prepare --check --package lynx-dashboard-server
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.runs-on }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            arch: x86_64
+            rust-target: x86_64-unknown-linux-musl
+            bun-arch: x64
+
+          - runs-on: ubuntu-24.04-arm
+            arch: arm64
+            rust-target: aarch64-unknown-linux-musl
+            bun-arch: aarch64
+
+    defaults:
+      run:
+        working-directory: lynx
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # --- Rust backend -------------------------------------------------------
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-target }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install musl toolchain
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build backend (musl static)
+        run: |
+          cargo build --release \
+            --package lynx-dashboard-server \
+            --target ${{ matrix.rust-target }}
+        env:
+          SQLX_OFFLINE: "true"
+
+      - name: Sign backend binary
+        working-directory: ${{ github.workspace }}
+        env:
+          RELEASE_SIGN_KEY: ${{ secrets.RELEASE_SIGN_KEY }}
+        run: |
+          pip install --quiet cryptography
+          BINARY="lynx/target/${{ matrix.rust-target }}/release/lynx-dashboard-server"
+          ARTIFACT="lynx-dashboard-backend-linux-${{ matrix.arch }}"
+          cp "$BINARY" "$ARTIFACT"
+          python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ARTIFACT"
+
+      # --- Frontend -----------------------------------------------------------
+
+      - name: Install musl bun
+        working-directory: ${{ github.workspace }}
+        run: |
+          BUN_ARCH="${{ matrix.bun-arch }}"
+          VERSION=$(curl -s "https://api.github.com/repos/oven-sh/bun/releases/latest" \
+            | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+          curl -sL \
+            "https://github.com/oven-sh/bun/releases/download/${VERSION}/bun-linux-${BUN_ARCH}-musl.zip" \
+            -o bun.zip
+          unzip -q bun.zip
+          sudo mv "bun-linux-${BUN_ARCH}-musl/bun" /usr/local/bin/bun
+          bun --version
+
+      - name: Install frontend deps
+        working-directory: lynx/dashboard/ui
+        run: bun install --frozen-lockfile
+
+      - name: Build Next.js (standalone)
+        working-directory: lynx/dashboard/ui
+        run: bun run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Compile standalone binary (musl)
+        working-directory: lynx/dashboard/ui
+        run: |
+          bun build --compile \
+            .next/standalone/server.js \
+            --outfile "lynx-dashboard-frontend-linux-${{ matrix.arch }}"
+
+      - name: Bundle static assets
+        working-directory: lynx/dashboard/ui
+        run: |
+          TARBALL="lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz"
+          tar -czf "$TARBALL" \
+            -C .next/standalone \
+            .next/static \
+            public
+          echo "assets tarball: $(du -sh "$TARBALL" | cut -f1)"
+
+      - name: Sign frontend artifacts
+        working-directory: ${{ github.workspace }}
+        env:
+          RELEASE_SIGN_KEY: ${{ secrets.RELEASE_SIGN_KEY }}
+        run: |
+          BIN="lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}"
+          ASSETS="lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz"
+          python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$BIN"
+          python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ASSETS"
+
+      # --- Upload artifacts ---------------------------------------------------
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-${{ matrix.arch }}
+          path: |
+            lynx/target/${{ matrix.rust-target }}/release/lynx-dashboard-server
+            lynx-dashboard-backend-linux-${{ matrix.arch }}
+            lynx-dashboard-backend-linux-${{ matrix.arch }}.sig
+            lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}
+            lynx/dashboard/ui/lynx-dashboard-frontend-linux-${{ matrix.arch }}.sig
+            lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz
+            lynx/dashboard/ui/lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz.sig
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            lynx-dashboard-backend-linux-x86_64
+            lynx-dashboard-backend-linux-x86_64.sig
+            lynx-dashboard-backend-linux-arm64
+            lynx-dashboard-backend-linux-arm64.sig
+            lynx-dashboard-frontend-linux-x86_64
+            lynx-dashboard-frontend-linux-x86_64.sig
+            lynx-dashboard-frontend-assets-linux-x86_64.tar.gz
+            lynx-dashboard-frontend-assets-linux-x86_64.tar.gz.sig
+            lynx-dashboard-frontend-linux-arm64
+            lynx-dashboard-frontend-linux-arm64.sig
+            lynx-dashboard-frontend-assets-linux-arm64.tar.gz
+            lynx-dashboard-frontend-assets-linux-arm64.tar.gz.sig

@@ -1,0 +1,90 @@
+name: release-agent
+
+on:
+  push:
+    tags:
+      - "agent@*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runs-on }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            arch: x86_64
+            rust-target: x86_64-unknown-linux-musl
+
+          - runs-on: ubuntu-24.04-arm
+            arch: arm64
+            rust-target: aarch64-unknown-linux-musl
+
+    defaults:
+      run:
+        working-directory: lynx
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-target }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install musl toolchain
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build agent (musl static)
+        run: |
+          cargo build --release \
+            --package lynx-agent \
+            --target ${{ matrix.rust-target }}
+
+      - name: Sign agent binary
+        working-directory: ${{ github.workspace }}
+        env:
+          RELEASE_SIGN_KEY: ${{ secrets.RELEASE_SIGN_KEY }}
+        run: |
+          pip install --quiet cryptography
+          BINARY="lynx/target/${{ matrix.rust-target }}/release/lynx-agent"
+          ARTIFACT="lynx-agent-linux-${{ matrix.arch }}"
+          cp "$BINARY" "$ARTIFACT"
+          python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ARTIFACT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.arch }}
+          path: |
+            lynx-agent-linux-${{ matrix.arch }}
+            lynx-agent-linux-${{ matrix.arch }}.sig
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            lynx-agent-linux-x86_64
+            lynx-agent-linux-x86_64.sig
+            lynx-agent-linux-arm64
+            lynx-agent-linux-arm64.sig
