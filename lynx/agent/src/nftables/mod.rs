@@ -8,16 +8,21 @@ const TABLE: &str = "lynx-agent";
 
 /// Full structure of the managed ruleset.
 /// lynx-base holds the immutable invariants.
-/// lynx-global / lynx-local hold dashboard-pushed rules.
+/// lynx-global / lynx-local hold dashboard-pushed input rules.
+/// lynx-global-output / lynx-local-output hold dashboard-pushed output rules.
 pub struct Ruleset {
     /// WireGuard UDP port for management plane
     pub wireguard_port: u16,
     /// Per-org blocked subnets (org isolation — inter-org traffic blocked)
     pub org_networks: Vec<OrgNetwork>,
-    /// Rules body for the lynx-global chain (dashboard-pushed, applies to all agents)
+    /// Input rules body for the lynx-global chain (dashboard-pushed, applies to all agents)
     pub global_body: String,
-    /// Rules body for the lynx-local chain (dashboard-pushed, this agent only)
+    /// Input rules body for the lynx-local chain (dashboard-pushed, this agent only)
     pub local_body: String,
+    /// Output rules body for the lynx-global-output chain (dashboard-pushed, applies to all agents)
+    pub global_output_body: String,
+    /// Output rules body for the lynx-local-output chain (dashboard-pushed, this agent only)
+    pub local_output_body: String,
 }
 
 pub struct OrgNetwork {
@@ -116,12 +121,12 @@ table inet {TABLE} {{
         drop
     }}
 
-    # Dashboard global rules — apply to all agents
+    # Dashboard global rules — input, apply to all agents
     chain lynx-global {{
 {global}
     }}
 
-    # Dashboard local rules — apply to this agent only
+    # Dashboard local rules — input, apply to this agent only
     chain lynx-local {{
 {local}
     }}
@@ -143,9 +148,24 @@ table inet {TABLE} {{
         ));
     }
 
-    out.push_str(
-        "    }\n\n    chain lynx-output {\n        type filter hook output priority 0; policy accept;\n    }\n}\n",
-    );
+    out.push_str(&format!(
+        r#"    }}
+
+    chain lynx-output {{
+        type filter hook output priority 0; policy accept;
+
+        # Dashboard global output rules — apply to all agents
+{global_out}
+
+        # Dashboard local output rules — apply to this agent only
+{local_out}
+    }}
+}}
+"#,
+        global_out = r.global_output_body,
+        local_out = r.local_output_body,
+    ));
+
     out
 }
 

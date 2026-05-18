@@ -184,6 +184,8 @@ async fn main() -> anyhow::Result<()> {
         nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
         nft_global_body: Arc::new(std::sync::Mutex::new(String::new())),
         nft_local_body: Arc::new(std::sync::Mutex::new(String::new())),
+        nft_global_output_body: Arc::new(std::sync::Mutex::new(String::new())),
+        nft_local_output_body: Arc::new(std::sync::Mutex::new(String::new())),
         nft_wg_port: Arc::new(std::sync::atomic::AtomicU32::new(51820)),
         cmd_rate: Arc::new(std::sync::Mutex::new((0u64, 0u64))),
         cmd_rejected_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -199,12 +201,16 @@ async fn main() -> anyhow::Result<()> {
         if let Ok(rows) = rows {
             let mut global_body = String::new();
             let mut local_body = String::new();
+            let mut global_output_body = String::new();
+            let mut local_output_body = String::new();
             let mut wg_port = 51820u16;
 
             for row in &rows {
                 match row.chain.as_str() {
                     "lynx-global" => global_body = row.body.clone(),
                     "lynx-local" => local_body = row.body.clone(),
+                    "lynx-global-output" => global_output_body = row.body.clone(),
+                    "lynx-local-output" => local_output_body = row.body.clone(),
                     _ => {}
                 }
                 wg_port = row.wg_port as u16;
@@ -212,6 +218,8 @@ async fn main() -> anyhow::Result<()> {
 
             state.set_nft_global_body(global_body);
             state.set_nft_local_body(local_body);
+            state.set_nft_global_output_body(global_output_body);
+            state.set_nft_local_output_body(local_output_body);
             state.set_nft_wg_port(wg_port);
 
             let ruleset = nftables::Ruleset {
@@ -219,6 +227,8 @@ async fn main() -> anyhow::Result<()> {
                 org_networks: vec![],
                 global_body: state.nft_global_body(),
                 local_body: state.nft_local_body(),
+                global_output_body: state.nft_global_output_body(),
+                local_output_body: state.nft_local_output_body(),
             };
 
             match nftables::apply(&ruleset) {

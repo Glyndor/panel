@@ -3,7 +3,7 @@ use crate::{
     auth::middleware::AuthUser,
     crypto::cmd::sign_command,
     error::AppError,
-    nftables::{rules_to_nft_chain, CreateRuleRequest, NftRule},
+    nftables::{rules_to_nft_chain, rules_to_nft_output_chain, CreateRuleRequest, NftRule},
     state::AppState,
 };
 use axum::{
@@ -20,9 +20,9 @@ pub async fn list_global_rules(
     let rules = sqlx::query_as!(
         NftRule,
         r#"
-        SELECT id, scope, agent_id, kind, port, protocol,
+        SELECT id, scope, agent_id, kind, port, port_end, protocol,
                ip_list, ip_version, rate_per_min, description,
-               priority, enabled, created_by, created_at, updated_at
+               priority, enabled, direction, created_by, created_at, updated_at
         FROM nftables_rules
         WHERE scope = 'global'
         ORDER BY priority ASC, created_at ASC
@@ -45,27 +45,30 @@ pub async fn create_global_rule(
     let ip_list = req.ip_list.unwrap_or_default();
     let ip_version = req.ip_version.unwrap_or_else(|| "both".into());
     let priority = req.priority.unwrap_or(0);
+    let direction = req.direction.unwrap_or_else(|| "input".into());
 
     let rule = sqlx::query_as!(
         NftRule,
         r#"
         INSERT INTO nftables_rules
-            (id, scope, agent_id, kind, port, protocol, ip_list, ip_version,
-             rate_per_min, description, priority, created_by)
-        VALUES ($1, 'global', NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, scope, agent_id, kind, port, protocol,
+            (id, scope, agent_id, kind, port, port_end, protocol, ip_list, ip_version,
+             rate_per_min, description, priority, direction, created_by)
+        VALUES ($1, 'global', NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id, scope, agent_id, kind, port, port_end, protocol,
                   ip_list, ip_version, rate_per_min, description,
-                  priority, enabled, created_by, created_at, updated_at
+                  priority, enabled, direction, created_by, created_at, updated_at
         "#,
         id,
         req.kind,
         req.port,
+        req.port_end,
         req.protocol,
         &ip_list,
         ip_version,
         req.rate_per_min,
         req.description,
         priority,
+        direction,
         user.user_id,
     )
     .fetch_one(&state.db)
@@ -93,6 +96,7 @@ pub async fn delete_global_rule(
 }
 
 /// Push current global rules to all online agents.
+/// Sends two commands per agent: input chain body + output chain body.
 pub async fn push_global_rules(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -100,9 +104,9 @@ pub async fn push_global_rules(
     let rules = sqlx::query_as!(
         NftRule,
         r#"
-        SELECT id, scope, agent_id, kind, port, protocol,
+        SELECT id, scope, agent_id, kind, port, port_end, protocol,
                ip_list, ip_version, rate_per_min, description,
-               priority, enabled, created_by, created_at, updated_at
+               priority, enabled, direction, created_by, created_at, updated_at
         FROM nftables_rules
         WHERE scope = 'global' AND enabled = true
         ORDER BY priority ASC
@@ -111,7 +115,8 @@ pub async fn push_global_rules(
     .fetch_all(&state.db)
     .await?;
 
-    let chain_body = rules_to_nft_chain(&rules);
+    let input_body = rules_to_nft_chain(&rules);
+    let output_body = rules_to_nft_output_chain(&rules);
 
     let agents =
         sqlx::query!("SELECT id, wg_ip, api_port, status FROM agents WHERE status = 'online'")
@@ -122,38 +127,16 @@ pub async fn push_global_rules(
     let mut failed = 0u32;
 
     for agent in &agents {
-        let command = json!({
-            "type": "nftables.apply",
-            "chain": "lynx-global",
-            "rules": chain_body,
-        });
-
-        let Ok(signed) = sign_command(&state.config, agent.id, user.user_id, "admin", &command)
-        else {
-            failed += 1;
-            continue;
-        };
-
-        let signed_val = serde_json::to_value(&signed).unwrap_or_default();
-        let sent = if ws_hub::push_command(&state, agent.id, signed_val)
-            .await
-            .is_some()
-        {
-            true
-        } else {
-            // HTTP fallback
-            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
-            let tok = &*state.config.internal_token;
-            reqwest::Client::new()
-                .post(&url)
-                .header("Authorization", format!("Bearer {tok}"))
-                .json(&signed)
-                .timeout(std::time::Duration::from_secs(15))
-                .send()
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false)
-        };
+        let sent = push_both_chains(
+            &state,
+            agent.id,
+            agent.wg_ip.as_str(),
+            agent.api_port,
+            user.user_id,
+            &input_body,
+            &output_body,
+        )
+        .await;
 
         if sent {
             for rule in &rules {
@@ -202,6 +185,76 @@ pub async fn push_global_rules(
     ))
 }
 
+/// Send the global input and output chain bodies to a single agent.
+/// Returns true only if both commands succeed.
+async fn push_both_chains(
+    state: &AppState,
+    agent_id: Uuid,
+    wg_ip: &str,
+    api_port: i32,
+    user_id: Uuid,
+    input_body: &str,
+    output_body: &str,
+) -> bool {
+    let input_cmd = json!({
+        "type": "nftables.apply",
+        "chain": "lynx-global",
+        "rules": input_body,
+    });
+    let output_cmd = json!({
+        "type": "nftables.apply",
+        "chain": "lynx-global-output",
+        "rules": output_body,
+    });
+
+    let Ok(signed_in) = sign_command(state.config.as_ref(), agent_id, user_id, "admin", &input_cmd)
+    else {
+        return false;
+    };
+    let Ok(signed_out) = sign_command(state.config.as_ref(), agent_id, user_id, "admin", &output_cmd)
+    else {
+        return false;
+    };
+
+    let in_val = serde_json::to_value(&signed_in).unwrap_or_default();
+    let sent_in = if ws_hub::push_command(state, agent_id, in_val).await.is_some() {
+        true
+    } else {
+        let url = format!("http://{wg_ip}:{api_port}/cmd");
+        let tok = &*state.config.internal_token;
+        reqwest::Client::new()
+            .post(&url)
+            .header("Authorization", format!("Bearer {tok}"))
+            .json(&signed_in)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    };
+
+    if !sent_in {
+        return false;
+    }
+
+    let out_val = serde_json::to_value(&signed_out).unwrap_or_default();
+    if ws_hub::push_command(state, agent_id, out_val).await.is_some() {
+        true
+    } else {
+        let url = format!("http://{wg_ip}:{api_port}/cmd");
+        let tok = &*state.config.internal_token;
+        reqwest::Client::new()
+            .post(&url)
+            .header("Authorization", format!("Bearer {tok}"))
+            .json(&signed_out)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+}
+
 fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
     let valid_kinds = [
         "allow_port",
@@ -209,13 +262,21 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
         "allow_ip",
         "block_ip",
         "rate_limit",
+        "drop_invalid_state",
+        "tcp_flag_null",
+        "tcp_flag_xmas",
+        "tcp_flag_ack_new",
+        "icmp_ping_limit",
+        "allow_icmp_errors",
+        "allow_ndp",
+        "block_output_port",
     ];
     if !valid_kinds.contains(&req.kind.as_str()) {
         return Err(AppError::Validation("invalid rule kind".into()));
     }
     if matches!(
         req.kind.as_str(),
-        "allow_port" | "block_port" | "rate_limit"
+        "allow_port" | "block_port" | "rate_limit" | "block_output_port"
     ) && req.port.is_none()
     {
         return Err(AppError::Validation(
@@ -235,6 +296,11 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
     if let Some(ver) = &req.ip_version {
         if !["ipv4", "ipv6", "both"].contains(&ver.as_str()) {
             return Err(AppError::Validation("invalid ip_version".into()));
+        }
+    }
+    if let Some(dir) = &req.direction {
+        if !["input", "output"].contains(&dir.as_str()) {
+            return Err(AppError::Validation("invalid direction".into()));
         }
     }
     Ok(())

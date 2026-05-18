@@ -3,7 +3,7 @@ use crate::{
     auth::middleware::AuthUser,
     crypto::cmd::sign_command,
     error::AppError,
-    nftables::{rules_to_nft_chain, CreateRuleRequest, NftRule},
+    nftables::{rules_to_nft_chain, rules_to_nft_output_chain, CreateRuleRequest, NftRule},
     state::AppState,
 };
 use axum::{
@@ -18,7 +18,6 @@ pub async fn list_local_rules(
     State(state): State<AppState>,
     Path(agent_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Verify agent exists.
     let exists = sqlx::query!("SELECT id FROM agents WHERE id = $1", agent_id)
         .fetch_optional(&state.db)
         .await?;
@@ -29,9 +28,9 @@ pub async fn list_local_rules(
     let rules = sqlx::query_as!(
         NftRule,
         r#"
-        SELECT id, scope, agent_id, kind, port, protocol,
+        SELECT id, scope, agent_id, kind, port, port_end, protocol,
                ip_list, ip_version, rate_per_min, description,
-               priority, enabled, created_by, created_at, updated_at
+               priority, enabled, direction, created_by, created_at, updated_at
         FROM nftables_rules
         WHERE scope = 'local' AND agent_id = $1
         ORDER BY priority ASC, created_at ASC
@@ -63,28 +62,31 @@ pub async fn create_local_rule(
     let ip_list = req.ip_list.unwrap_or_default();
     let ip_version = req.ip_version.unwrap_or_else(|| "both".into());
     let priority = req.priority.unwrap_or(0);
+    let direction = req.direction.unwrap_or_else(|| "input".into());
 
     let rule = sqlx::query_as!(
         NftRule,
         r#"
         INSERT INTO nftables_rules
-            (id, scope, agent_id, kind, port, protocol, ip_list, ip_version,
-             rate_per_min, description, priority, created_by)
-        VALUES ($1, 'local', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING id, scope, agent_id, kind, port, protocol,
+            (id, scope, agent_id, kind, port, port_end, protocol, ip_list, ip_version,
+             rate_per_min, description, priority, direction, created_by)
+        VALUES ($1, 'local', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING id, scope, agent_id, kind, port, port_end, protocol,
                   ip_list, ip_version, rate_per_min, description,
-                  priority, enabled, created_by, created_at, updated_at
+                  priority, enabled, direction, created_by, created_at, updated_at
         "#,
         id,
         agent_id,
         req.kind,
         req.port,
+        req.port_end,
         req.protocol,
         &ip_list,
         ip_version,
         req.rate_per_min,
         req.description,
         priority,
+        direction,
         user.user_id,
     )
     .fetch_one(&state.db)
@@ -112,7 +114,7 @@ pub async fn delete_local_rule(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// Push local rules to the specific agent.
+/// Push local rules to the specific agent (input + output chains).
 pub async fn push_local_rules(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -133,9 +135,9 @@ pub async fn push_local_rules(
     let rules = sqlx::query_as!(
         NftRule,
         r#"
-        SELECT id, scope, agent_id, kind, port, protocol,
+        SELECT id, scope, agent_id, kind, port, port_end, protocol,
                ip_list, ip_version, rate_per_min, description,
-               priority, enabled, created_by, created_at, updated_at
+               priority, enabled, direction, created_by, created_at, updated_at
         FROM nftables_rules
         WHERE scope = 'local' AND agent_id = $1 AND enabled = true
         ORDER BY priority ASC
@@ -145,34 +147,62 @@ pub async fn push_local_rules(
     .fetch_all(&state.db)
     .await?;
 
-    let chain_body = rules_to_nft_chain(&rules);
+    let input_body = rules_to_nft_chain(&rules);
+    let output_body = rules_to_nft_output_chain(&rules);
 
-    let command = json!({
+    let input_cmd = json!({
         "type": "nftables.apply",
         "chain": "lynx-local",
-        "rules": chain_body,
+        "rules": input_body,
+    });
+    let output_cmd = json!({
+        "type": "nftables.apply",
+        "chain": "lynx-local-output",
+        "rules": output_body,
     });
 
-    let signed = sign_command(&state.config, agent.id, user.user_id, "admin", &command)?;
-    let signed_val = serde_json::to_value(&signed).unwrap_or_default();
+    let signed_in = sign_command(&state.config, agent.id, user.user_id, "admin", &input_cmd)?;
+    let signed_out = sign_command(&state.config, agent.id, user.user_id, "admin", &output_cmd)?;
 
-    let ok = if let Some(body) = ws_hub::push_command(&state, agent.id, signed_val).await {
-        body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
-    } else {
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
-        let tok = &*state.config.internal_token;
-        reqwest::Client::new()
-            .post(&url)
-            .header("Authorization", format!("Bearer {tok}"))
-            .json(&signed)
-            .timeout(std::time::Duration::from_secs(15))
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+    let ok_in = {
+        let v = serde_json::to_value(&signed_in).unwrap_or_default();
+        if let Some(body) = ws_hub::push_command(&state, agent.id, v).await {
+            body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+        } else {
+            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let tok = &*state.config.internal_token;
+            reqwest::Client::new()
+                .post(&url)
+                .header("Authorization", format!("Bearer {tok}"))
+                .json(&signed_in)
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+        }
     };
 
-    Ok(Json(json!({ "ok": ok })))
+    let ok_out = {
+        let v = serde_json::to_value(&signed_out).unwrap_or_default();
+        if let Some(body) = ws_hub::push_command(&state, agent.id, v).await {
+            body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+        } else {
+            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let tok = &*state.config.internal_token;
+            reqwest::Client::new()
+                .post(&url)
+                .header("Authorization", format!("Bearer {tok}"))
+                .json(&signed_out)
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+        }
+    };
+
+    Ok(Json(json!({ "ok": ok_in && ok_out })))
 }
 
 fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
@@ -182,13 +212,21 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
         "allow_ip",
         "block_ip",
         "rate_limit",
+        "drop_invalid_state",
+        "tcp_flag_null",
+        "tcp_flag_xmas",
+        "tcp_flag_ack_new",
+        "icmp_ping_limit",
+        "allow_icmp_errors",
+        "allow_ndp",
+        "block_output_port",
     ];
     if !valid_kinds.contains(&req.kind.as_str()) {
         return Err(AppError::Validation("invalid rule kind".into()));
     }
     if matches!(
         req.kind.as_str(),
-        "allow_port" | "block_port" | "rate_limit"
+        "allow_port" | "block_port" | "rate_limit" | "block_output_port"
     ) && req.port.is_none()
     {
         return Err(AppError::Validation(
@@ -208,6 +246,11 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
     if let Some(ver) = &req.ip_version {
         if !["ipv4", "ipv6", "both"].contains(&ver.as_str()) {
             return Err(AppError::Validation("invalid ip_version".into()));
+        }
+    }
+    if let Some(dir) = &req.direction {
+        if !["input", "output"].contains(&dir.as_str()) {
+            return Err(AppError::Validation("invalid direction".into()));
         }
     }
     Ok(())
