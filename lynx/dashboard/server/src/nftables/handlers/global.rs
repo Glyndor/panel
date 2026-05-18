@@ -113,11 +113,10 @@ pub async fn push_global_rules(
 
     let chain_body = rules_to_nft_chain(&rules);
 
-    let agents = sqlx::query!(
-        "SELECT id, wg_ip, api_port, status FROM agents WHERE status = 'online'"
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let agents =
+        sqlx::query!("SELECT id, wg_ip, api_port, status FROM agents WHERE status = 'online'")
+            .fetch_all(&state.db)
+            .await?;
 
     let mut pushed = 0u32;
     let mut failed = 0u32;
@@ -136,7 +135,10 @@ pub async fn push_global_rules(
         };
 
         let signed_val = serde_json::to_value(&signed).unwrap_or_default();
-        let sent = if let Some(_) = ws_hub::push_command(&state, agent.id, signed_val).await {
+        let sent = if ws_hub::push_command(&state, agent.id, signed_val)
+            .await
+            .is_some()
+        {
             true
         } else {
             // HTTP fallback
@@ -174,12 +176,10 @@ pub async fn push_global_rules(
     }
 
     // Mark offline agents as pending_sync so they receive the rules on reconnect.
-    let offline_agents = sqlx::query!(
-        "SELECT id FROM agents WHERE status != 'online'"
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    let offline_agents = sqlx::query!("SELECT id FROM agents WHERE status != 'online'")
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
 
     for agent in &offline_agents {
         for rule in &rules {
@@ -197,19 +197,35 @@ pub async fn push_global_rules(
         }
     }
 
-    Ok(Json(json!({ "pushed": pushed, "failed": failed, "pending": offline_agents.len() })))
+    Ok(Json(
+        json!({ "pushed": pushed, "failed": failed, "pending": offline_agents.len() }),
+    ))
 }
 
 fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
-    let valid_kinds = ["allow_port", "block_port", "allow_ip", "block_ip", "rate_limit"];
+    let valid_kinds = [
+        "allow_port",
+        "block_port",
+        "allow_ip",
+        "block_ip",
+        "rate_limit",
+    ];
     if !valid_kinds.contains(&req.kind.as_str()) {
         return Err(AppError::Validation("invalid rule kind".into()));
     }
-    if matches!(req.kind.as_str(), "allow_port" | "block_port" | "rate_limit") && req.port.is_none() {
-        return Err(AppError::Validation("port required for this rule kind".into()));
+    if matches!(
+        req.kind.as_str(),
+        "allow_port" | "block_port" | "rate_limit"
+    ) && req.port.is_none()
+    {
+        return Err(AppError::Validation(
+            "port required for this rule kind".into(),
+        ));
     }
     if req.kind == "rate_limit" && req.rate_per_min.is_none() {
-        return Err(AppError::Validation("rate_per_min required for rate_limit".into()));
+        return Err(AppError::Validation(
+            "rate_per_min required for rate_limit".into(),
+        ));
     }
     if let Some(proto) = &req.protocol {
         if !["tcp", "udp", "both"].contains(&proto.as_str()) {

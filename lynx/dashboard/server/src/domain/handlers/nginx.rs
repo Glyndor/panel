@@ -1,5 +1,5 @@
-/// nginx config generation — pure functions, no OS calls.
-/// All deployment goes through the local agent via signed commands.
+//! nginx config generation — pure functions, no OS calls.
+//! All deployment goes through the local agent via signed commands.
 
 pub const NGINX_IMAGE: &str =
     "docker.io/library/nginx@sha256:ceba1c7f1e2c42e5f43c9fa55e74ef90a1d08e7fde12f25e2a6706f4c80e0428";

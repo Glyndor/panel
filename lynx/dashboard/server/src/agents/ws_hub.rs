@@ -1,5 +1,9 @@
 use super::{handlers::broadcast_event, AuditSyncEntry};
-use crate::{crypto::hash::sha256_hex, error::AppError, state::{AgentWsConn, AppState}};
+use crate::{
+    crypto::hash::sha256_hex,
+    error::AppError,
+    state::{AgentWsConn, AppState},
+};
 use axum::{
     extract::{
         ws::{Message, WebSocket},
@@ -29,19 +33,15 @@ pub async fn agent_ws_handler(
     Query(q): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, AppError> {
-    let stored_hash =
-        sqlx::query_scalar!("SELECT sync_token_hash FROM agents WHERE id = $1", id)
-            .fetch_optional(&state.db)
-            .await?
-            .flatten()
-            .ok_or(AppError::NotFound)?;
+    let stored_hash = sqlx::query_scalar!("SELECT sync_token_hash FROM agents WHERE id = $1", id)
+        .fetch_optional(&state.db)
+        .await?
+        .flatten()
+        .ok_or(AppError::NotFound)?;
 
     let provided_hash = sha256_hex(q.token.as_bytes());
-    let ok: bool = subtle::ConstantTimeEq::ct_eq(
-        provided_hash.as_bytes(),
-        stored_hash.as_bytes(),
-    )
-    .into();
+    let ok: bool =
+        subtle::ConstantTimeEq::ct_eq(provided_hash.as_bytes(), stored_hash.as_bytes()).into();
     if !ok {
         return Err(AppError::Unauthorized);
     }
@@ -83,7 +83,8 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
     let event_id = Uuid::now_v7();
     let _ = sqlx::query!(
         "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'connected', NULL)",
-        event_id, agent_id
+        event_id,
+        agent_id
     )
     .execute(&state.db)
     .await;
@@ -170,8 +171,16 @@ async fn handle_agent_message(
 
     match msg.msg_type.as_str() {
         "heartbeat" => {
-            let status = msg.data.get("status").and_then(|v| v.as_str()).unwrap_or("online");
-            let version = msg.data.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let status = msg
+                .data
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("online");
+            let version = msg
+                .data
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             sqlx::query!(
                 "UPDATE agents SET status=$1, last_heartbeat=NOW(), version=$2 WHERE id=$3",
                 status,
@@ -252,7 +261,7 @@ async fn store_audit_entries(
                 "audit_log hash chain mismatch — rejecting batch"
             );
             crate::alerts::fire(
-                &state,
+                state,
                 "audit_integrity_failure",
                 Some(format!(
                     "agent={agent_id} entry={} hash chain mismatch — entries rejected",
@@ -272,11 +281,12 @@ async fn store_audit_entries(
             .execute(&state.db)
             .await;
             super::handlers::broadcast_event(state, agent_id, "audit_integrity_failure", None);
-            return Err(anyhow::anyhow!("audit hash chain mismatch for agent {agent_id}"));
+            return Err(anyhow::anyhow!(
+                "audit hash chain mismatch for agent {agent_id}"
+            ));
         }
 
         expected_prev = entry.entry_hash.clone();
-
     }
 
     let mut tx = state.db.begin().await?;
@@ -313,11 +323,7 @@ async fn store_audit_entries(
 
 /// Push a signed command to a connected agent via WS.
 /// Returns `Some(response_body)` on success, `None` if no WS connection or timeout.
-pub async fn push_command(
-    state: &AppState,
-    agent_id: Uuid,
-    signed_cmd: Value,
-) -> Option<Value> {
+pub async fn push_command(state: &AppState, agent_id: Uuid, signed_cmd: Value) -> Option<Value> {
     let req_id = Uuid::now_v7();
 
     let conn = {
@@ -395,15 +401,19 @@ async fn push_pending_global_sync(state: &AppState, agent_id: Uuid) {
     };
 
     // Convert DB rows to nft chain body text.
-    let body = rules.iter().map(|r| {
-        crate::nftables::rule_line(
-            &r.kind,
-            r.port.map(|p| p as u16),
-            r.protocol.as_deref(),
-            &r.ip_list,
-            r.rate_per_min.map(|r| r as u32),
-        )
-    }).collect::<Vec<_>>().join("\n");
+    let body = rules
+        .iter()
+        .map(|r| {
+            crate::nftables::rule_line(
+                &r.kind,
+                r.port.map(|p| p as u16),
+                r.protocol.as_deref(),
+                &r.ip_list,
+                r.rate_per_min.map(|r| r as u32),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let signed = match crate::crypto::cmd::sign_command_system(
         &state.config,

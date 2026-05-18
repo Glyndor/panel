@@ -34,7 +34,7 @@ pub async fn require_auth(
     let mut redis = state.redis.clone();
     let valid = crate::auth::session::check_jti_valid(&mut redis, claims.jti)
         .await
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     if !valid {
         return Err(AppError::Unauthorized);
     }
@@ -52,7 +52,11 @@ pub async fn require_auth(
         crate::alerts::fire(
             &state,
             "intercepted",
-            Some(format!("session={} ip_mismatch={}", claims.session_id, claims.ip_hash != expected_ip)),
+            Some(format!(
+                "session={} ip_mismatch={}",
+                claims.session_id,
+                claims.ip_hash != expected_ip
+            )),
             None,
         )
         .await;

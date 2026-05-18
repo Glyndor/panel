@@ -1,9 +1,6 @@
 use super::super::AuditSyncEntry;
 use crate::{
-    auth::middleware::AuthUser,
-    crypto::hash::sha256_hex,
-    error::AppError,
-    state::AppState,
+    auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState,
 };
 use axum::{
     extract::{Extension, Path, State},

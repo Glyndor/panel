@@ -8,7 +8,10 @@ use anyhow::{Context, Result};
 use base64ct::{Base64UrlUnpadded, Encoding};
 use chrono::{Duration, Utc};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType, PKCS_ED25519};
+use rcgen::{
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType,
+    PKCS_ED25519,
+};
 use rustls::pki_types::CertificateDer as RustlsCertDer;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -105,14 +108,16 @@ pub fn gen_ca_keypair() -> (Zeroizing<[u8; 32]>, [u8; 32]) {
 /// Generate a self-signed X.509 CA certificate (Ed25519).
 /// Returns `(cert_der, key_der_pkcs8)`.
 pub fn generate_x509_ca() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
-    let key = KeyPair::generate_for(&PKCS_ED25519)
-        .context("generate CA Ed25519 key")?;
+    let key = KeyPair::generate_for(&PKCS_ED25519).context("generate CA Ed25519 key")?;
 
-    let mut params = CertificateParams::new(vec![])
-        .context("create CA cert params")?;
+    let mut params = CertificateParams::new(vec![]).context("create CA cert params")?;
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    params.distinguished_name.push(DnType::CommonName, "Lynx Internal CA");
-    params.distinguished_name.push(DnType::OrganizationName, "Lynx");
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "Lynx Internal CA");
+    params
+        .distinguished_name
+        .push(DnType::OrganizationName, "Lynx");
 
     let cert = params.self_signed(&key).context("self-sign CA cert")?;
     let cert_der = cert.der().to_vec();
@@ -126,9 +131,11 @@ pub fn generate_x509_ca() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
 fn load_ca_rcgen(ca_cert_der: &[u8], ca_key_der: &[u8]) -> Result<(rcgen::Certificate, KeyPair)> {
     let ca_key = KeyPair::try_from(ca_key_der).context("load CA key from DER")?;
     let cert_der = RustlsCertDer::from(ca_cert_der.to_vec());
-    let ca_params = CertificateParams::from_ca_cert_der(&cert_der)
-        .context("parse CA cert params from DER")?;
-    let ca_cert = ca_params.self_signed(&ca_key).context("reconstruct CA cert")?;
+    let ca_params =
+        CertificateParams::from_ca_cert_der(&cert_der).context("parse CA cert params from DER")?;
+    let ca_cert = ca_params
+        .self_signed(&ca_key)
+        .context("reconstruct CA cert")?;
     Ok((ca_cert, ca_key))
 }
 
@@ -142,15 +149,12 @@ pub fn issue_x509_agent_cert(
     wg_ip: &str,
 ) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
     let (ca_cert, ca_key) = load_ca_rcgen(ca_cert_der, ca_key_der)?;
-    let leaf_key = KeyPair::generate_for(&PKCS_ED25519)
-        .context("generate agent Ed25519 key")?;
+    let leaf_key = KeyPair::generate_for(&PKCS_ED25519).context("generate agent Ed25519 key")?;
 
-    let mut params = CertificateParams::new(vec![])
-        .context("create agent cert params")?;
-    params.distinguished_name.push(
-        DnType::CommonName,
-        format!("lynx-agent-{agent_id}"),
-    );
+    let mut params = CertificateParams::new(vec![]).context("create agent cert params")?;
+    params
+        .distinguished_name
+        .push(DnType::CommonName, format!("lynx-agent-{agent_id}"));
     // Extended key usages: both server auth (listener) and client auth (future)
     params.extended_key_usages = vec![
         ExtendedKeyUsagePurpose::ServerAuth,
@@ -177,12 +181,14 @@ pub fn issue_x509_dashboard_client_cert(
     ca_key_der: &[u8],
 ) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
     let (ca_cert, ca_key) = load_ca_rcgen(ca_cert_der, ca_key_der)?;
-    let leaf_key = KeyPair::generate_for(&PKCS_ED25519)
-        .context("generate dashboard client Ed25519 key")?;
+    let leaf_key =
+        KeyPair::generate_for(&PKCS_ED25519).context("generate dashboard client Ed25519 key")?;
 
-    let mut params = CertificateParams::new(vec![])
-        .context("create dashboard client cert params")?;
-    params.distinguished_name.push(DnType::CommonName, "lynx-dashboard");
+    let mut params =
+        CertificateParams::new(vec![]).context("create dashboard client cert params")?;
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "lynx-dashboard");
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
 
     let cert = params

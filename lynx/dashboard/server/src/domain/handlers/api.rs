@@ -1,10 +1,9 @@
 use super::super::{DomainConfig, SetDomainRequest, SetHstsRequest, UploadCertRequest};
-use super::nginx::{custom_cert_path, custom_key_path, nginx_conf, nginx_conf_with_cert, NGINX_IMAGE};
+use super::nginx::{
+    custom_cert_path, custom_key_path, nginx_conf, nginx_conf_with_cert, NGINX_IMAGE,
+};
 use crate::{
-    agents::client::build_agent_client,
-    auth::middleware::AuthUser,
-    crypto::cmd,
-    error::AppError,
+    agents::client::build_agent_client, auth::middleware::AuthUser, crypto::cmd, error::AppError,
     state::AppState,
 };
 use axum::{
@@ -302,7 +301,9 @@ pub async fn upload_cert(
     const MAX_CERT_BYTES: usize = 64 * 1024; // 64 KB
 
     if !["cloudflare", "custom"].contains(&req.cert_type.as_str()) {
-        return Err(AppError::Validation("cert_type must be 'cloudflare' or 'custom'".into()));
+        return Err(AppError::Validation(
+            "cert_type must be 'cloudflare' or 'custom'".into(),
+        ));
     }
 
     if req.cert_pem.len() > MAX_CERT_BYTES {
@@ -378,13 +379,9 @@ pub async fn upload_cert(
 }
 
 /// Validate a PEM cert (and optional key) before sending to the agent.
-fn validate_cert(
-    cert_pem: &str,
-    domain: &str,
-    key_pem: Option<&str>,
-) -> Result<(), AppError> {
-    use x509_parser::pem::parse_x509_pem;
+fn validate_cert(cert_pem: &str, domain: &str, key_pem: Option<&str>) -> Result<(), AppError> {
     use x509_parser::extensions::GeneralName;
+    use x509_parser::pem::parse_x509_pem;
 
     // Parse PEM → X.509 cert in one step.
     let (_, pem) = parse_x509_pem(cert_pem.as_bytes())
@@ -405,7 +402,9 @@ fn validate_cert(
         .unwrap_or(chrono::DateTime::UNIX_EPOCH);
 
     if now < not_before_ts {
-        return Err(AppError::Validation("certificate is not yet valid (not_before in future)".into()));
+        return Err(AppError::Validation(
+            "certificate is not yet valid (not_before in future)".into(),
+        ));
     }
     if now > not_after_ts {
         return Err(AppError::Validation("certificate has expired".into()));
@@ -419,9 +418,14 @@ fn validate_cert(
         .map(|san_ext| {
             san_ext.value.general_names.iter().any(|name| match name {
                 GeneralName::DNSName(dns) => {
-                    *dns == domain || dns.strip_prefix("*.").map_or(false, |suffix| {
-                        domain.ends_with(suffix) && !domain.trim_end_matches(suffix).trim_end_matches('.').contains('.')
-                    })
+                    *dns == domain
+                        || dns.strip_prefix("*.").is_some_and(|suffix| {
+                            domain.ends_with(suffix)
+                                && !domain
+                                    .trim_end_matches(suffix)
+                                    .trim_end_matches('.')
+                                    .contains('.')
+                        })
                 }
                 _ => false,
             })
@@ -431,18 +435,18 @@ fn validate_cert(
     let cn_ok = cert
         .subject()
         .iter_common_name()
-        .any(|cn| cn.as_str().map_or(false, |s| s == domain));
+        .any(|cn| cn.as_str() == Ok(domain));
 
     if !san_ok && !cn_ok {
-        return Err(AppError::Validation(
-            format!("certificate SAN/CN does not match domain '{domain}'").into(),
-        ));
+        return Err(AppError::Validation(format!(
+            "certificate SAN/CN does not match domain '{domain}'"
+        )));
     }
 
     // For custom certs, verify key pair.
     if let Some(key_pem_str) = key_pem {
         verify_key_pair(cert_pem, key_pem_str)
-            .map_err(|e| AppError::Validation(format!("cert/key pair mismatch: {e}").into()))?;
+            .map_err(|e| AppError::Validation(format!("cert/key pair mismatch: {e}")))?;
     }
 
     Ok(())
@@ -462,8 +466,8 @@ fn verify_key_pair(cert_pem: &str, key_pem: &str) -> Result<(), anyhow::Error> {
     use rcgen::KeyPair;
     use x509_parser::pem::parse_x509_pem;
 
-    let key = KeyPair::from_pem(key_pem)
-        .map_err(|e| anyhow::anyhow!("invalid private key PEM: {e}"))?;
+    let key =
+        KeyPair::from_pem(key_pem).map_err(|e| anyhow::anyhow!("invalid private key PEM: {e}"))?;
 
     let (_, pem) = parse_x509_pem(cert_pem.as_bytes())
         .map_err(|e| anyhow::anyhow!("invalid cert PEM: {e}"))?;

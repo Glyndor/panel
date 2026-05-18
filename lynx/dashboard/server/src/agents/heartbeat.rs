@@ -1,4 +1,9 @@
-use crate::{agents::{handlers::broadcast_event, ws_hub}, alerts, crypto::cmd, state::AppState};
+use crate::{
+    agents::{handlers::broadcast_event, ws_hub},
+    alerts,
+    crypto::cmd,
+    state::AppState,
+};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -29,10 +34,8 @@ async fn poll_agents(state: &AppState) {
     };
 
     let token = &*state.config.internal_token;
-    let client = super::client::build_agent_client_with_timeout(
-        &state.config,
-        Duration::from_secs(5),
-    );
+    let client =
+        super::client::build_agent_client_with_timeout(&state.config, Duration::from_secs(5));
 
     let latest = state.latest_agent_version.read().await.clone();
 
@@ -40,18 +43,16 @@ async fn poll_agents(state: &AppState) {
         let id = agent.id;
 
         // Skip HTTP poll if agent has an active WS connection — it sends heartbeats proactively.
-        if ws_hub::is_connected(&state, id).await {
+        if ws_hub::is_connected(state, id).await {
             // Check for pending updates even for WS-connected agents.
             if let Some(ref target) = latest {
-                let current_ver: Option<String> = sqlx::query_scalar!(
-                    "SELECT version FROM agents WHERE id = $1",
-                    id
-                )
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten()
-                .flatten();
+                let current_ver: Option<String> =
+                    sqlx::query_scalar!("SELECT version FROM agents WHERE id = $1", id)
+                        .fetch_optional(&state.db)
+                        .await
+                        .ok()
+                        .flatten()
+                        .flatten();
 
                 if let Some(ref current) = current_ver {
                     if current != target {
@@ -114,7 +115,7 @@ async fn poll_agents(state: &AppState) {
             .execute(&state.db)
             .await;
             broadcast_event(state, id, "heartbeat_lost", None);
-            alerts::fire(&state, "heartbeat_lost", None, id).await;
+            alerts::fire(state, "heartbeat_lost", None, id).await;
             tracing::warn!(agent_id = %id, "heartbeat lost — agent went offline");
         }
 
@@ -157,7 +158,9 @@ async fn dispatch_update_ws(state: &AppState, agent_id: Uuid, version: &str) {
     let signed_val = serde_json::to_value(&signed).unwrap_or_default();
     match ws_hub::push_command(state, agent_id, signed_val).await {
         Some(_) => tracing::info!(agent_id = %agent_id, version, "WS update.self dispatched"),
-        None => tracing::warn!(agent_id = %agent_id, "WS update.self: no response (agent may have disconnected)"),
+        None => {
+            tracing::warn!(agent_id = %agent_id, "WS update.self: no response (agent may have disconnected)")
+        }
     }
 }
 
@@ -182,13 +185,7 @@ async fn dispatch_update(
         "sig_url": sig_url,
     });
 
-    let signed = match cmd::sign_command(
-        &state.config,
-        agent_id,
-        Uuid::nil(),
-        "write",
-        &command,
-    ) {
+    let signed = match cmd::sign_command(&state.config, agent_id, Uuid::nil(), "write", &command) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(agent_id = %agent_id, "heartbeat: sign_command failed: {e}");
@@ -196,10 +193,8 @@ async fn dispatch_update(
         }
     };
 
-    let client = super::client::build_agent_client_with_timeout(
-        &state.config,
-        Duration::from_secs(10),
-    );
+    let client =
+        super::client::build_agent_client_with_timeout(&state.config, Duration::from_secs(10));
 
     let url = format!("http://{wg_ip}:{api_port}/cmd");
     let result = client

@@ -79,7 +79,9 @@ pub async fn register_agent(
 
     if let Err(e) = wg::add_peer(
         &req.wg_pubkey,
-        wg_ip.parse().unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+        wg_ip
+            .parse()
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
         &psk,
     ) {
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
@@ -87,8 +89,7 @@ pub async fn register_agent(
 
     state.wg_psks.write().await.insert(req.agent_id, psk);
 
-    let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
-        .map_err(anyhow::Error::from)?;
+    let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)?;
 
     sqlx::query!(
         "UPDATE agents SET cert_payload = $1, cert_signature = $2, cert_expires_at = NOW() + INTERVAL '90 days' WHERE id = $3",
@@ -105,8 +106,7 @@ pub async fn register_agent(
         &state.config.x509_ca_key_der,
         agent.id,
         &wg_ip,
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
 
     use base64ct::Encoding as _;
     let ca_public_key = base64ct::Base64UrlUnpadded::encode_string(&state.config.ca_public_bytes);

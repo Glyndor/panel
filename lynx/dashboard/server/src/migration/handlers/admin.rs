@@ -1,5 +1,7 @@
 use super::super::{MigrationState, PrepareMigrationResponse, StartMigrationRequest};
-use crate::{auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState};
+use crate::{
+    auth::middleware::AuthUser, crypto::hash::sha256_hex, error::AppError, state::AppState,
+};
 use axum::{
     extract::{Extension, State},
     http::StatusCode,
@@ -206,7 +208,7 @@ async fn run_migration(
         .build()?;
 
     let resp = client
-        .post(&format!("{target_url}/migration/receive"))
+        .post(format!("{target_url}/migration/receive"))
         .header("Authorization", format!("Migration {migration_token}"))
         .header("Content-Type", "application/octet-stream")
         .body(dump)

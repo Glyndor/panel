@@ -1,8 +1,4 @@
-use crate::{
-    auth::middleware::AuthUser,
-    error::AppError,
-    state::AppState,
-};
+use crate::{auth::middleware::AuthUser, error::AppError, state::AppState};
 use axum::{
     extract::{
         ws::{Message, WebSocket},
@@ -25,13 +21,10 @@ pub async fn frontend_metrics_ws(
 ) -> Result<impl IntoResponse, AppError> {
     super::events_ws::validate_ws_origin(&state, &headers).await?;
 
-    let exists = sqlx::query_scalar!(
-        "SELECT id FROM agents WHERE id = $1",
-        agent_id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .is_some();
+    let exists = sqlx::query_scalar!("SELECT id FROM agents WHERE id = $1", agent_id)
+        .fetch_optional(&state.db)
+        .await?
+        .is_some();
 
     if !exists {
         return Err(AppError::NotFound);
@@ -49,7 +42,8 @@ async fn handle_frontend_socket(state: AppState, agent_id: Uuid, mut socket: Web
     };
 
     let Some(mut rx) = rx else {
-        let frame = serde_json::json!({ "type": "agent_offline", "agent_id": agent_id }).to_string();
+        let frame =
+            serde_json::json!({ "type": "agent_offline", "agent_id": agent_id }).to_string();
         let _ = socket.send(Message::Text(frame.into())).await;
         return;
     };

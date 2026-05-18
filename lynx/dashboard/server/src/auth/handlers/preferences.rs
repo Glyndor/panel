@@ -27,7 +27,9 @@ pub async fn get_preferences(
         None => ("system".to_string(), "en".to_string()),
     };
 
-    Ok(Json(serde_json::json!({ "theme": theme, "locale": locale })))
+    Ok(Json(
+        serde_json::json!({ "theme": theme, "locale": locale }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -67,7 +69,9 @@ pub async fn update_preferences(
 
     if let Some(ref t) = body.theme {
         if !valid_themes.contains(&t.as_str()) {
-            return Err(AppError::Validation("theme must be light, dark, or system".into()));
+            return Err(AppError::Validation(
+                "theme must be light, dark, or system".into(),
+            ));
         }
     }
     if let Some(ref l) = body.locale {

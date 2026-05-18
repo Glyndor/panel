@@ -94,10 +94,10 @@ mod tests {
 
     #[test]
     fn username_invalid_chars() {
-        assert!(username("Alice").is_err());       // uppercase
-        assert!(username("ali ce").is_err());      // space
-        assert!(username("ali@ce").is_err());      // @
-        assert!(username("ali.ce").is_err());      // dot
+        assert!(username("Alice").is_err()); // uppercase
+        assert!(username("ali ce").is_err()); // space
+        assert!(username("ali@ce").is_err()); // @
+        assert!(username("ali.ce").is_err()); // dot
     }
 
     #[test]
@@ -110,7 +110,16 @@ mod tests {
 
     #[test]
     fn username_reserved() {
-        for r in ["admin", "root", "system", "lynx", "support", "api", "null", "undefined"] {
+        for r in [
+            "admin",
+            "root",
+            "system",
+            "lynx",
+            "support",
+            "api",
+            "null",
+            "undefined",
+        ] {
             assert!(username(r).is_err(), "{r} should be reserved");
         }
     }

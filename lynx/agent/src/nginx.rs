@@ -43,7 +43,15 @@ async fn check_nginx(state: &AppState) {
 
 async fn is_container_running(name: &str) -> bool {
     let out = std::process::Command::new("podman")
-        .args(["ps", "--filter", &format!("name={name}"), "--filter", "status=running", "--format", "{{.Names}}"])
+        .args([
+            "ps",
+            "--filter",
+            &format!("name={name}"),
+            "--filter",
+            "status=running",
+            "--format",
+            "{{.Names}}",
+        ])
         .output();
     match out {
         Ok(o) => String::from_utf8_lossy(&o.stdout).contains(name),
@@ -53,7 +61,14 @@ async fn is_container_running(name: &str) -> bool {
 
 async fn container_ever_existed(name: &str) -> bool {
     let out = std::process::Command::new("podman")
-        .args(["ps", "-a", "--filter", &format!("name={name}"), "--format", "{{.Names}}"])
+        .args([
+            "ps",
+            "-a",
+            "--filter",
+            &format!("name={name}"),
+            "--format",
+            "{{.Names}}",
+        ])
         .output();
     match out {
         Ok(o) => String::from_utf8_lossy(&o.stdout).contains(name),
@@ -90,7 +105,12 @@ async fn redeploy_nginx(state: &AppState) {
         match status {
             Ok(s) if s.success() => {
                 tracing::info!(attempt, "nginx re-deployed successfully");
-                audit_nginx_event(state, "nginx_unexpected_stop", "re-deployed after container removal").await;
+                audit_nginx_event(
+                    state,
+                    "nginx_unexpected_stop",
+                    "re-deployed after container removal",
+                )
+                .await;
                 return;
             }
             _ => {
@@ -102,8 +122,16 @@ async fn redeploy_nginx(state: &AppState) {
         }
     }
 
-    tracing::error!("nginx re-deploy failed after {} attempts — manual intervention required", MAX_REDEPLOY_ATTEMPTS);
-    audit_nginx_event(state, "nginx_unexpected_stop", "re-deploy failed after 3 attempts").await;
+    tracing::error!(
+        "nginx re-deploy failed after {} attempts — manual intervention required",
+        MAX_REDEPLOY_ATTEMPTS
+    );
+    audit_nginx_event(
+        state,
+        "nginx_unexpected_stop",
+        "re-deploy failed after 3 attempts",
+    )
+    .await;
 }
 
 async fn restore_nginx_config(state: &AppState) {

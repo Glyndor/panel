@@ -1,9 +1,4 @@
-use crate::{
-    auth::PermissionLevel,
-    error::AgentError,
-    nftables,
-    state::AppState,
-};
+use crate::{auth::PermissionLevel, error::AgentError, nftables, state::AppState};
 
 use serde_json::{json, Value};
 
@@ -12,7 +7,9 @@ pub async fn handle_nftables_apply(
     cmd: &crate::auth::VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("nftables.apply requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.apply requires write permission",
+        ));
     }
 
     // Chain-specific update: { chain: "lynx-global"|"lynx-local", rules: "..." }
@@ -26,8 +23,12 @@ pub async fn handle_nftables_apply(
 
         match chain {
             "lynx-global" => state.set_nft_global_body(rules.clone()),
-            "lynx-local"  => state.set_nft_local_body(rules.clone()),
-            _ => return Err(AgentError::BadRequest("unknown chain: must be lynx-global or lynx-local")),
+            "lynx-local" => state.set_nft_local_body(rules.clone()),
+            _ => {
+                return Err(AgentError::BadRequest(
+                    "unknown chain: must be lynx-global or lynx-local",
+                ))
+            }
         }
 
         let result = apply_current_ruleset(state)?;
@@ -66,14 +67,14 @@ pub async fn handle_nftables_apply(
 fn apply_current_ruleset(state: &AppState) -> std::result::Result<Value, AgentError> {
     let ruleset = nftables::Ruleset {
         wireguard_port: state.nft_wg_port(),
-        org_networks:   vec![],
-        global_body:    state.nft_global_body(),
-        local_body:     state.nft_local_body(),
+        org_networks: vec![],
+        global_body: state.nft_global_body(),
+        local_body: state.nft_local_body(),
     };
 
-    let rendered = nftables::apply(&ruleset).map_err(anyhow::Error::from)?;
+    let rendered = nftables::apply(&ruleset)?;
     // Checksum from live kernel state — must match current_checksum() in divergence checker.
-    let checksum = nftables::current_checksum().map_err(anyhow::Error::from)?;
+    let checksum = nftables::current_checksum()?;
     state.set_nft_checksum(checksum);
     state.set_nft_last_ruleset(rendered);
 
@@ -85,16 +86,18 @@ pub fn handle_nftables_restore(
     cmd: &crate::auth::VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("nftables.restore requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.restore requires write permission",
+        ));
     }
 
     let ruleset = state
         .nft_last_ruleset()
         .ok_or_else(|| AgentError::BadRequest("no ruleset has been applied yet"))?;
 
-    nftables::apply_raw(&ruleset).map_err(anyhow::Error::from)?;
+    nftables::apply_raw(&ruleset)?;
 
-    let checksum = nftables::current_checksum().map_err(anyhow::Error::from)?;
+    let checksum = nftables::current_checksum()?;
     state.set_nft_checksum(checksum);
 
     Ok(json!({ "ok": true, "action": "restored" }))
@@ -105,10 +108,12 @@ pub fn handle_nftables_accept(
     cmd: &crate::auth::VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("nftables.accept requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.accept requires write permission",
+        ));
     }
 
-    let current = nftables::current_checksum().map_err(anyhow::Error::from)?;
+    let current = nftables::current_checksum()?;
     state.set_nft_checksum(current.clone());
     state.set_nft_last_ruleset(String::new());
 

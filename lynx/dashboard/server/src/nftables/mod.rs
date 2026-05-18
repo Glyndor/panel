@@ -146,7 +146,9 @@ fn ip_rule_lines(rule: &NftRule) -> Vec<String> {
 
 fn rate_limit_lines(rule: &NftRule) -> Vec<String> {
     let Some(port) = rule.port else { return vec![] };
-    let Some(rate) = rule.rate_per_min else { return vec![] };
+    let Some(rate) = rule.rate_per_min else {
+        return vec![];
+    };
     let proto = rule.protocol.as_deref().unwrap_or("both");
     let mut lines = Vec::new();
 

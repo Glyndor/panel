@@ -38,13 +38,19 @@ mod tests {
     #[test]
     fn hash_and_verify_correct() {
         let h = hash("MyP@ssword123").expect("hash");
-        assert!(verify("MyP@ssword123", &h).expect("verify"), "correct password must verify");
+        assert!(
+            verify("MyP@ssword123", &h).expect("verify"),
+            "correct password must verify"
+        );
     }
 
     #[test]
     fn wrong_password_rejected() {
         let h = hash("MyP@ssword123").expect("hash");
-        assert!(!verify("WrongP@ssword1", &h).expect("verify"), "wrong password must not verify");
+        assert!(
+            !verify("WrongP@ssword1", &h).expect("verify"),
+            "wrong password must not verify"
+        );
     }
 
     #[test]

@@ -45,9 +45,7 @@ pub struct CreateRoleBody {
 // ── Handlers ───────────────────────────────────────────────────────────────
 
 /// GET /admin/users
-pub async fn list_users(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
+pub async fn list_users(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let users = sqlx::query!(
         r#"SELECT id, username, force_password_change, created_at FROM users ORDER BY created_at"#
     )
@@ -69,7 +67,13 @@ pub async fn list_users(
             username: u.username,
             force_password_change: u.force_password_change,
             created_at: u.created_at,
-            roles: roles.into_iter().map(|r| RoleRef { id: r.id, name: r.name }).collect(),
+            roles: roles
+                .into_iter()
+                .map(|r| RoleRef {
+                    id: r.id,
+                    name: r.name,
+                })
+                .collect(),
         });
     }
 
@@ -134,14 +138,18 @@ pub async fn list_permissions(
         .fetch_all(&state.db)
         .await?;
 
-    let result: Vec<PermRef> = perms.into_iter().map(|p| PermRef { id: p.id, key: p.key }).collect();
+    let result: Vec<PermRef> = perms
+        .into_iter()
+        .map(|p| PermRef {
+            id: p.id,
+            key: p.key,
+        })
+        .collect();
     Ok(Json(result))
 }
 
 /// GET /admin/roles
-pub async fn list_roles(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
+pub async fn list_roles(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let roles = sqlx::query!("SELECT id, name FROM roles ORDER BY name")
         .fetch_all(&state.db)
         .await?;
@@ -159,7 +167,13 @@ pub async fn list_roles(
         result.push(RoleRow {
             id: r.id,
             name: r.name,
-            permissions: perms.into_iter().map(|p| PermRef { id: p.id, key: p.key }).collect(),
+            permissions: perms
+                .into_iter()
+                .map(|p| PermRef {
+                    id: p.id,
+                    key: p.key,
+                })
+                .collect(),
         });
     }
 
@@ -174,7 +188,9 @@ pub async fn create_role(
 ) -> Result<impl IntoResponse, AppError> {
     let name = body.name.trim().to_string();
     if name.is_empty() || name.len() > 64 {
-        return Err(AppError::Validation("role name must be 1–64 characters".into()));
+        return Err(AppError::Validation(
+            "role name must be 1–64 characters".into(),
+        ));
     }
 
     let id = Uuid::now_v7();
@@ -194,7 +210,10 @@ pub async fn create_role(
         }
     })?;
 
-    Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "id": id, "name": name }))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(serde_json::json!({ "id": id, "name": name })),
+    ))
 }
 
 /// DELETE /admin/roles/:id
@@ -389,7 +408,9 @@ pub async fn remove_user_role(
             .unwrap_or(0);
 
             if other_admin_roles == 0 {
-                return Err(AppError::BadRequest("cannot remove your own last admin role"));
+                return Err(AppError::BadRequest(
+                    "cannot remove your own last admin role",
+                ));
             }
         }
     }

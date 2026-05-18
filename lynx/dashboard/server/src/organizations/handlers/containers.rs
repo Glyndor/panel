@@ -1,9 +1,6 @@
 use super::super::{DeployContainerRequest, UpdateResourcesRequest};
 use crate::{
-    auth::middleware::AuthUser,
-    crypto::cmd::sign_command,
-    error::AppError,
-    state::AppState,
+    auth::middleware::AuthUser, crypto::cmd::sign_command, error::AppError, state::AppState,
 };
 use axum::{
     extract::{Extension, Path, State},

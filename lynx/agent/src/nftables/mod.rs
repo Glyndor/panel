@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::process::Command;
 
-
 const TABLE: &str = "lynx-agent";
 
 /// Full structure of the managed ruleset.
@@ -82,10 +81,7 @@ fn chain_checksum_raw(args: &[&str]) -> Result<String> {
         .context("nft list")?;
 
     if !out.status.success() {
-        anyhow::bail!(
-            "nft list failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("nft list failed: {}", String::from_utf8_lossy(&out.stderr));
     }
 
     let mut hasher = Sha256::new();

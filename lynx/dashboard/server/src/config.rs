@@ -92,7 +92,7 @@ fn load_secret_opt(env: &str, file_env: &str) -> Option<Zeroizing<String>> {
             return Some(Zeroizing::new(val.trim().to_string()));
         }
     }
-    std::env::var(env).ok().map(|v| Zeroizing::new(v))
+    std::env::var(env).ok().map(Zeroizing::new)
 }
 
 fn load_key32(env: &str, file_env: &str) -> Result<Zeroizing<[u8; 32]>> {
@@ -161,10 +161,8 @@ fn load_or_gen_x509_ca() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
     let key_raw = load_secret_opt("X509_CA_KEY", "X509_CA_KEY_FILE");
 
     if let (Some(cert_b64), Some(key_b64)) = (cert_raw, key_raw) {
-        let cert_der = Base64::decode_vec(cert_b64.trim())
-            .context("X509_CA_CERT base64 decode")?;
-        let key_der = Base64::decode_vec(key_b64.trim())
-            .context("X509_CA_KEY base64 decode")?;
+        let cert_der = Base64::decode_vec(cert_b64.trim()).context("X509_CA_CERT base64 decode")?;
+        let key_der = Base64::decode_vec(key_b64.trim()).context("X509_CA_KEY base64 decode")?;
         return Ok((cert_der, Zeroizing::new(key_der)));
     }
 

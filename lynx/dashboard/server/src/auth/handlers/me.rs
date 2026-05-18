@@ -18,10 +18,7 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
     let claims = jwt::verify_access_token(&keys, token).map_err(|_| AppError::Unauthorized)?;
 
     let mut redis = state.redis.clone();
-    if !session::check_jti_valid(&mut redis, claims.jti)
-        .await
-        .map_err(anyhow::Error::from)?
-    {
+    if !session::check_jti_valid(&mut redis, claims.jti).await? {
         return Err(AppError::Unauthorized);
     }
 

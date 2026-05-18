@@ -47,7 +47,7 @@ pub fn sign_command(
     let payload_bytes = serde_json::to_vec(&payload_json)?;
     let payload_b64 = Base64UrlUnpadded::encode_string(&payload_bytes);
 
-    let signing_key = SigningKey::from_bytes(&*config.jwt_sign_private_seed);
+    let signing_key = SigningKey::from_bytes(&config.jwt_sign_private_seed);
     let signature = signing_key.sign(&payload_bytes);
     let sig_b64 = Base64UrlUnpadded::encode_string(&signature.to_bytes());
 

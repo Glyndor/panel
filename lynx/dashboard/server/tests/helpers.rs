@@ -1,8 +1,8 @@
 use axum_test::TestServer;
 use ed25519_dalek::SigningKey;
-use rustls;
 use lynx_dashboard_server::{build_router, crypto::pki, AppState};
 use redis::aio::ConnectionManager;
+use rustls;
 use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -19,11 +19,14 @@ pub async fn test_state() -> AppState {
 
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://lynx:lynx_dev@localhost:5433/lynx_dashboard".to_string());
-    let redis_url = std::env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
     let db = PgPool::connect(&db_url).await.expect("connect to test DB");
-    sqlx::migrate!("./migrations").run(&db).await.expect("migrate test DB");
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await
+        .expect("migrate test DB");
 
     // Ensure bootstrap token window is open (idempotent — ON CONFLICT DO NOTHING).
     sqlx::query!(
@@ -147,8 +150,8 @@ async fn seed_test_admin(db: &PgPool) {
     let dek = kek::gen_dek();
     let dek_encrypted = kek::encrypt_dek(&dek, &test_kek).expect("encrypt dek");
     let email_lower = "testadmin@example.com";
-    let email_encrypted = kek::encrypt_with_dek(email_lower.as_bytes(), &dek)
-        .expect("encrypt email");
+    let email_encrypted =
+        kek::encrypt_with_dek(email_lower.as_bytes(), &dek).expect("encrypt email");
     let email_hash = lynx_dashboard_server::crypto::hash::email_hash(email_lower, test_pepper);
 
     // Insert user — skip if already exists (another parallel test may have inserted it).
@@ -166,12 +169,10 @@ async fn seed_test_admin(db: &PgPool) {
     .await;
 
     // Fetch the actual user_id in case it was already inserted.
-    let actual_id: Uuid = sqlx::query_scalar!(
-        "SELECT id FROM users WHERE username = 'testadmin'"
-    )
-    .fetch_one(db)
-    .await
-    .expect("fetch testadmin id");
+    let actual_id: Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE username = 'testadmin'")
+        .fetch_one(db)
+        .await
+        .expect("fetch testadmin id");
 
     // Create Admin role and assign *:* — use DO NOTHING on conflicts.
     let star_perm_id: Uuid = sqlx::query_scalar!("SELECT id FROM permissions WHERE key = '*:*'")
@@ -214,11 +215,10 @@ async fn seed_test_admin(db: &PgPool) {
     .await;
 
     // Reset force_password_change in case a previous test set it on all users.
-    let _ = sqlx::query!(
-        "UPDATE users SET force_password_change = false WHERE username = 'testadmin'"
-    )
-    .execute(db)
-    .await;
+    let _ =
+        sqlx::query!("UPDATE users SET force_password_change = false WHERE username = 'testadmin'")
+            .execute(db)
+            .await;
 
     sqlx::query("SELECT pg_advisory_unlock($1)")
         .bind(LOCK_KEY)
@@ -245,7 +245,10 @@ pub async fn test_state_redis_down() -> AppState {
         .unwrap_or_else(|_| "postgresql://lynx:lynx_dev@localhost:5433/lynx_dashboard".to_string());
 
     let db = PgPool::connect(&db_url).await.expect("connect to test DB");
-    sqlx::migrate!("./migrations").run(&db).await.expect("migrate test DB");
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await
+        .expect("migrate test DB");
 
     sqlx::query!(
         "INSERT INTO system_config (key, value) VALUES ('setup_token_issued_at', NOW()::text) ON CONFLICT (key) DO NOTHING"

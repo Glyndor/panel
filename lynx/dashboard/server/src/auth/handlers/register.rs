@@ -116,13 +116,12 @@ pub async fn register(
         return Err(AppError::Conflict("email already registered"));
     }
 
-    let pwd_hash = password::hash(&body.password).map_err(anyhow::Error::from)?;
+    let pwd_hash = password::hash(&body.password)?;
     password::zeroize_str(&mut body.password);
 
     let dek = kek::gen_dek();
-    let dek_encrypted = kek::encrypt_dek(&dek, &state.config.kek).map_err(anyhow::Error::from)?;
-    let email_encrypted =
-        kek::encrypt_with_dek(email_lower.as_bytes(), &dek).map_err(anyhow::Error::from)?;
+    let dek_encrypted = kek::encrypt_dek(&dek, &state.config.kek)?;
+    let email_encrypted = kek::encrypt_with_dek(email_lower.as_bytes(), &dek)?;
 
     let user_id = Uuid::now_v7();
 
@@ -143,19 +142,16 @@ pub async fn register(
     .map_err(anyhow::Error::from)?;
 
     if is_bootstrap {
-        bootstrap_admin(&state.db, user_id)
-            .await
-            .map_err(anyhow::Error::from)?;
+        bootstrap_admin(&state.db, user_id).await?;
     }
 
     Ok(StatusCode::CREATED)
 }
 
 async fn bootstrap_admin(db: &sqlx::PgPool, user_id: Uuid) -> anyhow::Result<()> {
-    let star_perm_id: Uuid =
-        sqlx::query_scalar!("SELECT id FROM permissions WHERE key = '*:*'")
-            .fetch_one(db)
-            .await?;
+    let star_perm_id: Uuid = sqlx::query_scalar!("SELECT id FROM permissions WHERE key = '*:*'")
+        .fetch_one(db)
+        .await?;
 
     let role_id = Uuid::now_v7();
     sqlx::query!(

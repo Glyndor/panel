@@ -29,7 +29,9 @@ fn try_build_mtls_client(config: &Config, timeout: std::time::Duration) -> Optio
 
     // Trust root store with the internal CA.
     let mut root_store = rustls::RootCertStore::empty();
-    root_store.add(CertificateDer::from(ca_cert_der.to_vec())).ok()?;
+    root_store
+        .add(CertificateDer::from(ca_cert_der.to_vec()))
+        .ok()?;
 
     // Dashboard client cert + key.
     let cert_chain = vec![CertificateDer::from(cert_der.to_vec())];

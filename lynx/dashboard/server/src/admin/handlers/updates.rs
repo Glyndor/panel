@@ -143,7 +143,7 @@ pub async fn trigger_update(
         });
 
         let signed = cmd::sign_command(&state.config, agent.id, user.user_id, "write", &command)
-            .map_err(|e| AppError::Internal(e))?;
+            .map_err(AppError::Internal)?;
 
         let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
 

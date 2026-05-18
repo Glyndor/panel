@@ -102,11 +102,9 @@ pub async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
     }
 
     // UUID v7 required — generate in Rust, not via gen_random_uuid() (UUID v4)
-    let session_ids = sqlx::query_scalar!(
-        "SELECT id FROM sessions WHERE expires_at > NOW()"
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let session_ids = sqlx::query_scalar!("SELECT id FROM sessions WHERE expires_at > NOW()")
+        .fetch_all(&state.db)
+        .await?;
 
     for session_id in &session_ids {
         let log_id = Uuid::now_v7();
@@ -130,10 +128,11 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
     use crate::agents::wg;
     use std::io::Write;
 
-    let agents =
-        sqlx::query!("SELECT id, wg_pubkey, wg_ip::text AS wg_ip, api_port FROM agents WHERE status = 'online'")
-            .fetch_all(&state.db)
-            .await?;
+    let agents = sqlx::query!(
+        "SELECT id, wg_pubkey, wg_ip::text AS wg_ip, api_port FROM agents WHERE status = 'online'"
+    )
+    .fetch_all(&state.db)
+    .await?;
 
     let client = crate::agents::client::build_agent_client(&state.config);
 
@@ -171,7 +170,11 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
         }
 
         // Update in-memory PSK cache.
-        state.wg_psks.write().await.insert(agent.id, new_psk.clone());
+        state
+            .wg_psks
+            .write()
+            .await
+            .insert(agent.id, new_psk.clone());
 
         // Send new PSK to agent via signed command.
         let command = serde_json::json!({
@@ -180,7 +183,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
         });
 
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
-            .map_err(|e| AppError::Internal(e))?;
+            .map_err(AppError::Internal)?;
 
         let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
@@ -212,8 +215,8 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
     let client = crate::agents::client::build_agent_client(&state.config);
 
     for agent in &agents {
-        let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
-            .map_err(|e| AppError::Internal(e))?;
+        let cert =
+            pki::issue_cert(&state.config.ca_private_seed, agent.id).map_err(AppError::Internal)?;
 
         sqlx::query!(
             "UPDATE agents SET cert_payload = $1, cert_signature = $2, cert_expires_at = NOW() + INTERVAL '90 days' WHERE id = $3",
@@ -235,7 +238,7 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
 
             let signed =
                 cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
-                    .map_err(|e| AppError::Internal(e))?;
+                    .map_err(AppError::Internal)?;
 
             let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
             let result = client
@@ -402,8 +405,8 @@ pub async fn rotate_expiring_certs(state: &AppState, threshold_days: i64) -> Res
     let client = crate::agents::client::build_agent_client(&state.config);
 
     for agent in &agents {
-        let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
-            .map_err(|e| AppError::Internal(e))?;
+        let cert =
+            pki::issue_cert(&state.config.ca_private_seed, agent.id).map_err(AppError::Internal)?;
 
         sqlx::query!(
             "UPDATE agents SET cert_payload = $1, cert_signature = $2, cert_expires_at = NOW() + INTERVAL '90 days' WHERE id = $3",
@@ -421,7 +424,7 @@ pub async fn rotate_expiring_certs(state: &AppState, threshold_days: i64) -> Res
         });
 
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
-            .map_err(|e| AppError::Internal(e))?;
+            .map_err(AppError::Internal)?;
 
         let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
         let result = client

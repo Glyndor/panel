@@ -31,9 +31,9 @@ async fn check_once(state: &AppState) {
     }
 
     // Detect which chains were modified for appropriate severity / logging.
-    let base_diverged   = is_chain_diverged(state, "lynx-base");
+    let base_diverged = is_chain_diverged(state, "lynx-base");
     let global_diverged = is_chain_diverged(state, "lynx-global");
-    let local_diverged  = is_chain_diverged(state, "lynx-local");
+    let local_diverged = is_chain_diverged(state, "lynx-local");
 
     if base_diverged {
         error!(
@@ -58,7 +58,9 @@ async fn check_once(state: &AppState) {
         if let Err(e2) = super::apply_emergency() {
             error!(error = %e2, "emergency ruleset also failed — lockdown");
         }
-        state.lockdown.store(true, std::sync::atomic::Ordering::SeqCst);
+        state
+            .lockdown
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     } else {
         info!("nftables auto-restored successfully");
     }
@@ -81,10 +83,7 @@ fn is_chain_diverged(_state: &AppState, chain: &str) -> bool {
     // if the chain is accessible. If nft fails (chain deleted), that's divergence.
     // For base specifically, any table-level divergence implies base was touched
     // if global/local weren't modified — conservative assumption.
-    match super::chain_checksum(chain) {
-        Ok(_) => false, // chain exists; full-table divergence already confirmed
-        Err(_) => true, // chain missing or inaccessible = definitely diverged
-    }
+    super::chain_checksum(chain).is_err()
 }
 
 fn restore(state: &AppState) -> anyhow::Result<()> {

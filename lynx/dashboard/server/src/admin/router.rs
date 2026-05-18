@@ -16,7 +16,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/sessions/all", delete(handlers::revoke_all_sessions))
         .route("/users", get(handlers::list_users))
         .route("/users/{id}", delete(handlers::delete_user))
-        .route("/users/{user_id}/sessions", delete(handlers::revoke_user_sessions))
+        .route(
+            "/users/{user_id}/sessions",
+            delete(handlers::revoke_user_sessions),
+        )
         .route(
             "/users/{user_id}/sessions/{session_id}",
             delete(handlers::admin_revoke_session),
@@ -57,7 +60,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/update-check", get(handlers::update_check))
         .route("/update-log", get(handlers::list_update_log))
         .route("/alerts", get(handlers::list_alerts))
-        .route("/alerts/{id}/acknowledge", post(handlers::acknowledge_alert));
+        .route(
+            "/alerts/{id}/acknowledge",
+            post(handlers::acknowledge_alert),
+        );
 
     Router::new().merge(admin_only).merge(auth_only)
 }

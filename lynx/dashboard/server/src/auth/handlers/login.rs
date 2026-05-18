@@ -58,15 +58,13 @@ pub async fn login(
         Some(u) => u,
     };
 
-    let ok = password::verify(&body.password, &u.password_hash).map_err(anyhow::Error::from)?;
+    let ok = password::verify(&body.password, &u.password_hash)?;
     if !ok {
         return Err(AppError::InvalidCredentials);
     }
 
     if u.single_session {
-        session::revoke_all_user_sessions(&state.db, &mut redis, u.id, "mass_logout")
-            .await
-            .map_err(anyhow::Error::from)?;
+        session::revoke_all_user_sessions(&state.db, &mut redis, u.id, "mass_logout").await?;
     }
 
     let session_id = Uuid::now_v7();
@@ -82,8 +80,7 @@ pub async fn login(
         session_id,
         &hash::ip_hash(&ip),
         &hash::ua_hash(&ua),
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
 
     let expires_at = Utc::now() + Duration::days(1);
 
@@ -100,12 +97,9 @@ pub async fn login(
             last_jti: jti,
         },
     )
-    .await
-    .map_err(anyhow::Error::from)?;
+    .await?;
 
-    session::store_access_jti(&mut redis, jti, session_id)
-        .await
-        .map_err(anyhow::Error::from)?;
+    session::store_access_jti(&mut redis, jti, session_id).await?;
 
     let theme = sqlx::query_scalar!(
         "SELECT theme FROM user_preferences WHERE user_id = $1",

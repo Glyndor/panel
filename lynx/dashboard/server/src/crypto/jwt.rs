@@ -228,9 +228,15 @@ mod tests {
         let jti = dummy_uuid();
         let session_id = dummy_uuid();
 
-        let token =
-            issue_access_token(&keys, user_id, jti, session_id, "ip_hash_val", "ua_hash_val")
-                .expect("issue token");
+        let token = issue_access_token(
+            &keys,
+            user_id,
+            jti,
+            session_id,
+            "ip_hash_val",
+            "ua_hash_val",
+        )
+        .expect("issue token");
 
         let claims = verify_access_token(&keys, &token).expect("verify token");
         assert_eq!(claims.sub, user_id);
@@ -243,15 +249,8 @@ mod tests {
     #[test]
     fn wrong_sign_key_rejected() {
         let keys = test_keys();
-        let token = issue_access_token(
-            &keys,
-            dummy_uuid(),
-            dummy_uuid(),
-            dummy_uuid(),
-            "ip",
-            "ua",
-        )
-        .expect("issue");
+        let token = issue_access_token(&keys, dummy_uuid(), dummy_uuid(), dummy_uuid(), "ip", "ua")
+            .expect("issue");
 
         let mut bad_keys = test_keys();
         bad_keys.sign_public_bytes = [0u8; 32]; // invalid pub key → verify fails
@@ -261,15 +260,8 @@ mod tests {
     #[test]
     fn wrong_enc_key_rejected() {
         let keys = test_keys();
-        let token = issue_access_token(
-            &keys,
-            dummy_uuid(),
-            dummy_uuid(),
-            dummy_uuid(),
-            "ip",
-            "ua",
-        )
-        .expect("issue");
+        let token = issue_access_token(&keys, dummy_uuid(), dummy_uuid(), dummy_uuid(), "ip", "ua")
+            .expect("issue");
 
         let mut bad_keys = test_keys();
         bad_keys.enc_private_bytes = [0u8; 32]; // wrong private key → decrypt fails
@@ -285,15 +277,8 @@ mod tests {
     #[test]
     fn tampered_token_rejected() {
         let keys = test_keys();
-        let token = issue_access_token(
-            &keys,
-            dummy_uuid(),
-            dummy_uuid(),
-            dummy_uuid(),
-            "ip",
-            "ua",
-        )
-        .expect("issue");
+        let token = issue_access_token(&keys, dummy_uuid(), dummy_uuid(), dummy_uuid(), "ip", "ua")
+            .expect("issue");
 
         // Corrupt a character near the middle of the compact JWE string
         let mut bytes = token.into_bytes();

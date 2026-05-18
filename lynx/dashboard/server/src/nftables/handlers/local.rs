@@ -176,15 +176,29 @@ pub async fn push_local_rules(
 }
 
 fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
-    let valid_kinds = ["allow_port", "block_port", "allow_ip", "block_ip", "rate_limit"];
+    let valid_kinds = [
+        "allow_port",
+        "block_port",
+        "allow_ip",
+        "block_ip",
+        "rate_limit",
+    ];
     if !valid_kinds.contains(&req.kind.as_str()) {
         return Err(AppError::Validation("invalid rule kind".into()));
     }
-    if matches!(req.kind.as_str(), "allow_port" | "block_port" | "rate_limit") && req.port.is_none() {
-        return Err(AppError::Validation("port required for this rule kind".into()));
+    if matches!(
+        req.kind.as_str(),
+        "allow_port" | "block_port" | "rate_limit"
+    ) && req.port.is_none()
+    {
+        return Err(AppError::Validation(
+            "port required for this rule kind".into(),
+        ));
     }
     if req.kind == "rate_limit" && req.rate_per_min.is_none() {
-        return Err(AppError::Validation("rate_per_min required for rate_limit".into()));
+        return Err(AppError::Validation(
+            "rate_per_min required for rate_limit".into(),
+        ));
     }
     if let Some(proto) = &req.protocol {
         if !["tcp", "udp", "both"].contains(&proto.as_str()) {

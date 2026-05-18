@@ -75,24 +75,31 @@ fn collect_container_stats() -> Vec<ContainerStat> {
         #[serde(rename = "Name")]
         name: String,
         #[serde(rename = "CPUPerc")]
-        cpu_perc: String,   // "1.23%"
+        cpu_perc: String, // "1.23%"
         #[serde(rename = "MemUsage")]
-        mem_usage: String,  // "12.5MB / 2GB"
+        mem_usage: String, // "12.5MB / 2GB"
     }
 
     let stats: Vec<RawStat> = serde_json::from_slice(&out).unwrap_or_default();
 
-    stats.into_iter().map(|s| {
-        let cpu = s.cpu_perc.trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
-        let (usage, limit) = parse_mem_usage(&s.mem_usage);
-        ContainerStat {
-            id: s.id,
-            name: s.name,
-            cpu_percent: cpu,
-            mem_usage_mb: usage,
-            mem_limit_mb: limit,
-        }
-    }).collect()
+    stats
+        .into_iter()
+        .map(|s| {
+            let cpu = s
+                .cpu_perc
+                .trim_end_matches('%')
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let (usage, limit) = parse_mem_usage(&s.mem_usage);
+            ContainerStat {
+                id: s.id,
+                name: s.name,
+                cpu_percent: cpu,
+                mem_usage_mb: usage,
+                mem_limit_mb: limit,
+            }
+        })
+        .collect()
 }
 
 /// Parse "12.5MiB / 2GiB" into (usage_mb, limit_mb).
@@ -177,7 +184,7 @@ fn read_disk_gb(mount: &str) -> (f64, f64) {
     use nix::sys::statvfs::statvfs;
     match statvfs(mount) {
         Ok(stat) => {
-            let block = stat.block_size() as u64;
+            let block = stat.block_size();
             let total = stat.blocks() * block;
             let avail = stat.blocks_available() * block;
             let used = total.saturating_sub(avail);

@@ -1,9 +1,6 @@
 use super::super::{DataPlaneTunnel, HorizontalScaleRequest};
 use crate::{
-    auth::middleware::AuthUser,
-    crypto::cmd::sign_command,
-    error::AppError,
-    state::AppState,
+    auth::middleware::AuthUser, crypto::cmd::sign_command, error::AppError, state::AppState,
 };
 use axum::{
     extract::{Extension, Path, State},
@@ -318,7 +315,7 @@ pub async fn teardown_horizontal_scale(
                 let signed =
                     sign_command(&state.config, agent_id, user.user_id, "write", &teardown)?;
                 let _ = http
-                    .post(&format!("http://{}:{}/cmd", a.wg_ip, a.api_port))
+                    .post(format!("http://{}:{}/cmd", a.wg_ip, a.api_port))
                     .header("Authorization", format!("Bearer {tok}"))
                     .json(&signed)
                     .timeout(std::time::Duration::from_secs(15))

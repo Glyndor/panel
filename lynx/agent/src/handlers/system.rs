@@ -22,14 +22,12 @@ use super::{
         handle_container_restart, handle_container_start, handle_container_stop,
         handle_container_update, handle_tenant_ensure,
     },
+    nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
     nginx_cmd::{
         handle_certbot_obtain, handle_close_setup_port, handle_nginx_deploy,
         handle_nginx_install_cert, handle_nginx_update_config,
     },
-    nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
-    wireguard::{
-        handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk,
-    },
+    wireguard::{handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk},
 };
 
 pub async fn health() -> StatusCode {
@@ -130,8 +128,7 @@ pub async fn run_verified_command(
             },
         },
     )
-    .await
-    .map_err(anyhow::Error::from)?;
+    .await?;
 
     result
 }
@@ -204,7 +201,9 @@ async fn command_dispatch(
 
 async fn handle_update_self(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("update.self requires write permission"));
+        return Err(AgentError::Forbidden(
+            "update.self requires write permission",
+        ));
     }
     let version = require_str(&cmd.command, "version")?;
     let download_url = require_str(&cmd.command, "download_url")?;
@@ -224,7 +223,9 @@ pub async fn handle_dashboard_migrate(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("dashboard.migrate requires write permission"));
+        return Err(AgentError::Forbidden(
+            "dashboard.migrate requires write permission",
+        ));
     }
 
     let target_url = require_str(&cmd.command, "target_url")?;
@@ -244,7 +245,7 @@ pub async fn handle_dashboard_migrate(
         };
 
         let _ = client
-            .post(&format!("{target_url}/migration/agent-confirm"))
+            .post(format!("{target_url}/migration/agent-confirm"))
             .header("Authorization", format!("Bearer {sync_token}"))
             .json(&serde_json::json!({ "agent_id": agent_id }))
             .send()
@@ -261,7 +262,9 @@ pub async fn handle_cert_update(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("cert.update requires write permission"));
+        return Err(AgentError::Forbidden(
+            "cert.update requires write permission",
+        ));
     }
 
     let payload = cmd
@@ -282,8 +285,7 @@ pub async fn handle_cert_update(
     let ca_public = cert::load_ca_public_key()
         .ok_or_else(|| AgentError::Internal(anyhow::anyhow!("CA_PUBLIC_KEY not configured")))?;
 
-    cert::verify(&cert_entry, &ca_public, state.config.agent_id)
-        .map_err(|e| AgentError::Internal(e))?;
+    cert::verify(&cert_entry, &ca_public, state.config.agent_id).map_err(AgentError::Internal)?;
 
     let cert_json =
         serde_json::to_string(&cert_entry).map_err(|e| AgentError::Internal(anyhow::anyhow!(e)))?;
@@ -306,7 +308,9 @@ async fn handle_db_rotate_password(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("db.rotate_password requires write permission"));
+        return Err(AgentError::Forbidden(
+            "db.rotate_password requires write permission",
+        ));
     }
 
     use rand::Rng;
@@ -327,7 +331,11 @@ async fn handle_db_rotate_password(
         .spawn()
         .and_then(|mut child| {
             use std::io::Write;
-            child.stdin.as_mut().unwrap().write_all(new_pass.as_bytes())?;
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(new_pass.as_bytes())?;
             child.wait()
         })
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("podman secret create: {e}")))?;
@@ -342,11 +350,15 @@ async fn handle_db_rotate_password(
 
 fn handle_vps_reboot(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("vps.reboot requires write permission"));
+        return Err(AgentError::Forbidden(
+            "vps.reboot requires write permission",
+        ));
     }
     tokio::spawn(async {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        let _ = std::process::Command::new("systemctl").arg("reboot").status();
+        let _ = std::process::Command::new("systemctl")
+            .arg("reboot")
+            .status();
     });
     Ok(json!({ "ok": true, "message": "reboot initiated" }))
 }

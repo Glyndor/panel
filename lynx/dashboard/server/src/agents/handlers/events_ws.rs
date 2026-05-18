@@ -1,11 +1,11 @@
 use crate::{auth::middleware::AuthUser, error::AppError, state::AppState};
+use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{State, WebSocketUpgrade},
     http::HeaderMap,
     response::IntoResponse,
     Extension,
 };
-use axum::extract::ws::{Message, WebSocket};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -23,10 +23,7 @@ pub async fn frontend_events_ws(
     Ok(ws.on_upgrade(move |socket| handle_events_socket(socket, rx)))
 }
 
-async fn handle_events_socket(
-    mut socket: WebSocket,
-    mut rx: broadcast::Receiver<Arc<String>>,
-) {
+async fn handle_events_socket(mut socket: WebSocket, mut rx: broadcast::Receiver<Arc<String>>) {
     loop {
         tokio::select! {
             result = rx.recv() => {
@@ -68,13 +65,12 @@ pub(crate) async fn validate_ws_origin(
         None => return Ok(()),
     };
 
-    let configured_domain: Option<String> = sqlx::query_scalar!(
-        "SELECT domain FROM domain_config WHERE id = 1"
-    )
-    .fetch_optional(&state.db)
-    .await
-    .unwrap_or(None)
-    .flatten();
+    let configured_domain: Option<String> =
+        sqlx::query_scalar!("SELECT domain FROM domain_config WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None)
+            .flatten();
 
     let allowed = if let Some(ref domain) = configured_domain {
         origin == format!("https://{domain}")

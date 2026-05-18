@@ -29,7 +29,9 @@ async fn security_headers_present_on_health() {
         "X-Frame-Options: DENY missing"
     );
     assert_eq!(
-        headers.get("x-content-type-options").and_then(|v| v.to_str().ok()),
+        headers
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
         Some("nosniff"),
         "X-Content-Type-Options: nosniff missing"
     );
@@ -107,7 +109,9 @@ async fn login_error_body_does_not_reveal_username_existence() {
     // Body must not mention "not found", "no user", "doesn't exist", etc.
     let lower = body.to_lowercase();
     assert!(
-        !lower.contains("not found") && !lower.contains("no user") && !lower.contains("doesn't exist"),
+        !lower.contains("not found")
+            && !lower.contains("no user")
+            && !lower.contains("doesn't exist"),
         "error body must not reveal user existence: {body}"
     );
 }
@@ -220,14 +224,22 @@ async fn agents_endpoint_requires_auth() {
 async fn organizations_endpoint_requires_auth() {
     let server = helpers::test_server().await;
     let res = server.get("/organizations").await;
-    assert_eq!(res.status_code().as_u16(), 401, "/organizations must require auth");
+    assert_eq!(
+        res.status_code().as_u16(),
+        401,
+        "/organizations must require auth"
+    );
 }
 
 #[tokio::test]
 async fn admin_endpoint_requires_auth() {
     let server = helpers::test_server().await;
     let res = server.get("/admin/users").await;
-    assert_eq!(res.status_code().as_u16(), 401, "/admin/* must require auth");
+    assert_eq!(
+        res.status_code().as_u16(),
+        401,
+        "/admin/* must require auth"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +296,7 @@ async fn org_not_member_returns_404_not_403() {
         }))
         .await;
     assert!(create_res.status_code().is_success(), "org create failed");
-    let org_id = create_res
-        .json::<serde_json::Value>()["id"]
+    let org_id = create_res.json::<serde_json::Value>()["id"]
         .as_str()
         .unwrap()
         .to_string();

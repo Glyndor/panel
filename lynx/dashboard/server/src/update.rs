@@ -35,7 +35,10 @@ pub async fn perform_dashboard_update(
     .await;
 
     if result.is_ok() {
-        tracing::info!(version, "dashboard backend swap complete — exiting for Podman restart");
+        tracing::info!(
+            version,
+            "dashboard backend swap complete — exiting for Podman restart"
+        );
         std::process::exit(0);
     }
 }
@@ -47,7 +50,9 @@ async fn do_backend_swap(version: &str, url: &str, sig_url: &str) -> Result<()> 
     validate_github_url(sig_url)?;
 
     let binary = download_bytes(url).await.context("download binary")?;
-    let sig = download_bytes(sig_url).await.context("download signature")?;
+    let sig = download_bytes(sig_url)
+        .await
+        .context("download signature")?;
 
     verify_signature(&binary, &sig).context("signature verification failed — update aborted")?;
     tracing::info!(version, bytes = binary.len(), "signature verified");
@@ -79,7 +84,10 @@ async fn do_backend_swap(version: &str, url: &str, sig_url: &str) -> Result<()> 
 }
 
 fn validate_github_url(url: &str) -> Result<()> {
-    let allowed = ["https://github.com/", "https://objects.githubusercontent.com/"];
+    let allowed = [
+        "https://github.com/",
+        "https://objects.githubusercontent.com/",
+    ];
     if allowed.iter().any(|prefix| url.starts_with(prefix)) {
         Ok(())
     } else {
@@ -93,7 +101,9 @@ fn validate_github_url(url: &str) -> Result<()> {
 /// This prevents TOCTOU: we resolve once and pin to that IP — no second DNS lookup.
 async fn build_ssrf_safe_client(url: &str) -> Result<reqwest::Client> {
     let parsed = url::Url::parse(url).with_context(|| format!("parse URL {url}"))?;
-    let host = parsed.host_str().ok_or_else(|| anyhow::anyhow!("no host in URL {url}"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("no host in URL {url}"))?;
     let port = parsed.port_or_known_default().unwrap_or(443);
 
     let addrs: Vec<IpAddr> = tokio::net::lookup_host(format!("{host}:{port}"))
@@ -119,7 +129,9 @@ async fn build_ssrf_safe_client(url: &str) -> Result<reqwest::Client> {
         .timeout(std::time::Duration::from_secs(300))
         .resolve(host, std::net::SocketAddr::new(pinned_ip, port));
 
-    client_builder.build().context("build SSRF-safe HTTP client")
+    client_builder
+        .build()
+        .context("build SSRF-safe HTTP client")
 }
 
 fn is_blocked_ip(ip: &IpAddr) -> bool {
@@ -127,25 +139,41 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
         IpAddr::V4(v4) => {
             let octets = v4.octets();
             // 10.0.0.0/8
-            if octets[0] == 10 { return true; }
+            if octets[0] == 10 {
+                return true;
+            }
             // 172.16.0.0/12
-            if octets[0] == 172 && (octets[1] & 0xF0) == 16 { return true; }
+            if octets[0] == 172 && (octets[1] & 0xF0) == 16 {
+                return true;
+            }
             // 192.168.0.0/16
-            if octets[0] == 192 && octets[1] == 168 { return true; }
+            if octets[0] == 192 && octets[1] == 168 {
+                return true;
+            }
             // 127.0.0.0/8 loopback
-            if octets[0] == 127 { return true; }
+            if octets[0] == 127 {
+                return true;
+            }
             // 169.254.0.0/16 link-local
-            if octets[0] == 169 && octets[1] == 254 { return true; }
+            if octets[0] == 169 && octets[1] == 254 {
+                return true;
+            }
             false
         }
         IpAddr::V6(v6) => {
             // ::1 loopback
-            if v6.is_loopback() { return true; }
+            if v6.is_loopback() {
+                return true;
+            }
             let segs = v6.segments();
             // fc00::/7 unique local
-            if (segs[0] & 0xFE00) == 0xFC00 { return true; }
+            if (segs[0] & 0xFE00) == 0xFC00 {
+                return true;
+            }
             // fe80::/10 link-local
-            if (segs[0] & 0xFFC0) == 0xFE80 { return true; }
+            if (segs[0] & 0xFFC0) == 0xFE80 {
+                return true;
+            }
             false
         }
     }
@@ -192,7 +220,10 @@ pub fn spawn_startup_health_guard() {
 
         for _ in 0..15 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if client.get("http://127.0.0.1:8080/health").send().await
+            if client
+                .get("http://127.0.0.1:8080/health")
+                .send()
+                .await
                 .map(|r| r.status().is_success())
                 .unwrap_or(false)
             {
@@ -235,7 +266,8 @@ fn verify_signature(binary: &[u8], sig_bytes: &[u8]) -> Result<()> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("signature must be 64 bytes, got {}", sig_bytes.len()))?;
     let sig = Signature::from_bytes(&sig_arr);
-    key.verify(binary, &sig).context("Ed25519 signature invalid")
+    key.verify(binary, &sig)
+        .context("Ed25519 signature invalid")
 }
 
 fn load_release_verify_key() -> Result<[u8; 32]> {

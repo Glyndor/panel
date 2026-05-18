@@ -9,7 +9,9 @@ use super::containers::require_str;
 
 pub fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("wg.rotate_psk requires write permission"));
+        return Err(AgentError::Forbidden(
+            "wg.rotate_psk requires write permission",
+        ));
     }
     let new_psk = require_str(&cmd.command, "new_psk")?;
 
@@ -26,7 +28,9 @@ pub fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value,
         .to_string();
 
     if dashboard_pubkey.is_empty() {
-        return Err(AgentError::Internal(anyhow::anyhow!("no WireGuard peers found")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "no WireGuard peers found"
+        )));
     }
 
     let mut child = std::process::Command::new("wg")
@@ -53,7 +57,9 @@ pub fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value,
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("wait wg: {e}")))?;
 
     if !status.success() {
-        return Err(AgentError::Internal(anyhow::anyhow!("wg set preshared-key failed")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "wg set preshared-key failed"
+        )));
     }
 
     // Persist new PSK to credential file so it survives agent restarts.
@@ -75,7 +81,9 @@ pub fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value,
 
 pub fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("wg.data_plane.setup requires write permission"));
+        return Err(AgentError::Forbidden(
+            "wg.data_plane.setup requires write permission",
+        ));
     }
 
     let tunnel_id = require_str(&cmd.command, "tunnel_id")?;
@@ -145,9 +153,13 @@ pub fn handle_wg_data_plane_setup(cmd: &VerifiedCommand) -> std::result::Result<
     Ok(json!({ "ok": true, "interface": interface }))
 }
 
-pub fn handle_wg_data_plane_teardown(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
+pub fn handle_wg_data_plane_teardown(
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
     if cmd.permission == PermissionLevel::Read {
-        return Err(AgentError::Forbidden("wg.data_plane.teardown requires write permission"));
+        return Err(AgentError::Forbidden(
+            "wg.data_plane.teardown requires write permission",
+        ));
     }
 
     let tunnel_id = require_str(&cmd.command, "tunnel_id")?;

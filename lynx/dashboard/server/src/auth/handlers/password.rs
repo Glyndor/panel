@@ -33,10 +33,7 @@ pub async fn change_password(
     let claims = jwt::verify_access_token(&keys, token).map_err(|_| AppError::Unauthorized)?;
 
     let mut redis = state.redis.clone();
-    if !session::check_jti_valid(&mut redis, claims.jti)
-        .await
-        .map_err(anyhow::Error::from)?
-    {
+    if !session::check_jti_valid(&mut redis, claims.jti).await? {
         return Err(AppError::Unauthorized);
     }
 
@@ -50,13 +47,12 @@ pub async fn change_password(
     .await?
     .ok_or(AppError::Unauthorized)?;
 
-    let ok = password::verify(&body.current_password, &user.password_hash)
-        .map_err(anyhow::Error::from)?;
+    let ok = password::verify(&body.current_password, &user.password_hash)?;
     if !ok {
         return Err(AppError::InvalidCredentials);
     }
 
-    let new_hash = password::hash(&body.new_password).map_err(anyhow::Error::from)?;
+    let new_hash = password::hash(&body.new_password)?;
 
     sqlx::query!(
         "UPDATE users SET password_hash = $1, force_password_change = FALSE WHERE id = $2",
@@ -66,9 +62,7 @@ pub async fn change_password(
     .execute(&state.db)
     .await?;
 
-    session::revoke_all_user_sessions(&state.db, &mut redis, user.id, "password_changed")
-        .await
-        .map_err(anyhow::Error::from)?;
+    session::revoke_all_user_sessions(&state.db, &mut redis, user.id, "password_changed").await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

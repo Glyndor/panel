@@ -1,4 +1,4 @@
-use super::super::{CreateOrgRequest, Organization, OrgWithMemberCount};
+use super::super::{CreateOrgRequest, OrgWithMemberCount, Organization};
 use crate::{auth::middleware::AuthUser, error::AppError, state::AppState};
 use axum::{
     extract::{Extension, Path, State},

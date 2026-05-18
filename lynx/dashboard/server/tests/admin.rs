@@ -189,7 +189,10 @@ async fn admin_create_role_and_assign_to_user() {
     let (_, _, user_id) = register_and_get_id(&server).await;
 
     // Create a new role
-    let role_name = format!("testrole-{}", &uuid::Uuid::now_v7().simple().to_string()[..16]);
+    let role_name = format!(
+        "testrole-{}",
+        &uuid::Uuid::now_v7().simple().to_string()[..16]
+    );
     let create_res = server
         .post("/admin/roles")
         .add_header("x-real-ip", &admin_ip)
@@ -314,10 +317,7 @@ async fn admin_force_password_change_blocks_protected_routes() {
 
     // Admin forces password change
     let res = server
-        .post(&format!(
-            "/admin/users/{}/force-password-change",
-            user_id
-        ))
+        .post(&format!("/admin/users/{}/force-password-change", user_id))
         .add_header("x-real-ip", &admin_ip)
         .add_header("authorization", format!("Bearer {}", admin_token))
         .await;

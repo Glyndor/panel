@@ -19,6 +19,12 @@ pub fn router() -> Router<AppState> {
             "/agents/{agent_id}/local",
             get(handlers::list_local_rules).post(handlers::create_local_rule),
         )
-        .route("/agents/{agent_id}/local/push", post(handlers::push_local_rules))
-        .route("/agents/{agent_id}/local/{rule_id}", delete(handlers::delete_local_rule))
+        .route(
+            "/agents/{agent_id}/local/push",
+            post(handlers::push_local_rules),
+        )
+        .route(
+            "/agents/{agent_id}/local/{rule_id}",
+            delete(handlers::delete_local_rule),
+        )
 }

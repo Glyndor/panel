@@ -152,12 +152,15 @@ async fn rotation_log_update_and_scheduled_produce_distinct_entries() {
     let found_update = entries
         .iter()
         .any(|e| e["id"].as_str() == Some(&update_id) && e["reason"].as_str() == Some("update"));
-    let found_sched = entries.iter().any(|e| {
-        e["id"].as_str() == Some(&sched_id) && e["reason"].as_str() == Some("scheduled")
-    });
+    let found_sched = entries
+        .iter()
+        .any(|e| e["id"].as_str() == Some(&sched_id) && e["reason"].as_str() == Some("scheduled"));
 
     assert!(found_update, "rotation_log must contain the 'update' entry");
-    assert!(found_sched, "rotation_log must contain the 'scheduled' entry");
+    assert!(
+        found_sched,
+        "rotation_log must contain the 'scheduled' entry"
+    );
 
     // No duplicate IDs in the log
     let ids: Vec<&str> = entries.iter().filter_map(|e| e["id"].as_str()).collect();
@@ -210,10 +213,7 @@ async fn rotation_log_invalid_scope_rejected() {
 #[tokio::test]
 async fn rotation_log_non_admin_cannot_rotate() {
     let server = helpers::test_server().await;
-    let username = format!(
-        "t{}",
-        &uuid::Uuid::now_v7().simple().to_string()[..16]
-    );
+    let username = format!("t{}", &uuid::Uuid::now_v7().simple().to_string()[..16]);
 
     server
         .post("/auth/register")

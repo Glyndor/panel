@@ -266,8 +266,14 @@ async fn refresh_rotates_tokens() {
 
     res.assert_status_ok();
     let body: Value = res.json();
-    assert!(body["access_token"].is_string(), "refresh must return access_token");
-    assert!(body["refresh_token"].is_string(), "refresh must return new refresh_token");
+    assert!(
+        body["access_token"].is_string(),
+        "refresh must return access_token"
+    );
+    assert!(
+        body["refresh_token"].is_string(),
+        "refresh must return new refresh_token"
+    );
     assert_ne!(
         body["refresh_token"].as_str().unwrap(),
         refresh_token.as_str(),
@@ -388,7 +394,11 @@ async fn me_without_token_returns_401() {
 
     let res = server.get("/auth/me").await;
 
-    assert_eq!(res.status_code().as_u16(), 401, "unauthenticated /me must return 401");
+    assert_eq!(
+        res.status_code().as_u16(),
+        401,
+        "unauthenticated /me must return 401"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -750,13 +760,11 @@ async fn concurrent_refresh_only_one_wins() {
     let unauthorized = statuses.iter().filter(|&&s| s == 401).count();
 
     assert_eq!(
-        successes,
-        1,
+        successes, 1,
         "exactly 1 concurrent refresh must succeed; got statuses: {statuses:?}"
     );
     assert_eq!(
-        unauthorized,
-        9,
+        unauthorized, 9,
         "exactly 9 concurrent refreshes must return 401; got statuses: {statuses:?}"
     );
 }
@@ -803,8 +811,14 @@ async fn concurrent_refresh_winner_returns_valid_tokens() {
     );
 
     let (new_access, new_refresh) = &winners[0];
-    assert!(!new_access.is_empty(), "winner access_token must not be empty");
-    assert!(!new_refresh.is_empty(), "winner refresh_token must not be empty");
+    assert!(
+        !new_access.is_empty(),
+        "winner access_token must not be empty"
+    );
+    assert!(
+        !new_refresh.is_empty(),
+        "winner refresh_token must not be empty"
+    );
 
     // The new access token must work for authenticated endpoints.
     let me = server

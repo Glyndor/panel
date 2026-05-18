@@ -1,4 +1,6 @@
-use lynx_dashboard_server::{agents, build_router, config, crypto, scheduler, state::AppState, update};
+use lynx_dashboard_server::{
+    agents, build_router, config, crypto, scheduler, state::AppState, update,
+};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -42,7 +44,12 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Handle logs subcommand before connecting to DB — works even when backend is down.
-    if let Some(Command::Logs { follow, errors, since }) = cli.command {
+    if let Some(Command::Logs {
+        follow,
+        errors,
+        since,
+    }) = cli.command
+    {
         return cmd_logs(follow, errors, since);
     }
 
@@ -67,7 +74,10 @@ async fn main() -> anyhow::Result<()> {
 
     let wg_psks = agents::wg::load_all_psks();
     if !wg_psks.is_empty() {
-        tracing::info!(count = wg_psks.len(), "loaded WireGuard PSKs from secret files");
+        tracing::info!(
+            count = wg_psks.len(),
+            "loaded WireGuard PSKs from secret files"
+        );
     }
 
     let state = AppState {
@@ -159,7 +169,10 @@ fn cmd_logs(follow: bool, errors: bool, since: Option<String>) -> anyhow::Result
         for line in text.lines() {
             if errors {
                 let lower = line.to_lowercase();
-                if !lower.contains("error") && !lower.contains("critical") && !lower.contains("fatal") {
+                if !lower.contains("error")
+                    && !lower.contains("critical")
+                    && !lower.contains("fatal")
+                {
                     continue;
                 }
             }
@@ -210,6 +223,7 @@ fn generate_random_password() -> String {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
             .chars()
             .collect();
-    (0..24).map(|_| charset[rng.gen_range(0..charset.len())]).collect()
+    (0..24)
+        .map(|_| charset[rng.gen_range(0..charset.len())])
+        .collect()
 }
-

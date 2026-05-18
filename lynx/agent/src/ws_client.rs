@@ -28,10 +28,16 @@ pub async fn run_ws_client(state: AppState) {
 
     // Convert http → ws, https → wss
     let ws_url = if let Some(host) = base.strip_prefix("https://") {
-        format!("wss://{host}/agents/{agent_id}/ws?token={}", sync_token.as_str())
+        format!(
+            "wss://{host}/agents/{agent_id}/ws?token={}",
+            sync_token.as_str()
+        )
     } else {
         let host = base.strip_prefix("http://").unwrap_or(base);
-        format!("ws://{host}/agents/{agent_id}/ws?token={}", sync_token.as_str())
+        format!(
+            "ws://{host}/agents/{agent_id}/ws?token={}",
+            sync_token.as_str()
+        )
     };
 
     let mut backoff = BACKOFF_BASE;
@@ -78,7 +84,7 @@ async fn run_session(
             _ = hb_ticker.tick() => {
                 let hb = heartbeat_payload(state);
                 let text = serde_json::to_string(&hb).unwrap_or_default();
-                if sink.send(Message::Text(text.into())).await.is_err() {
+                if sink.send(Message::Text(text)).await.is_err() {
                     break;
                 }
             }
@@ -89,7 +95,7 @@ async fn run_session(
                         "data": m,
                     });
                     let text = serde_json::to_string(&frame).unwrap_or_default();
-                    if sink.send(Message::Text(text.into())).await.is_err() {
+                    if sink.send(Message::Text(text)).await.is_err() {
                         break;
                     }
                 }
@@ -101,25 +107,24 @@ async fn run_session(
                     "data": m,
                 });
                 let text = serde_json::to_string(&frame).unwrap_or_default();
-                if sink.send(Message::Text(text.into())).await.is_err() {
+                if sink.send(Message::Text(text)).await.is_err() {
                     break;
                 }
             }
             msg = stream.next() => {
+                #[allow(clippy::collapsible_match)]
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         let reply = handle_message(state, text.as_str()).await;
                         if let Some(frame) = reply {
                             let text = serde_json::to_string(&frame).unwrap_or_default();
-                            if sink.send(Message::Text(text.into())).await.is_err() {
+                            if sink.send(Message::Text(text)).await.is_err() {
                                 break;
                             }
                         }
                     }
                     Some(Ok(Message::Ping(data))) => {
-                        if sink.send(Message::Pong(data)).await.is_err() {
-                            break;
-                        }
+                        if sink.send(Message::Pong(data)).await.is_err() { break; }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(e)) => {
@@ -150,7 +155,11 @@ async fn handle_message(state: &AppState, text: &str) -> Option<Value> {
         .ok()?;
 
     let msg_type = msg.get("type").and_then(|v| v.as_str())?;
-    let req_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let req_id = msg
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     match msg_type {
         "command" => {

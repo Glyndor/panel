@@ -18,7 +18,9 @@ pub async fn handle_nginx_deploy(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("nginx.deploy requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nginx.deploy requires write permission",
+        ));
     }
 
     let image = require_str(&cmd.command, "image")?;
@@ -48,7 +50,9 @@ pub async fn handle_nginx_deploy(
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("podman run nginx: {e}")))?;
 
     if !status.success() {
-        return Err(AgentError::Internal(anyhow::anyhow!("nginx container start failed")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "nginx container start failed"
+        )));
     }
 
     // Persist config to DB if provided (optional — may come separately via nginx.update_config).
@@ -70,7 +74,9 @@ pub async fn handle_nginx_update_config(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("nginx.update_config requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nginx.update_config requires write permission",
+        ));
     }
 
     let config = require_str(&cmd.command, "config")?;
@@ -116,7 +122,9 @@ fn reload_nginx() -> std::result::Result<(), AgentError> {
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("nginx reload: {e}")))?;
 
     if !status.success() {
-        return Err(AgentError::Internal(anyhow::anyhow!("nginx -s reload failed")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "nginx -s reload failed"
+        )));
     }
 
     Ok(())
@@ -129,7 +137,9 @@ pub fn handle_nginx_install_cert(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("nginx.install_cert requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nginx.install_cert requires write permission",
+        ));
     }
 
     let domain = require_str(&cmd.command, "domain")?;
@@ -163,7 +173,9 @@ pub async fn handle_certbot_obtain(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("certbot.obtain requires write permission"));
+        return Err(AgentError::Forbidden(
+            "certbot.obtain requires write permission",
+        ));
     }
 
     let domain = require_str(&cmd.command, "domain")?;
@@ -190,7 +202,9 @@ pub async fn handle_certbot_obtain(
         .map_err(|e| AgentError::Internal(anyhow::anyhow!("certbot exec: {e}")))?;
 
     if !status.success() {
-        return Err(AgentError::Internal(anyhow::anyhow!("certbot failed to obtain certificate")));
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "certbot failed to obtain certificate"
+        )));
     }
 
     tracing::info!(domain, "Let's Encrypt cert obtained");
@@ -203,7 +217,9 @@ pub fn handle_close_setup_port(
     cmd: &VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
     if cmd.permission < PermissionLevel::Write {
-        return Err(AgentError::Forbidden("nftables.close_setup_port requires write permission"));
+        return Err(AgentError::Forbidden(
+            "nftables.close_setup_port requires write permission",
+        ));
     }
 
     // Delete the rule that allows 19443 inbound.

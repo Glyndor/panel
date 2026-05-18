@@ -1,8 +1,4 @@
-use crate::{
-    admin::handlers::rotation,
-    crypto::cmd,
-    state::AppState,
-};
+use crate::{admin::handlers::rotation, crypto::cmd, state::AppState};
 use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
@@ -142,19 +138,14 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
             "sig_url": sig_url,
         });
 
-        let signed = match cmd::sign_command(
-            &state.config,
-            agent.id,
-            system_user_id,
-            "write",
-            &command,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(agent_id = %agent.id, "scheduler: sign_command failed: {e}");
-                continue;
-            }
-        };
+        let signed =
+            match cmd::sign_command(&state.config, agent.id, system_user_id, "write", &command) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(agent_id = %agent.id, "scheduler: sign_command failed: {e}");
+                    continue;
+                }
+            };
 
         let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
         let result = client

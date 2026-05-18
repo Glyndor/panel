@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Download new binary, verify Ed25519 signature, atomic swap, then exec into new process.
 ///
@@ -113,8 +113,8 @@ fn load_verify_key() -> Result<[u8; 32]> {
         .map_err(|_| anyhow::anyhow!("DASHBOARD_VERIFY_KEY must be 32 bytes"))
 }
 
-fn tmp_path(exe: &PathBuf) -> PathBuf {
-    let mut p = exe.clone();
+fn tmp_path(exe: &Path) -> PathBuf {
+    let mut p = exe.to_path_buf();
     let name = exe
         .file_name()
         .and_then(|n| n.to_str())

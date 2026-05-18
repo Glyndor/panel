@@ -54,6 +54,7 @@ pub fn podman_as_tenant(tenant_id: &str, args: &[&str]) -> Result<std::process::
 }
 
 /// Create an isolated Podman network for an organization.
+#[allow(dead_code)]
 pub fn ensure_org_network(tenant_id: &str, network_name: &str) -> Result<()> {
     let out = podman_as_tenant(tenant_id, &["network", "exists", network_name])?;
 
@@ -144,6 +145,7 @@ pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
 }
 
 /// Tear down a project's compose stack.
+#[allow(dead_code)]
 pub fn compose_down(tenant_id: &str, project_id: &str) -> Result<()> {
     let compose_path = format!("{}/compose.yml", project_dir(tenant_id, project_id));
     if !std::path::Path::new(&compose_path).exists() {

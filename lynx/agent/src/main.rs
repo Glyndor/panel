@@ -54,7 +54,9 @@ fn build_tls_acceptor(config: &config::Config) -> Option<tokio_rustls::TlsAccept
         match rustls::server::WebPkiClientVerifier::builder(StdArc::new(root_store)).build() {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!("TLS client verifier build failed: {e} — falling back to plain HTTP");
+                tracing::warn!(
+                    "TLS client verifier build failed: {e} — falling back to plain HTTP"
+                );
                 return None;
             }
         };
@@ -98,14 +100,15 @@ async fn serve_tls(
             let io = TokioIo::new(tls_stream);
 
             // Bridge hyper::body::Incoming → axum::body::Body so the router can handle it.
-            let svc = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                let app = app.clone();
-                async move {
-                    use tower::ServiceExt;
-                    let req = req.map(axum::body::Body::new);
-                    app.oneshot(req).await
-                }
-            });
+            let svc =
+                hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        let req = req.map(axum::body::Body::new);
+                        app.oneshot(req).await
+                    }
+                });
 
             if let Err(e) = http1::Builder::new()
                 .serve_connection(io, svc)
@@ -149,7 +152,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    if let Some(AgentCommand::Logs { follow, errors, since }) = cli.command {
+    if let Some(AgentCommand::Logs {
+        follow,
+        errors,
+        since,
+    }) = cli.command
+    {
         return agent_logs(follow, errors, since);
     }
 
@@ -184,11 +192,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Reload nftables state from DB and re-apply on startup (rules don't persist across reboots).
     {
-        let rows = sqlx::query!(
-            "SELECT chain, body, wg_port FROM nftables_state ORDER BY chain"
-        )
-        .fetch_all(&state.db)
-        .await;
+        let rows = sqlx::query!("SELECT chain, body, wg_port FROM nftables_state ORDER BY chain")
+            .fetch_all(&state.db)
+            .await;
 
         if let Ok(rows) = rows {
             let mut global_body = String::new();
@@ -198,7 +204,7 @@ async fn main() -> anyhow::Result<()> {
             for row in &rows {
                 match row.chain.as_str() {
                     "lynx-global" => global_body = row.body.clone(),
-                    "lynx-local"  => local_body  = row.body.clone(),
+                    "lynx-local" => local_body = row.body.clone(),
                     _ => {}
                 }
                 wg_port = row.wg_port as u16;
@@ -223,7 +229,9 @@ async fn main() -> anyhow::Result<()> {
                     state.set_nft_last_ruleset(rendered);
                     tracing::info!("nftables ruleset re-applied from DB on startup");
                 }
-                Err(e) => tracing::warn!(error = %e, "nftables startup apply failed — will retry on first dashboard push"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "nftables startup apply failed — will retry on first dashboard push")
+                }
             }
         }
     }
@@ -273,11 +281,9 @@ async fn main() -> anyhow::Result<()> {
         loop {
             ticker.tick().await;
             let elapsed = heartbeat_clone.lock().unwrap().elapsed().as_secs();
-            if elapsed > HEARTBEAT_TIMEOUT_SECS {
-                if !lockdown_clone.load(Ordering::SeqCst) {
-                    tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
-                    lockdown_clone.store(true, Ordering::SeqCst);
-                }
+            if elapsed > HEARTBEAT_TIMEOUT_SECS && !lockdown_clone.load(Ordering::SeqCst) {
+                tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
+                lockdown_clone.store(true, Ordering::SeqCst);
             }
         }
     });

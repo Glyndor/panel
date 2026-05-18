@@ -1,8 +1,5 @@
 use crate::{
-    agents::ws_hub,
-    auth::middleware::AuthUser,
-    crypto::cmd::sign_command,
-    error::AppError,
+    agents::ws_hub, auth::middleware::AuthUser, crypto::cmd::sign_command, error::AppError,
     state::AppState,
 };
 use axum::{
@@ -169,7 +166,11 @@ pub async fn reboot_agent(
     let signed_val = serde_json::to_value(&signed).unwrap_or_default();
     if let Some(body) = ws_hub::push_command(&state, id, signed_val).await {
         let ok = body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-        let code = if ok { axum::http::StatusCode::OK } else { axum::http::StatusCode::BAD_GATEWAY };
+        let code = if ok {
+            axum::http::StatusCode::OK
+        } else {
+            axum::http::StatusCode::BAD_GATEWAY
+        };
         return Ok((code, Json(body)));
     }
 
