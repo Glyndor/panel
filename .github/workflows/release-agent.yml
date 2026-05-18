@@ -93,17 +93,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          generate_release_notes: true
-          files: |
-            lynx-agent-linux-x86_64
-            lynx-agent-linux-x86_64.sig
-            lynx-agent-linux-arm64
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --generate-notes \
+            lynx-agent-linux-x86_64 \
+            lynx-agent-linux-x86_64.sig \
+            lynx-agent-linux-arm64 \
             lynx-agent-linux-arm64.sig
