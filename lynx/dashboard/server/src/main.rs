@@ -37,6 +37,11 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install ring as the rustls crypto provider before any TLS code runs.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok(); // ok() — ignore error if already installed (e.g. in tests)
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
