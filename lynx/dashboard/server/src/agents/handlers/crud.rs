@@ -77,13 +77,11 @@ pub async fn register_agent(
         }
     };
 
-    if let Err(e) = wg::add_peer(
-        &req.wg_pubkey,
-        wg_ip
-            .parse()
-            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
-        &psk,
-    ) {
+    let wg_ip_addr: std::net::IpAddr = wg_ip
+        .parse()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("invalid allocated WG IP {wg_ip:?}: {e}")))?;
+
+    if let Err(e) = wg::add_peer(&req.wg_pubkey, wg_ip_addr, &psk) {
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
     }
 

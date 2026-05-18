@@ -14,11 +14,29 @@ use tokio::sync::broadcast;
 /// Each connected admin browser receives a copy of every agent event.
 pub async fn frontend_events_ws(
     State(state): State<AppState>,
-    Extension(_user): Extension<AuthUser>,
+    Extension(user): Extension<AuthUser>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, AppError> {
     validate_ws_origin(&state, &headers).await?;
+
+    // Require vps:read permission to receive agent events.
+    let has_access: bool = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE ur.user_id = $1 AND p.key IN ('vps:read','vps:*','*:*')
+        ) AS "exists!""#,
+        user.user_id
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    if !has_access {
+        return Err(AppError::Forbidden);
+    }
+
     let rx = state.events_tx.subscribe();
     Ok(ws.on_upgrade(move |socket| handle_events_socket(socket, rx)))
 }
@@ -75,8 +93,14 @@ pub(crate) async fn validate_ws_origin(
     let allowed = if let Some(ref domain) = configured_domain {
         origin == format!("https://{domain}")
     } else {
-        // No domain configured — browser reaches dashboard via https://IP:19443
-        origin.starts_with("https://")
+        // No domain configured — browser reaches dashboard via https://IP:19443.
+        // Use the Host header to derive the expected origin exactly, preventing
+        // cross-site WebSocket hijacking from other HTTPS origins.
+        if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
+            origin == format!("https://{host}")
+        } else {
+            false
+        }
     };
 
     if !allowed {
