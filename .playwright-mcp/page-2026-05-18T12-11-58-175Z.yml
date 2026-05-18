@@ -1,0 +1,35 @@
+- generic [active] [ref=e1]:
+  - main [ref=e33]:
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - heading "Sign in to Lynx" [level=1] [ref=e36]
+        - paragraph [ref=e37]: Distributed infrastructure orchestration
+      - generic [ref=e38]:
+        - group [ref=e39]:
+          - generic [ref=e40]: Username
+          - textbox "Username" [ref=e41]
+        - group [ref=e42]:
+          - generic [ref=e43]: Password
+          - textbox "Password" [ref=e44]
+        - button "Sign in" [ref=e45] [cursor=pointer]
+        - paragraph [ref=e46]:
+          - text: Don't have an account?
+          - link "Create account" [ref=e47] [cursor=pointer]:
+            - /url: /en/register
+      - generic [ref=e48]:
+        - text: Made with love by
+        - link "Jaroc" [ref=e49] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c
+        - text: ·
+        - link "lynx" [ref=e50] [cursor=pointer]:
+          - /url: https://github.com/Jaro-c/Lynx
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e51]:
+        - generic [ref=e52]:
+          - img [ref=e54]
+          - img [ref=e56]
+        - generic [ref=e60]: Create account
+  - button "Open Next.js Dev Tools" [ref=e28] [cursor=pointer]:
+    - img [ref=e29]
+  - alert [ref=e32]

@@ -1,0 +1,53 @@
+[     112ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[     548ms] [LOG] [Fast Refresh] done in 537ms @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[    1489ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[    1525ms] [LOG] [HMR] connected @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[  241871ms] [ERROR] WebSocket connection to 'ws://localhost:3001/api/agents/events/ws' failed: WebSocket opening handshake timed out @ http://localhost:3001/_next/static/chunks/src_0ljxgm~._.js:182
+[  483875ms] [ERROR] WebSocket connection to 'ws://localhost:3001/api/agents/events/ws' failed: WebSocket opening handshake timed out @ http://localhost:3001/_next/static/chunks/src_0ljxgm~._.js:182
+[  727878ms] [ERROR] WebSocket connection to 'ws://localhost:3001/api/agents/events/ws' failed: WebSocket opening handshake timed out @ http://localhost:3001/_next/static/chunks/src_0ljxgm~._.js:182
+[  756516ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[  756543ms] [ERROR] ./src/app/[locale]/(dashboard)/app/agents/[id]/page.tsx:293:1
+Merge conflict marker encountered.
+  291 | 						onDeleteRule={(ruleId) => deleteLocalRule(agentId, ruleId)}
+  292 | 						onPush={() => pushLocalRules(agentId)}
+> 293 | >>>>>>> origin/main
+      | ^^^^^^^
+  294 | 					/>
+  295 | 				</div>
+  296 | 			</div>
+
+Parsing ecmascript source code failed @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[  756543ms] [ERROR] ./src/app/[locale]/(dashboard)/app/settings/page.tsx:302:1
+Merge conflict marker encountered.
+  300 | =======
+  301 | 								agentsProgress: t("migrationAgentsProgress"),
+> 302 | >>>>>>> origin/main
+      | ^^^^^^^
+  303 | 								error: t("migrationStatusError"),
+  304 | 								prepareError: t("migrationPrepareError"),
+  305 | 								startError: t("migrationStartError"),
+
+Parsing ecmascript source code failed @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[  756605ms] [ERROR] ./src/app/[locale]/(dashboard)/app/agents/[id]/page.tsx:293:1
+Merge conflict marker encountered.
+  291 | 						onDeleteRule={(ruleId) => deleteLocalRule(agentId, ruleId)}
+  292 | 						onPush={() => pushLocalRules(agentId)}
+> 293 | >>>>>>> origin/main
+      | ^^^^^^^
+  294 | 					/>
+  295 | 				</div>
+  296 | 			</div>
+
+Parsing ecmascript source code failed @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[  756606ms] [ERROR] ./src/app/[locale]/(dashboard)/app/settings/page.tsx:302:1
+Merge conflict marker encountered.
+  300 | =======
+  301 | 								agentsProgress: t("migrationAgentsProgress"),
+> 302 | >>>>>>> origin/main
+      | ^^^^^^^
+  303 | 								error: t("migrationStatusError"),
+  304 | 								prepareError: t("migrationPrepareError"),
+  305 | 								startError: t("migrationStartError"),
+
+Parsing ecmascript source code failed @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[  756657ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
