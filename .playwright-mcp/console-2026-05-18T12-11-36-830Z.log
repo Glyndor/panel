@@ -1,7 +1,0 @@
-[     481ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[     511ms] [LOG] [HMR] connected @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[   35438ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[   36290ms] [LOG] [Fast Refresh] done in 952ms @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[   36720ms] [WARNING] WebSocket connection to 'ws://localhost:3001/api/agents/events/ws' failed: WebSocket is closed before the connection is established. @ http://localhost:3001/_next/static/chunks/src_0ljxgm~._.js:227
-[   51985ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[   52646ms] [LOG] [Fast Refresh] done in 762ms @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
