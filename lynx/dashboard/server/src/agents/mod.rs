@@ -66,7 +66,7 @@ pub struct RegisterAgentResponse {
     pub tls_ca_cert_der: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuditSyncEntry {
     pub id: Uuid,
     pub agent_id: Uuid,

@@ -173,7 +173,31 @@ pub async fn push_global_rules(
         }
     }
 
-    Ok(Json(json!({ "pushed": pushed, "failed": failed })))
+    // Mark offline agents as pending_sync so they receive the rules on reconnect.
+    let offline_agents = sqlx::query!(
+        "SELECT id FROM agents WHERE status != 'online'"
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    for agent in &offline_agents {
+        for rule in &rules {
+            let _ = sqlx::query!(
+                r#"
+                INSERT INTO global_rule_sync (rule_id, agent_id)
+                VALUES ($1, $2)
+                ON CONFLICT (rule_id, agent_id) DO NOTHING
+                "#,
+                rule.id,
+                agent.id,
+            )
+            .execute(&state.db)
+            .await;
+        }
+    }
+
+    Ok(Json(json!({ "pushed": pushed, "failed": failed, "pending": offline_agents.len() })))
 }
 
 fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {

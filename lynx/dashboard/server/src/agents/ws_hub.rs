@@ -223,8 +223,64 @@ async fn store_audit_entries(
         return Ok(());
     }
 
+    // Verify hash chain integrity before persisting: each entry's previous_hash must
+    // match the entry_hash of the entry immediately before it in the chain.
+    // Convention: first entry ever has previous_hash = "" (empty string).
+    let mut expected_prev: String = sqlx::query_scalar!(
+        "SELECT entry_hash FROM audit_log WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1",
+        agent_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .unwrap_or_default();
+
+    // Sort entries by created_at to process in chronological order.
+    let mut ordered = entries.clone();
+    ordered.sort_by_key(|e| e.created_at);
+
+    for entry in &ordered {
+        if entry.agent_id != agent_id {
+            continue;
+        }
+
+        let chain_ok = entry.previous_hash == expected_prev;
+
+        if !chain_ok {
+            tracing::error!(
+                agent_id = %agent_id,
+                entry_id = %entry.id,
+                "audit_log hash chain mismatch — rejecting batch"
+            );
+            crate::alerts::fire(
+                &state.db,
+                "audit_integrity_failure",
+                Some(format!(
+                    "agent={agent_id} entry={} hash chain mismatch — entries rejected",
+                    entry.id
+                )),
+                None::<Uuid>,
+            )
+            .await;
+            // Mark agent with the failure event.
+            let event_id = Uuid::now_v7();
+            let _ = sqlx::query!(
+                "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'audit_integrity_failure', $3)",
+                event_id,
+                agent_id,
+                Some(format!("hash chain broken at entry {}", entry.id))
+            )
+            .execute(&state.db)
+            .await;
+            super::handlers::broadcast_event(state, agent_id, "audit_integrity_failure", None);
+            return Err(anyhow::anyhow!("audit hash chain mismatch for agent {agent_id}"));
+        }
+
+        expected_prev = entry.entry_hash.clone();
+
+    }
+
     let mut tx = state.db.begin().await?;
-    for entry in &entries {
+    for entry in &ordered {
         if entry.agent_id != agent_id {
             continue;
         }
@@ -251,7 +307,7 @@ async fn store_audit_entries(
         .await?;
     }
     tx.commit().await?;
-    tracing::info!(agent_id = %agent_id, count = entries.len(), "audit entries received via WS");
+    tracing::info!(agent_id = %agent_id, count = ordered.len(), "audit entries received via WS");
     Ok(())
 }
 
