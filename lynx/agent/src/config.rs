@@ -103,7 +103,8 @@ fn load_key32_or_dev(env: &str) -> Result<[u8; 32]> {
     if std::env::var(env).is_err() && std::env::var(format!("{env}_FILE")).is_err() {
         tracing::warn!("{env} not configured — using ephemeral dev key (INSECURE)");
         let mut key = [0u8; 32];
-        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
+        use rand::Rng;
+        rand::rng().fill_bytes(&mut key);
         return Ok(key);
     }
     load_key32(env)

@@ -9,8 +9,8 @@ use base64ct::{Base64UrlUnpadded, Encoding};
 use chrono::{Duration, Utc};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rcgen::{
-    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType,
-    PKCS_ED25519,
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
+    SanType, PKCS_ED25519,
 };
 use rustls::pki_types::CertificateDer as RustlsCertDer;
 use serde::{Deserialize, Serialize};
@@ -95,7 +95,7 @@ pub fn verify_cert(
 /// Generate a new CA Ed25519 keypair (for startup when not configured).
 pub fn gen_ca_keypair() -> (Zeroizing<[u8; 32]>, [u8; 32]) {
     let mut seed = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut seed);
+    { use rand::Rng; rand::rng().fill_bytes(&mut seed); }
     let signing_key = SigningKey::from_bytes(&seed);
     let pub_bytes = signing_key.verifying_key().to_bytes();
     (Zeroizing::new(seed), pub_bytes)
@@ -126,19 +126,6 @@ pub fn generate_x509_ca() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
     Ok((cert_der, key_der))
 }
 
-/// Reconstruct an `rcgen::Certificate` from stored DER bytes.
-/// Used as the issuer when signing leaf certs.
-fn load_ca_rcgen(ca_cert_der: &[u8], ca_key_der: &[u8]) -> Result<(rcgen::Certificate, KeyPair)> {
-    let ca_key = KeyPair::try_from(ca_key_der).context("load CA key from DER")?;
-    let cert_der = RustlsCertDer::from(ca_cert_der.to_vec());
-    let ca_params =
-        CertificateParams::from_ca_cert_der(&cert_der).context("parse CA cert params from DER")?;
-    let ca_cert = ca_params
-        .self_signed(&ca_key)
-        .context("reconstruct CA cert")?;
-    Ok((ca_cert, ca_key))
-}
-
 /// Issue an X.509 server certificate for an agent (Ed25519).
 /// The cert includes the agent's WireGuard IP as a SAN.
 /// Returns `(cert_der, key_der_pkcs8)`.
@@ -148,14 +135,17 @@ pub fn issue_x509_agent_cert(
     agent_id: Uuid,
     wg_ip: &str,
 ) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
-    let (ca_cert, ca_key) = load_ca_rcgen(ca_cert_der, ca_key_der)?;
+    let ca_key = KeyPair::try_from(ca_key_der).context("load CA key from DER")?;
+    let cert_der_owned = RustlsCertDer::from(ca_cert_der.to_vec());
+    let issuer =
+        Issuer::from_ca_cert_der(&cert_der_owned, ca_key).context("parse CA cert as issuer")?;
+
     let leaf_key = KeyPair::generate_for(&PKCS_ED25519).context("generate agent Ed25519 key")?;
 
     let mut params = CertificateParams::new(vec![]).context("create agent cert params")?;
     params
         .distinguished_name
         .push(DnType::CommonName, format!("lynx-agent-{agent_id}"));
-    // Extended key usages: both server auth (listener) and client auth (future)
     params.extended_key_usages = vec![
         ExtendedKeyUsagePurpose::ServerAuth,
         ExtendedKeyUsagePurpose::ClientAuth,
@@ -165,7 +155,7 @@ pub fn issue_x509_agent_cert(
     }
 
     let cert = params
-        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .signed_by(&leaf_key, &issuer)
         .context("sign agent cert")?;
     let cert_der = cert.der().to_vec();
     let key_der = Zeroizing::new(leaf_key.serialize_der());
@@ -180,7 +170,11 @@ pub fn issue_x509_dashboard_client_cert(
     ca_cert_der: &[u8],
     ca_key_der: &[u8],
 ) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
-    let (ca_cert, ca_key) = load_ca_rcgen(ca_cert_der, ca_key_der)?;
+    let ca_key = KeyPair::try_from(ca_key_der).context("load CA key from DER")?;
+    let cert_der_owned = RustlsCertDer::from(ca_cert_der.to_vec());
+    let issuer =
+        Issuer::from_ca_cert_der(&cert_der_owned, ca_key).context("parse CA cert as issuer")?;
+
     let leaf_key =
         KeyPair::generate_for(&PKCS_ED25519).context("generate dashboard client Ed25519 key")?;
 
@@ -192,7 +186,7 @@ pub fn issue_x509_dashboard_client_cert(
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
 
     let cert = params
-        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .signed_by(&leaf_key, &issuer)
         .context("sign dashboard client cert")?;
     let cert_der = cert.der().to_vec();
     let key_der = Zeroizing::new(leaf_key.serialize_der());
