@@ -285,16 +285,6 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
 								targetUrl: t("migrationTargetUrl"),
 								title: t("migration"),
 								token: t("migrationToken"),
-								statusCompleted: t("migrationStatusCompleted"),
-								statusAborted: t("migrationStatusAborted"),
-								statusError: t("migrationStatusError"),
-								agentsProgress: t("migrationAgentsProgress", { confirmed: "{confirmed}", total: "{total}" }),
-								error: t("migrationStatusError"),
-								prepareError: t("migrationPrepareError"),
-								startError: t("migrationStartError"),
-								abortSuccess: t("migrationAbortSuccess"),
-								abortError: t("migrationAbortError"),
-								shutdownError: t("migrationShutdownError"),
 							}}
 						/>
 					</div>
