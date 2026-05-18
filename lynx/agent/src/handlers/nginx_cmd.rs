@@ -143,6 +143,7 @@ pub fn handle_nginx_install_cert(
     }
 
     let domain = require_str(&cmd.command, "domain")?;
+    validate_domain_for_path(&domain)?;
     let cert_pem = require_str(&cmd.command, "cert_pem")?;
 
     let cert_dir = format!("/etc/lynx/nginx/certs/{domain}");
@@ -209,6 +210,21 @@ pub async fn handle_certbot_obtain(
 
     tracing::info!(domain, "Let's Encrypt cert obtained");
     Ok(json!({ "ok": true, "domain": domain }))
+}
+
+fn validate_domain_for_path(domain: &str) -> std::result::Result<(), AgentError> {
+    if domain.is_empty()
+        || domain.len() > 253
+        || domain.contains("..")
+        || domain.contains('/')
+        || domain.contains('\0')
+        || !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+    {
+        return Err(AgentError::BadRequest("invalid domain for cert path"));
+    }
+    Ok(())
 }
 
 /// Close port 19443 via nftables once a domain is confirmed active.
