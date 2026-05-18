@@ -32,6 +32,8 @@ argon2 = { workspace = true }
 josekit = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
+# force static OpenSSL for musl builds (josekit depends on openssl-sys)
+openssl = { version = "0.10", features = ["vendored"] }
 
 # crypto primitives
 rand = { workspace = true }
