@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE nftables_state SET wg_port = $1, updated_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f2ceb2be0d2387d5c8e254dc6e9fcf5af91155fcd73f7ef31b1fd35e4193ed6"
+}
