@@ -73,12 +73,12 @@ jobs:
           - arch: x86_64
             rust-target: x86_64-unknown-linux-musl
             bun-target: bun-linux-x64-musl
-            use-cross: false
+            use_cross: false
 
           - arch: arm64
             rust-target: aarch64-unknown-linux-musl
             bun-target: bun-linux-arm64-musl
-            use-cross: true
+            use_cross: true
 
     defaults:
       run:
@@ -99,16 +99,16 @@ jobs:
           workspaces: lynx
 
       - name: Install musl toolchain (x86_64)
-        if: ${{ !matrix.use-cross }}
+        if: ${{ !matrix.use_cross }}
         run: sudo apt-get install -y musl-tools
 
       - name: Install cross (arm64)
-        if: ${{ matrix.use-cross }}
+        if: ${{ matrix.use_cross }}
         run: cargo install cross --locked
 
       - name: Build backend (musl static)
         run: |
-          if [ "${{ matrix.use-cross }}" = "true" ]; then
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release \
               --package lynx-dashboard-server \
               --target ${{ matrix.rust-target }}
