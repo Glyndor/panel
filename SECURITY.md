@@ -1,32 +1,22 @@
 # Security Policy
 
-## Supported Versions
-
-Only the latest release of each component is supported.
-
-| Component | Support |
-|-----------|---------|
-| `dashboard@latest` | ✅ Supported |
-| `agent@latest` | ✅ Supported |
-| Older versions | ❌ No patches — update via auto-update |
-
-There is no manual rollback mechanism. The auto-updater handles all version transitions. If a critical bug is found, a new release is published and deployed automatically.
-
 ---
 
 ## Reporting a Vulnerability
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Report via GitHub's private vulnerability disclosure:
-[Report a vulnerability](https://github.com/Jaro-c/Lynx/security/advisories/new)
+Report via GitHub's private vulnerability disclosure:  
+[**Report a vulnerability →**](https://github.com/Jaro-c/Lynx/security/advisories/new)
 
 Include:
-- Component affected (dashboard / agent / installer)
+- Component affected (`dashboard` / `agent` / installer)
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
-- Any suggested fix (optional)
+- Suggested fix (optional)
+
+Responsible disclosure is appreciated. If the report leads to a fix, you'll be credited in the release notes (unless you prefer anonymity).
 
 ---
 
@@ -38,15 +28,27 @@ Include:
 | Initial assessment | 5 business days |
 | Fix + release | Depends on severity |
 
-**Critical** (RCE, auth bypass, crypto break, privilege escalation): target fix within 7 days.
-**High** (data leak, firewall bypass, replay attack): target fix within 14 days.
-**Medium/Low**: addressed in next regular release.
+**Critical** (RCE, auth bypass, crypto break, privilege escalation) — target fix within 7 days.  
+**High** (data leak, firewall bypass, replay attack) — target fix within 14 days.  
+**Medium / Low** — addressed in next regular release.
+
+---
+
+## Supported Versions
+
+Only the latest release of each component is supported. Lynx auto-updates itself — there is no manual rollback. If a critical bug is found, a new release is published and deployed automatically.
+
+| Component | Support |
+|-----------|---------|
+| `dashboard@latest` | ✅ Supported |
+| `agent@latest` | ✅ Supported |
+| Older versions | ❌ No patches — update via auto-update |
 
 ---
 
 ## Scope
 
-In scope:
+**In scope:**
 - Authentication and session handling
 - WireGuard tunnel security
 - nftables rule bypass
@@ -59,9 +61,9 @@ In scope:
 - SSRF in binary download flow
 - SQL injection, shell injection
 
-Out of scope:
+**Out of scope:**
 - Vulnerabilities requiring physical access to the VPS
-- Issues in third-party dependencies (report upstream; we follow `cargo-audit` / `bun audit`)
+- Issues in third-party dependencies (report upstream — we track them via `cargo-audit` / `bun audit`)
 - Theoretical attacks with no practical exploit path
 - Social engineering
 
@@ -69,11 +71,11 @@ Out of scope:
 
 ## Security Architecture
 
-Key properties relevant to threat modeling:
+Key properties for threat modeling:
 
-- **Transport:** WireGuard + mTLS (double layer). Agent never accepts plain connections.
-- **Command integrity:** every dashboard → agent command is Ed25519-signed with nonce + 30s timestamp window. Replay attacks rejected even if transport is compromised.
-- **Binary integrity:** Ed25519 signature verified before any binary swap during auto-update. Partial downloads fail verification.
-- **Audit log:** hash-chained, append-only, synced to dashboard. Any tampered entry breaks the chain.
-- **Firewall:** nftables default deny. `lynx-base` chain is invariant — auto-restored silently if modified, even by root.
-- **Containers:** rootless Podman under per-org system users. UID 0 inside container maps to unprivileged UID on host.
+- **Transport** — WireGuard + mTLS on all dashboard ↔ agent traffic. Agent never accepts plain connections.
+- **Command integrity** — every dashboard → agent command is Ed25519-signed with a nonce and 30s timestamp window. Replay attacks rejected even if transport is compromised.
+- **Binary integrity** — Ed25519 signature verified before any binary swap during auto-update. Partial downloads fail verification automatically.
+- **Audit log** — hash-chained, append-only, synced to dashboard PostgreSQL in real time. Any tampered entry breaks the chain.
+- **Firewall** — nftables default deny. `lynx-base` chain is invariant — auto-restored silently if modified, even by root.
+- **Containers** — rootless Podman under per-org system users. UID 0 inside a container maps to an unprivileged UID on the host.
