@@ -122,23 +122,49 @@ impl Engine {
             t: Some(tag.clone()),
             rm: true,
             nocache: build.no_cache(),
-            pull: if build.pull() { Some("1".to_string()) } else { None },
-            buildargs: if build_args.is_empty() { None } else { Some(build_args) },
-            labels: if labels.is_empty() { None } else { Some(labels) },
-            networkmode: if network_owned.is_empty() { None } else { Some(network_owned) },
+            pull: if build.pull() {
+                Some("1".to_string())
+            } else {
+                None
+            },
+            buildargs: if build_args.is_empty() {
+                None
+            } else {
+                Some(build_args)
+            },
+            labels: if labels.is_empty() {
+                None
+            } else {
+                Some(labels)
+            },
+            networkmode: if network_owned.is_empty() {
+                None
+            } else {
+                Some(network_owned)
+            },
             platform: platform_owned,
-            shmsize: if shmsize > 0 { Some(shmsize as i32) } else { None },
+            shmsize: if shmsize > 0 {
+                Some(shmsize as i32)
+            } else {
+                None
+            },
             extrahosts: if extrahosts.is_empty() {
                 None
             } else {
                 Some(extrahosts)
             },
-            cachefrom: if build.cache_from().is_empty() { None } else { Some(build.cache_from().to_vec()) },
+            cachefrom: if build.cache_from().is_empty() {
+                None
+            } else {
+                Some(build.cache_from().to_vec())
+            },
             ..Default::default()
         };
 
         let body = Bytes::from(tar_bytes);
-        let mut stream = self.docker.build_image(options, None, Some(body_full(body)));
+        let mut stream = self
+            .docker
+            .build_image(options, None, Some(body_full(body)));
 
         while let Some(result) = stream.next().await {
             match result {
@@ -162,7 +188,13 @@ impl Engine {
                 .unwrap_or_else(|| (extra_tag.clone(), "latest".to_string()));
             if let Err(e) = self
                 .docker
-                .tag_image(&tag, Some(TagImageOptions { repo: Some(repo), tag: Some(tag_str) }))
+                .tag_image(
+                    &tag,
+                    Some(TagImageOptions {
+                        repo: Some(repo),
+                        tag: Some(tag_str),
+                    }),
+                )
                 .await
             {
                 warn!("failed to apply extra tag {extra_tag}: {e}");

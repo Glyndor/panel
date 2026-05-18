@@ -14,7 +14,9 @@ use bollard::models::{
     HostConfigLogConfig, NetworkingConfig, ResourcesBlkioWeightDevice, ResourcesUlimits,
     RestartPolicy as BollardRestart, RestartPolicyNameEnum, ThrottleDevice,
 };
-use bollard::query_parameters::{CreateContainerOptions, RemoveContainerOptions, StartContainerOptions};
+use bollard::query_parameters::{
+    CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
+};
 use tracing::warn;
 
 use crate::compose::types::{

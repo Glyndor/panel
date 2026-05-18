@@ -14,8 +14,10 @@ use std::time::Duration;
 
 use bollard::body_full;
 use bollard::container::LogOutput;
-use bollard::query_parameters::{StartContainerOptions, StopContainerOptions, UploadToContainerOptions};
 use bollard::exec::{CreateExecOptions, StartExecResults};
+use bollard::query_parameters::{
+    StartContainerOptions, StopContainerOptions, UploadToContainerOptions,
+};
 use bytes::Bytes;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -246,7 +248,13 @@ impl Engine {
         info!("restarting {container_name}");
         let _ = self
             .docker
-            .stop_container(container_name, Some(StopContainerOptions { t: Some(5), ..Default::default() }))
+            .stop_container(
+                container_name,
+                Some(StopContainerOptions {
+                    t: Some(5),
+                    ..Default::default()
+                }),
+            )
             .await;
         self.docker
             .start_container(container_name, None::<StartContainerOptions>)

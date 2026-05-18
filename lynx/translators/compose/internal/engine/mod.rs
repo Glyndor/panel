@@ -14,11 +14,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bollard::container::LogOutput;
+use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::query_parameters::{
     ListContainersOptions, LogsOptions, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions,
 };
-use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
 use futures::StreamExt;
 use tracing::info;
@@ -169,7 +169,13 @@ impl Engine {
 
                 let _ = self
                     .docker
-                    .stop_container(&container_name, Some(StopContainerOptions { t: Some(10), ..Default::default() }))
+                    .stop_container(
+                        &container_name,
+                        Some(StopContainerOptions {
+                            t: Some(10),
+                            ..Default::default()
+                        }),
+                    )
                     .await;
 
                 let _ = self
@@ -460,7 +466,13 @@ impl Engine {
 
             let _ = self
                 .docker
-                .stop_container(&container_name, Some(StopContainerOptions { t: Some(10), ..Default::default() }))
+                .stop_container(
+                    &container_name,
+                    Some(StopContainerOptions {
+                        t: Some(10),
+                        ..Default::default()
+                    }),
+                )
                 .await;
 
             self.docker
@@ -475,7 +487,13 @@ impl Engine {
                     let dep_container = self.container_name(dep_name, dep_service);
                     let _ = self
                         .docker
-                        .stop_container(&dep_container, Some(StopContainerOptions { t: Some(10), ..Default::default() }))
+                        .stop_container(
+                            &dep_container,
+                            Some(StopContainerOptions {
+                                t: Some(10),
+                                ..Default::default()
+                            }),
+                        )
                         .await;
                     if let Err(e) = self
                         .docker

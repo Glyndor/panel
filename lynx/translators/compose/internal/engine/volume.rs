@@ -56,8 +56,16 @@ impl Engine {
             let options = VolumeCreateRequest {
                 name: Some(volume_name.to_string()),
                 driver: Some(driver.clone()),
-                driver_opts: if driver_opts.is_empty() { None } else { Some(driver_opts) },
-                labels: if labels.is_empty() { None } else { Some(labels) },
+                driver_opts: if driver_opts.is_empty() {
+                    None
+                } else {
+                    Some(driver_opts)
+                },
+                labels: if labels.is_empty() {
+                    None
+                } else {
+                    Some(labels)
+                },
                 ..Default::default()
             };
 

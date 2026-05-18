@@ -59,8 +59,16 @@ impl Engine {
                 internal: config.as_ref().and_then(|c| c.internal),
                 attachable: config.as_ref().and_then(|c| c.attachable),
                 enable_ipv6: config.as_ref().and_then(|c| c.enable_ipv6),
-                options: if driver_opts.is_empty() { None } else { Some(driver_opts) },
-                labels: if labels.is_empty() { None } else { Some(labels) },
+                options: if driver_opts.is_empty() {
+                    None
+                } else {
+                    Some(driver_opts)
+                },
+                labels: if labels.is_empty() {
+                    None
+                } else {
+                    Some(labels)
+                },
                 ipam,
                 ..Default::default()
             };
