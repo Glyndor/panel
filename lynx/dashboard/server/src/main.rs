@@ -8,6 +8,7 @@ mod crypto;
 mod domain;
 mod error;
 mod migration;
+mod nftables;
 mod organizations;
 mod scheduler;
 mod state;
@@ -101,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
         latest_agent_version: Arc::new(tokio::sync::RwLock::new(None)),
         wg_psks: Arc::new(tokio::sync::RwLock::new(wg_psks)),
         agent_ws_conns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        agent_metric_tx: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
 
     let auth_layer = middleware::from_fn_with_state(state.clone(), auth::middleware::require_auth);
@@ -113,7 +115,9 @@ async fn main() -> anyhow::Result<()> {
 
     let domain_router = domain::router::router().route_layer(auth_layer.clone());
 
-    let migration_router = migration::router::router().route_layer(auth_layer);
+    let migration_router = migration::router::router().route_layer(auth_layer.clone());
+
+    let nftables_router = nftables::router::router().route_layer(auth_layer);
 
     // Record setup_token_issued_at on first boot without an admin (24h TTL window).
     record_setup_token_issuance(&state.db).await;
@@ -135,6 +139,7 @@ async fn main() -> anyhow::Result<()> {
         .nest("/domain", domain_router)
         .nest("/migration", migration_router)
         .nest("/migration", migration::router::receive_router())
+        .nest("/nftables", nftables_router)
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("x-frame-options"),

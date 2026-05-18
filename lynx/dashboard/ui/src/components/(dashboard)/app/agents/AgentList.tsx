@@ -133,12 +133,20 @@ export async function AgentList({
 								{formatHeartbeat(agent.last_heartbeat)}
 							</p>
 							<p className="truncate text-xs opacity-60">{agent.id}</p>
-							<Link
-								href={`/${locale}/app/agents/${agent.id}/audit-log`}
-								className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
-							>
-								{t("auditLog")}
-							</Link>
+							<div className="flex items-center gap-3 pt-1">
+								<Link
+									href={`/${locale}/app/agents/${agent.id}`}
+									className="text-xs text-foreground underline underline-offset-2 hover:text-muted-foreground transition-colors"
+								>
+									{t("detailTitle")} →
+								</Link>
+								<Link
+									href={`/${locale}/app/agents/${agent.id}/audit-log`}
+									className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+								>
+									{t("auditLog")}
+								</Link>
+							</div>
 							{nft.diverged && (
 								<NftablesAlert
 									agentId={agent.id}

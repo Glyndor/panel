@@ -10,8 +10,11 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{broadcast, oneshot, Mutex};
 use uuid::Uuid;
+
+/// Capacity of each per-agent broadcast channel (number of metric frames buffered).
+const METRIC_BROADCAST_CAP: usize = 32;
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -56,9 +59,15 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
         pending: pending.clone(),
     });
 
+    // Create broadcast channel for metric fan-out to frontend WS clients.
+    let (metric_tx, _) = broadcast::channel::<Arc<String>>(METRIC_BROADCAST_CAP);
     {
         let mut map = state.agent_ws_conns.write().await;
         map.insert(agent_id, conn);
+    }
+    {
+        let mut map = state.agent_metric_tx.write().await;
+        map.insert(agent_id, metric_tx);
     }
 
     let _ = sqlx::query!(
@@ -96,6 +105,10 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
 
     {
         let mut map = state.agent_ws_conns.write().await;
+        map.remove(&agent_id);
+    }
+    {
+        let mut map = state.agent_metric_tx.write().await;
         map.remove(&agent_id);
     }
 
@@ -154,6 +167,14 @@ async fn handle_agent_message(
                         let _ = tx.send(body);
                     }
                 }
+            }
+        }
+        "metrics" => {
+            let shared = Arc::new(text.to_string());
+            let map = state.agent_metric_tx.read().await;
+            if let Some(tx) = map.get(&agent_id) {
+                // Ignore send errors — no subscribers is normal.
+                let _ = tx.send(shared);
             }
         }
         "audit_sync" => {

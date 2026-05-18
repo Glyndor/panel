@@ -199,6 +199,38 @@ export async function setHsts(
 	}
 }
 
+export async function uploadCert(
+	certType: "cloudflare" | "custom",
+	certPem: string,
+	keyPem?: string,
+): Promise<{ ok: boolean; error?: string }> {
+	const jar = await cookies();
+	const tok = jar.get("access_token")?.value ?? "";
+
+	try {
+		const res = await fetch(`${BACKEND_URL}/domain/cert/upload`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${tok}`,
+			},
+			body: JSON.stringify({
+				cert_type: certType,
+				cert_pem: certPem,
+				key_pem: keyPem ?? null,
+			}),
+		});
+		if (!res.ok) {
+			const body = (await res.json().catch(() => ({}))) as { error?: string };
+			return { ok: false, error: body.error ?? "server_error" };
+		}
+		revalidatePath("/app/settings");
+		return { ok: true };
+	} catch {
+		return { ok: false, error: "network_error" };
+	}
+}
+
 export async function closePort19443(): Promise<{ ok: boolean; error?: string }> {
 	const jar = await cookies();
 	const tok = jar.get("access_token")?.value ?? "";

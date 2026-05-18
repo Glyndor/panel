@@ -18,6 +18,7 @@ pub async fn require_auth(
     next: Next,
 ) -> Result<Response, AppError> {
     let token = extract_bearer(&req).ok_or(AppError::Unauthorized)?;
+    let token = token.as_str();
 
     let keys = crypto::jwt::JwtKeys {
         sign_private_seed: *state.config.jwt_sign_private_seed,
@@ -80,11 +81,29 @@ pub async fn require_auth(
     Ok(next.run(req).await)
 }
 
-fn extract_bearer(req: &Request) -> Option<&str> {
-    req.headers()
+fn extract_bearer(req: &Request) -> Option<String> {
+    // Primary: Authorization: Bearer <token>
+    if let Some(bearer) = req
+        .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        return Some(bearer.to_string());
+    }
+
+    // Fallback: access_token cookie (used by browser WebSocket clients — browsers
+    // cannot set custom headers on WS connections, but do send cookies automatically).
+    req.headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookie_hdr| {
+            cookie_hdr.split(';').find_map(|pair| {
+                let pair = pair.trim();
+                pair.strip_prefix("access_token=")
+                    .map(|t| t.trim().to_string())
+            })
+        })
 }
 
 fn client_ip(req: &Request) -> String {

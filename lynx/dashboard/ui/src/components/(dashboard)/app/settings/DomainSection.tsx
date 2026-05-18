@@ -16,6 +16,7 @@ import {
 	setHsts,
 	closePort19443,
 } from "@/actions/(dashboard)/app/settings";
+import { CertUploadSection } from "./CertUploadSection";
 
 interface DomainConfig {
 	domain: string | null;
@@ -58,7 +59,19 @@ interface Labels {
 	cert: string;
 	certSelfSigned: string;
 	certLE: string;
+	certCloudflare: string;
+	certCustom: string;
 	certExpires: string;
+	certUpload: string;
+	certUploadCloudflare: string;
+	certUploadCustom: string;
+	certPem: string;
+	certPemPlaceholder: string;
+	certKeyPem: string;
+	certKeyPemPlaceholder: string;
+	certKeyOptional: string;
+	certUploadSuccess: string;
+	certUploadError: string;
 }
 
 interface Props {
@@ -167,7 +180,13 @@ export function DomainSection({ initial, labels }: Props) {
 					<span>
 						{labels.cert}{" "}
 						<span className="text-foreground font-medium">
-							{cfg.cert_type === "lets_encrypt" ? labels.certLE : labels.certSelfSigned}
+							{cfg.cert_type === "lets_encrypt"
+						? labels.certLE
+						: cfg.cert_type === "cloudflare"
+						? labels.certCloudflare
+						: cfg.cert_type === "custom"
+						? labels.certCustom
+						: labels.certSelfSigned}
 						</span>
 					</span>
 					{cfg.cert_expires_at && (
@@ -265,6 +284,27 @@ export function DomainSection({ initial, labels }: Props) {
 					<Lock className="size-3" />
 					Port 19443 is closed
 				</p>
+			)}
+
+			{isActive && (
+				<CertUploadSection
+					labels={{
+						title: labels.certUpload,
+						cloudflareTab: labels.certUploadCloudflare,
+						customTab: labels.certUploadCustom,
+						certPem: labels.certPem,
+						certPemPlaceholder: labels.certPemPlaceholder,
+						keyPem: labels.certKeyPem,
+						keyPemPlaceholder: labels.certKeyPemPlaceholder,
+						keyOptional: labels.certKeyOptional,
+						upload: labels.certUpload,
+						success: labels.certUploadSuccess,
+						error: labels.certUploadError,
+					}}
+					onSuccess={() =>
+						setCfg((prev) => ({ ...prev }))
+					}
+				/>
 			)}
 		</div>
 	);

@@ -4,14 +4,21 @@ use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::process::Command;
 
+
 const TABLE: &str = "lynx-agent";
 
-/// Full ruleset applied atomically. Never incremental.
+/// Full structure of the managed ruleset.
+/// lynx-base holds the immutable invariants.
+/// lynx-global / lynx-local hold dashboard-pushed rules.
 pub struct Ruleset {
     /// WireGuard UDP port for management plane
     pub wireguard_port: u16,
     /// Per-org blocked subnets (org isolation — inter-org traffic blocked)
     pub org_networks: Vec<OrgNetwork>,
+    /// Rules body for the lynx-global chain (dashboard-pushed, applies to all agents)
+    pub global_body: String,
+    /// Rules body for the lynx-local chain (dashboard-pushed, this agent only)
+    pub local_body: String,
 }
 
 pub struct OrgNetwork {
@@ -33,16 +40,50 @@ pub fn apply_raw(nft: &str) -> Result<()> {
     run_nft(nft).context("nftables apply_raw")
 }
 
+/// Apply a minimal emergency ruleset when normal restore fails.
+/// Allows only WireGuard inbound from the dashboard + established + loopback.
+/// Everything else dropped — VPS stays reachable only from dashboard.
+pub fn apply_emergency() -> Result<()> {
+    let emergency = r#"
+table inet lynx-agent {
+    chain lynx-base {
+        type filter hook input priority 0; policy drop;
+        ct state established,related accept
+        iifname "lo" accept
+        udp dport 51820 accept
+        drop
+    }
+    chain lynx-forward {
+        type filter hook forward priority 0; policy drop;
+    }
+    chain lynx-output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+"#;
+    run_nft(emergency).context("nftables apply_emergency")
+}
+
 /// Compute checksum of the live lynx-agent table for divergence detection.
 pub fn current_checksum() -> Result<String> {
+    chain_checksum_raw(&["list", "table", "inet", TABLE])
+}
+
+/// Compute checksum of a single chain for per-chain divergence detection.
+pub fn chain_checksum(chain: &str) -> Result<String> {
+    chain_checksum_raw(&["list", "chain", "inet", TABLE, chain])
+}
+
+fn chain_checksum_raw(args: &[&str]) -> Result<String> {
     let out = Command::new("nft")
-        .args(["-j", "list", "table", "inet", TABLE])
+        .arg("-j")
+        .args(args)
         .output()
-        .context("nft list table")?;
+        .context("nft list")?;
 
     if !out.status.success() {
         anyhow::bail!(
-            "nft list table failed: {}",
+            "nft list failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }
@@ -52,41 +93,53 @@ pub fn current_checksum() -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-/// Expected checksum after last apply() call. Stored in AppState.
-pub fn checksum_of(ruleset: &Ruleset) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(render_ruleset(ruleset).as_bytes());
-    hex::encode(hasher.finalize())
-}
-
 fn render_ruleset(r: &Ruleset) -> String {
     let mut out = format!(
         r#"
 table inet {TABLE} {{
-    chain input {{
+    # Immutable invariants — never editable from dashboard
+    chain lynx-base {{
         type filter hook input priority 0; policy drop;
 
-        # Established/related connections
+        # Established/related
         ct state established,related accept
 
         # Loopback
         iif lo accept
 
-        # WireGuard management plane
+        # WireGuard management plane — dashboard VPS only
         udp dport {wg} accept
 
-        # Drop everything else
+        # Dashboard backend port (on WG interface only)
+        ip saddr 10.100.0.1 accept
+
+        # Run global and local rule chains
+        jump lynx-global
+        jump lynx-local
+
+        drop
     }}
 
-    chain forward {{
+    # Dashboard global rules — apply to all agents
+    chain lynx-global {{
+{global}
+    }}
+
+    # Dashboard local rules — apply to this agent only
+    chain lynx-local {{
+{local}
+    }}
+
+    chain lynx-forward {{
         type filter hook forward priority 0; policy drop;
 "#,
         TABLE = TABLE,
         wg = r.wireguard_port,
+        global = r.global_body,
+        local = r.local_body,
     );
 
-    // Block inter-org traffic (nftables can't do "not same subnet" easily,
-    // so we mark each org's subnet and drop cross-org forwarding)
+    // Block inter-org traffic
     for org in &r.org_networks {
         out.push_str(&format!(
             "        # org {} isolation\n        ip saddr {} ip daddr != {} drop;\n",
@@ -94,7 +147,9 @@ table inet {TABLE} {{
         ));
     }
 
-    out.push_str("    }\n\n    chain output {\n        type filter hook output priority 0; policy accept;\n    }\n}\n");
+    out.push_str(
+        "    }\n\n    chain lynx-output {\n        type filter hook output priority 0; policy accept;\n    }\n}\n",
+    );
     out
 }
 

@@ -15,6 +15,12 @@ pub struct AppState {
     pub nft_checksum: Arc<Mutex<Option<String>>>,
     /// Rendered nft ruleset from last successful apply() — used for restore.
     pub nft_last_ruleset: Arc<Mutex<Option<String>>>,
+    /// Body of the lynx-global chain (managed by dashboard global rules).
+    pub nft_global_body: Arc<Mutex<String>>,
+    /// Body of the lynx-local chain (managed by dashboard local rules for this agent).
+    pub nft_local_body: Arc<Mutex<String>>,
+    /// WireGuard port used in the last full nftables apply (stored for chain-only updates).
+    pub nft_wg_port: Arc<std::sync::atomic::AtomicU32>,
     /// In-memory command rate limiter: (window_start_secs, count_in_window)
     pub cmd_rate: Arc<Mutex<(u64, u64)>>,
     /// Count of `rejected_rate_limit` events in the current minute — alert threshold.
@@ -63,6 +69,14 @@ impl AppState {
         }
     }
 
+    pub fn nft_wg_port(&self) -> u16 {
+        self.nft_wg_port.load(Ordering::SeqCst) as u16
+    }
+
+    pub fn set_nft_wg_port(&self, port: u16) {
+        self.nft_wg_port.store(port as u32, Ordering::SeqCst);
+    }
+
     pub fn set_nft_checksum(&self, checksum: String) {
         *self.nft_checksum.lock().unwrap() = Some(checksum);
     }
@@ -77,5 +91,21 @@ impl AppState {
 
     pub fn nft_last_ruleset(&self) -> Option<String> {
         self.nft_last_ruleset.lock().unwrap().clone()
+    }
+
+    pub fn set_nft_global_body(&self, body: String) {
+        *self.nft_global_body.lock().unwrap() = body;
+    }
+
+    pub fn nft_global_body(&self) -> String {
+        self.nft_global_body.lock().unwrap().clone()
+    }
+
+    pub fn set_nft_local_body(&self, body: String) {
+        *self.nft_local_body.lock().unwrap() = body;
+    }
+
+    pub fn nft_local_body(&self) -> String {
+        self.nft_local_body.lock().unwrap().clone()
     }
 }

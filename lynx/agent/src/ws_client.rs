@@ -1,4 +1,4 @@
-use crate::{auth::SignedCommand, handlers::run_verified_command, state::AppState};
+use crate::{auth::SignedCommand, handlers::run_verified_command, metrics, state::AppState};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
@@ -8,6 +8,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const METRICS_INTERVAL: Duration = Duration::from_secs(5);
 const BACKOFF_BASE: Duration = Duration::from_secs(5);
 const BACKOFF_MAX: Duration = Duration::from_secs(300);
 
@@ -66,6 +67,9 @@ async fn run_session(
 ) {
     let (mut sink, mut stream) = ws_stream.split();
     let mut hb_ticker = interval(HEARTBEAT_INTERVAL);
+    let mut metrics_ticker = interval(METRICS_INTERVAL);
+    // Skip first tick so we don't fire immediately on connect.
+    metrics_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -74,6 +78,18 @@ async fn run_session(
                 let text = serde_json::to_string(&hb).unwrap_or_default();
                 if sink.send(Message::Text(text.into())).await.is_err() {
                     break;
+                }
+            }
+            _ = metrics_ticker.tick() => {
+                if let Ok(m) = metrics::sample().await {
+                    let frame = json!({
+                        "type": "metrics",
+                        "data": m,
+                    });
+                    let text = serde_json::to_string(&frame).unwrap_or_default();
+                    if sink.send(Message::Text(text.into())).await.is_err() {
+                        break;
+                    }
                 }
             }
             msg = stream.next() => {

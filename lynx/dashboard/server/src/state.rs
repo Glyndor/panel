@@ -2,7 +2,7 @@ use crate::config::Config;
 use redis::aio::ConnectionManager;
 use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{broadcast, oneshot, RwLock};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -26,4 +26,7 @@ pub struct AppState {
     pub wg_psks: Arc<RwLock<HashMap<Uuid, Zeroizing<String>>>>,
     /// Active WebSocket connections from agents (agent_id → connection).
     pub agent_ws_conns: Arc<RwLock<HashMap<Uuid, Arc<AgentWsConn>>>>,
+    /// Per-agent broadcast channels for real-time metric fan-out to frontend WS clients.
+    /// Keyed by agent_id. Channels are created on agent connect, dropped on disconnect.
+    pub agent_metric_tx: Arc<RwLock<HashMap<Uuid, broadcast::Sender<Arc<String>>>>>,
 }

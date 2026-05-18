@@ -30,6 +30,24 @@ export const migrationStartSchema = z.object({
 	migration_token: z.string().min(1),
 });
 
+const MAX_CERT_BYTES = 64 * 1024;
+
+export const certUploadSchema = z.object({
+	cert_type: z.enum(["cloudflare", "custom"]),
+	cert_pem: z
+		.string()
+		.min(1)
+		.refine((s) => s.length <= MAX_CERT_BYTES, "Certificate exceeds 64 KB limit")
+		.refine((s) => s.includes("-----BEGIN"), "Must be PEM format"),
+	key_pem: z
+		.string()
+		.refine((s) => s.length <= MAX_CERT_BYTES, "Key exceeds 64 KB limit")
+		.refine((s) => s === "" || s.includes("-----BEGIN"), "Must be PEM format")
+		.optional(),
+});
+
+export type CertUploadInput = z.infer<typeof certUploadSchema>;
+
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type BrandingInput = z.infer<typeof brandingSchema>;
 export type DomainSetupInput = z.infer<typeof domainSetupSchema>;

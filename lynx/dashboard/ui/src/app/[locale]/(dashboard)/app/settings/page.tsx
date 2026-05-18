@@ -161,7 +161,19 @@ export default async function SettingsPage({
 							cert: t("domainCert"),
 							certSelfSigned: t("domainCertSelfSigned"),
 							certLE: t("domainCertLE"),
+							certCloudflare: t("domainCertCloudflare"),
+							certCustom: t("domainCertCustom"),
 							certExpires: t("domainCertExpires"),
+							certUpload: t("domainCertUpload"),
+							certUploadCloudflare: t("domainCertUploadCloudflare"),
+							certUploadCustom: t("domainCertUploadCustom"),
+							certPem: t("domainCertPem"),
+							certPemPlaceholder: t("domainCertPemPlaceholder"),
+							certKeyPem: t("domainCertKeyPem"),
+							certKeyPemPlaceholder: t("domainCertKeyPemPlaceholder"),
+							certKeyOptional: t("domainCertKeyOptional"),
+							certUploadSuccess: t("domainCertUploadSuccess"),
+							certUploadError: t("domainCertUploadError"),
 						}}
 					/>
 				</div>
