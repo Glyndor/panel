@@ -50,12 +50,9 @@
 		"build": "next build",
 		"check": "biome check",
 		"check:fix": "biome check --write",
-		"dev": "next dev",
 		"start": "next start",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
-		"test:e2e:ui": "playwright test --ui",
-		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit"
 	},
 	"trustedDependencies": [
