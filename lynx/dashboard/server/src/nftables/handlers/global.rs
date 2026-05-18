@@ -303,5 +303,44 @@ fn validate_rule_request(req: &CreateRuleRequest) -> Result<(), AppError> {
             return Err(AppError::Validation("invalid direction".into()));
         }
     }
+    // Validate port range: 1-65535, start ≤ end.
+    if let Some(p) = req.port {
+        if !(1..=65535).contains(&p) {
+            return Err(AppError::Validation("port must be 1–65535".into()));
+        }
+    }
+    if let Some(pe) = req.port_end {
+        if !(1..=65535).contains(&pe) {
+            return Err(AppError::Validation("port_end must be 1–65535".into()));
+        }
+        if let Some(p) = req.port {
+            if p > pe {
+                return Err(AppError::Validation("port must be ≤ port_end".into()));
+            }
+        }
+    }
+    // Validate IP list entries are valid IPs or CIDRs (IP/prefix_len).
+    if let Some(ref ips) = req.ip_list {
+        for ip_str in ips {
+            if !is_valid_ip_or_cidr(ip_str) {
+                return Err(AppError::Validation(format!("invalid IP or CIDR: {ip_str}")));
+            }
+        }
+    }
     Ok(())
+}
+
+fn is_valid_ip_or_cidr(s: &str) -> bool {
+    if s.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    if let Some((ip_part, prefix_part)) = s.rsplit_once('/') {
+        if let Ok(ip) = ip_part.parse::<std::net::IpAddr>() {
+            if let Ok(prefix) = prefix_part.parse::<u8>() {
+                let max = if ip.is_ipv4() { 32u8 } else { 128u8 };
+                return prefix <= max;
+            }
+        }
+    }
+    false
 }
