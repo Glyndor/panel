@@ -12,13 +12,13 @@ updates:
     target-branch: "develop"
 
   - package-ecosystem: "cargo"
-    directory: "/lynx/translators/compose"
+    directory: "/lynx"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     labels:
       - "dependencies"
-      - "translator/compose"
-    open-pull-requests-limit: 5
+      - "rust"
+    open-pull-requests-limit: 10
     target-branch: "develop"
 
   - package-ecosystem: "bun"
