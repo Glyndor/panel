@@ -1,5 +1,10 @@
 "use client";
 
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -11,12 +16,10 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { BACKEND_URL } from "@/lib/api";
 import { Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { createOrgSchema, type CreateOrgInput } from "@/schemas/(dashboard)/app/organizations";
 
 type Props = {
 	token: string;
@@ -25,57 +28,47 @@ type Props = {
 	errorMsg: string;
 };
 
+function deriveSlug(n: string) {
+	return n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props) {
 	const [open, setOpen] = useState(false);
-	const [name, setName] = useState("");
-	const [slug, setSlug] = useState("");
-	const [pending, start] = useTransition();
 	const router = useRouter();
 
-	function derivedSlug(n: string) {
-		return n
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-|-$/g, "");
-	}
+	const {
+		register,
+		handleSubmit,
+		setValue,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<CreateOrgInput>({
+		resolver: zodResolver(createOrgSchema),
+	});
 
-	function handleNameChange(v: string) {
-		setName(v);
-		setSlug(derivedSlug(v));
-	}
-
-	function handleCreate() {
-		if (!name.trim() || !slug) return;
-		start(async () => {
-			try {
-				const res = await fetch(`${BACKEND_URL}/organizations`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${token}`,
-					},
-					body: JSON.stringify({ name: name.trim(), slug }),
-				});
-				if (res.status === 409) {
-					toast.error(slugConflict);
-					return;
-				}
-				if (!res.ok) {
-					toast.error(errorMsg);
-					return;
-				}
+	const onSubmit = (data: CreateOrgInput) => {
+		toast.promise(
+			fetch(`${BACKEND_URL}/organizations`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+				body: JSON.stringify({ name: data.name, slug: data.slug }),
+			}).then(async (res) => {
+				if (res.status === 409) throw new Error("conflict");
+				if (!res.ok) throw new Error("error");
 				setOpen(false);
-				setName("");
-				setSlug("");
+				reset();
 				router.refresh();
-			} catch {
-				toast.error(errorMsg);
-			}
-		});
-	}
+			}),
+			{
+				loading: "Creating…",
+				success: label,
+				error: (e: Error) => (e.message === "conflict" ? slugConflict : errorMsg),
+			},
+		);
+	};
 
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
 			<DialogTrigger asChild>
 				<Button size="sm">
 					<Plus className="size-4 mr-1" />
@@ -89,36 +82,35 @@ export function CreateOrgDialog({ token, label, slugConflict, errorMsg }: Props)
 						Create an organization to group projects and containers.
 					</DialogDescription>
 				</DialogHeader>
-				<div className="flex flex-col gap-3 py-2">
-					<div className="space-y-1.5">
-						<Label htmlFor="org-name">Name</Label>
+				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3 py-2">
+					<Field>
+						<FieldLabel htmlFor="org-name">Name</FieldLabel>
 						<Input
 							id="org-name"
 							placeholder="Acme Corp"
-							value={name}
-							onChange={(e) => handleNameChange(e.target.value)}
-							disabled={pending}
+							{...register("name", {
+								onChange: (e) => setValue("slug", deriveSlug(e.target.value)),
+							})}
+							disabled={isSubmitting}
 						/>
-					</div>
-					<div className="space-y-1.5">
-						<Label htmlFor="org-slug">Slug</Label>
+						<FieldError errors={[errors.name]} />
+					</Field>
+					<Field>
+						<FieldLabel htmlFor="org-slug">Slug</FieldLabel>
 						<Input
 							id="org-slug"
 							placeholder="acme-corp"
-							value={slug}
-							onChange={(e) => setSlug(e.target.value)}
-							disabled={pending}
+							{...register("slug")}
+							disabled={isSubmitting}
 						/>
-					</div>
-				</div>
-				<DialogFooter>
-					<Button
-						onClick={handleCreate}
-						disabled={pending || !name.trim() || !slug}
-					>
-						{pending ? "Creating…" : "Create"}
-					</Button>
-				</DialogFooter>
+						<FieldError errors={[errors.slug]} />
+					</Field>
+					<DialogFooter className="mt-2">
+						<Button type="submit" disabled={isSubmitting}>
+							{isSubmitting ? "Creating…" : "Create"}
+						</Button>
+					</DialogFooter>
+				</form>
 			</DialogContent>
 		</Dialog>
 	);

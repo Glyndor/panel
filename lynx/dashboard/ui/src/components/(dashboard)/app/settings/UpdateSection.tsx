@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { checkForUpdates, triggerUpdate, type UpdateCheckResult } from "./actions";
+import { checkForUpdates, triggerUpdate, type UpdateCheckResult } from "@/actions/(dashboard)/app/settings";
 
 interface Props {
 	labels: {

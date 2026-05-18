@@ -17,6 +17,8 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = { version = "0.8", features = ["macros", "ws"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "set-header", "limit"] }
 
@@ -39,6 +41,9 @@ aes-gcm = "0.10"
 base64ct = { version = "1", features = ["alloc"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "zeroize"] }
 x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
+rcgen = { version = "0.13", features = ["x509-parser"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+tokio-rustls = "0.26"
 
 # types
 uuid = { version = "1", features = ["v7", "serde"] }

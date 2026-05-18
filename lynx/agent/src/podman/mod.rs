@@ -32,6 +32,12 @@ pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
 
         // Assign subuid/subgid range (65536 IDs per tenant)
         add_subid_range(&username)?;
+
+        // Enable lingering so the systemd user instance starts at boot,
+        // allowing rootless containers to survive without an active login session.
+        let _ = Command::new("loginctl")
+            .args(["enable-linger", &username])
+            .status();
     }
 
     Ok(())

@@ -28,6 +28,13 @@ services:
       - INTERNAL_API_TOKEN_FILE=/run/secrets/lynx-dashboard-api-token
       - KEK_FILE=/run/secrets/lynx-dashboard-kek
       - PEPPER_FILE=/run/secrets/lynx-dashboard-pepper
+      - JWT_SIGN_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-private
+      - JWT_SIGN_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-public
+      - JWT_ENC_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-private
+      - JWT_ENC_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-public
+      - CA_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-ca-private
+      - CA_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-ca-public
+      - SETUP_TOKEN_FILE=/run/secrets/lynx-dashboard-setup-token
       - RUST_LOG=${RUST_LOG:-info}
     secrets:
       - lynx-dashboard-database-url
@@ -35,6 +42,13 @@ services:
       - lynx-dashboard-api-token
       - lynx-dashboard-kek
       - lynx-dashboard-pepper
+      - lynx-dashboard-jwt-sign-private
+      - lynx-dashboard-jwt-sign-public
+      - lynx-dashboard-jwt-enc-private
+      - lynx-dashboard-jwt-enc-public
+      - lynx-dashboard-ca-private
+      - lynx-dashboard-ca-public
+      - lynx-dashboard-setup-token
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,7 +68,7 @@ services:
 
   postgres:
     container_name: lynx-dashboard-postgres
-    image: docker.io/library/postgres:18
+    image: docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=lynx_dashboard
@@ -76,7 +90,7 @@ services:
 
   redis:
     container_name: lynx-dashboard-redis
-    image: docker.io/library/redis:8-alpine
+    image: docker.io/library/redis@sha256:02c2454cd3b6277389101b9d42d009f8518255930f8b06ae33624e324f8c6455
     command:
       - sh
       - -c
@@ -121,4 +135,18 @@ secrets:
   lynx-dashboard-kek:
     external: true
   lynx-dashboard-pepper:
+    external: true
+  lynx-dashboard-jwt-sign-private:
+    external: true
+  lynx-dashboard-jwt-sign-public:
+    external: true
+  lynx-dashboard-jwt-enc-private:
+    external: true
+  lynx-dashboard-jwt-enc-public:
+    external: true
+  lynx-dashboard-ca-private:
+    external: true
+  lynx-dashboard-ca-public:
+    external: true
+  lynx-dashboard-setup-token:
     external: true

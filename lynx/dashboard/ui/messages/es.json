@@ -285,7 +285,12 @@
       "recentEvents": "Eventos recientes",
       "noEvents": "Sin eventos recientes.",
       "noAgents": "No hay agentes conectados",
-      "noAgentsDesc": "Conecta un VPS agente para empezar a gestionar tu infraestructura."
+      "noAgentsDesc": "Conecta un VPS agente para empezar a gestionar tu infraestructura.",
+      "securityAlerts": "Alertas de seguridad",
+      "noAlerts": "Sin alertas activas.",
+      "acknowledge": "Descartar",
+      "acknowledged": "Alerta descartada.",
+      "acknowledgeError": "Error al descartar la alerta."
     }
   },
   "branding": {

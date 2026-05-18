@@ -1,9 +1,9 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
-import { AgentList } from "./AgentList";
-import { AgentListSkeleton } from "./AgentListSkeleton";
-import { RegisterAgentDialog } from "./RegisterAgentDialog";
+import { AgentList } from "@/components/(dashboard)/app/agents/AgentList";
+import { AgentListSkeleton } from "@/components/(dashboard)/app/agents/AgentListSkeleton";
+import { RegisterAgentDialog } from "@/components/(dashboard)/app/agents/RegisterAgentDialog";
 
 export default async function AgentsPage({
 	params,

@@ -1,12 +1,21 @@
 "use client";
 
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { ArrowRightLeft, AlertTriangle } from "lucide-react";
+import { migrationStartSchema, type MigrationStartInput } from "@/schemas/(dashboard)/app/settings";
+import {
+	prepareMigration,
+	startMigration,
+	abortMigration,
+	confirmMigrationShutdown,
+} from "@/actions/(dashboard)/app/settings/migration";
 
 interface MigrationState {
 	status: string;
@@ -56,34 +65,35 @@ interface Props {
 	labels: Labels;
 }
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> =
-	{
-		idle: "secondary",
-		preparing: "secondary",
-		transferring: "secondary",
-		notifying_agents: "secondary",
-		waiting_agents: "secondary",
-		completed: "default",
-		aborted: "secondary",
-		error: "destructive",
-	};
-
-import {
-	prepareMigration,
-	startMigration,
-	abortMigration,
-	confirmMigrationShutdown,
-} from "./migrationActions";
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
+	idle: "secondary",
+	preparing: "secondary",
+	transferring: "secondary",
+	notifying_agents: "secondary",
+	waiting_agents: "secondary",
+	completed: "default",
+	aborted: "secondary",
+	error: "destructive",
+};
 
 export function MigrationSection({ initial, labels }: Props) {
 	const [state, setState] = useState<MigrationState>(initial);
-	const [targetUrl, setTargetUrl] = useState("");
-	const [migrationToken, setMigrationToken] = useState("");
 	const [receivedToken, setReceivedToken] = useState<string | null>(null);
-	const [pending, startTransition] = useTransition();
+	const [preparePending, startPrepare] = useTransition();
+	const [abortPending, startAbort] = useTransition();
+	const [shutdownPending, startShutdown] = useTransition();
+
+	const {
+		register,
+		handleSubmit,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<MigrationStartInput>({
+		resolver: zodResolver(migrationStartSchema),
+	});
 
 	const handlePrepare = () => {
-		startTransition(async () => {
+		startPrepare(async () => {
 			const r = await prepareMigration();
 			if (r.ok && r.migration_token) {
 				setReceivedToken(r.migration_token);
@@ -94,28 +104,29 @@ export function MigrationSection({ initial, labels }: Props) {
 		});
 	};
 
-	const handleStart = (e: React.FormEvent) => {
-		e.preventDefault();
-		if (!targetUrl || !migrationToken) return;
-		startTransition(async () => {
-			const r = await startMigration(targetUrl, migrationToken);
-			if (r.ok) {
+	const onStart = (data: MigrationStartInput) => {
+		toast.promise(
+			startMigration(data.target_url, data.migration_token).then((r) => {
+				if (!r.ok) throw new Error(r.error);
 				setState((prev) => ({
 					...prev,
 					status: "transferring",
 					role: "source",
-					target_url: targetUrl,
+					target_url: data.target_url,
 				}));
-				setTargetUrl("");
-				setMigrationToken("");
-			} else {
-				toast.error(labels.startError);
-			}
-		});
+				reset();
+				return r;
+			}),
+			{
+				loading: labels.startMigration,
+				success: labels.startMigration,
+				error: labels.startError,
+			},
+		);
 	};
 
 	const handleAbort = () => {
-		startTransition(async () => {
+		startAbort(async () => {
 			const r = await abortMigration();
 			if (r.ok) {
 				setState((prev) => ({ ...prev, status: "aborted" }));
@@ -128,7 +139,7 @@ export function MigrationSection({ initial, labels }: Props) {
 
 	const handleShutdown = () => {
 		if (!window.confirm(labels.confirmShutdownMsg)) return;
-		startTransition(async () => {
+		startShutdown(async () => {
 			const r = await confirmMigrationShutdown();
 			if (r.ok) {
 				setState((prev) => ({ ...prev, status: "completed" }));
@@ -145,15 +156,12 @@ export function MigrationSection({ initial, labels }: Props) {
 		}
 	};
 
-	const isActive = !["idle", "completed", "aborted", "error"].includes(
-		state.status,
-	);
+	const isActive = !["idle", "completed", "aborted", "error"].includes(state.status);
 
 	return (
 		<div className="flex flex-col gap-4">
 			<p className="text-sm text-muted-foreground">{labels.desc}</p>
 
-			{/* Status */}
 			<div className="flex items-center gap-2 flex-wrap">
 				<ArrowRightLeft className="size-4 text-muted-foreground" />
 				<Badge variant={STATUS_VARIANT[state.status] ?? "secondary"}>
@@ -166,7 +174,6 @@ export function MigrationSection({ initial, labels }: Props) {
 				)}
 			</div>
 
-			{/* Agent progress */}
 			{(state.status === "waiting_agents" || state.status === "notifying_agents") && (
 				<p className="text-sm text-muted-foreground">
 					{labels.agentsProgress
@@ -175,7 +182,6 @@ export function MigrationSection({ initial, labels }: Props) {
 				</p>
 			)}
 
-			{/* Error */}
 			{state.error_message && (
 				<div className="flex items-start gap-2 text-sm text-destructive">
 					<AlertTriangle className="size-4 shrink-0 mt-0.5" />
@@ -183,59 +189,48 @@ export function MigrationSection({ initial, labels }: Props) {
 				</div>
 			)}
 
-			{/* Idle: offer both source and target flows */}
 			{state.status === "idle" && (
 				<div className="grid sm:grid-cols-2 gap-4">
-					{/* Source side: migrate to VPS-B */}
 					<div className="rounded-lg border p-4 flex flex-col gap-3">
 						<div>
 							<p className="text-sm font-medium">{labels.sourceTitle}</p>
-							<p className="text-xs text-muted-foreground mt-0.5">
-								{labels.sourceDesc}
-							</p>
+							<p className="text-xs text-muted-foreground mt-0.5">{labels.sourceDesc}</p>
 						</div>
-						<form onSubmit={handleStart} className="flex flex-col gap-2">
-							<div className="flex flex-col gap-1">
-								<Label className="text-xs">{labels.targetUrl}</Label>
+						<form onSubmit={handleSubmit(onStart)} className="flex flex-col gap-3">
+							<Field>
+								<FieldLabel htmlFor="migration-url">{labels.targetUrl}</FieldLabel>
 								<Input
-									value={targetUrl}
-									onChange={(e) => setTargetUrl(e.target.value)}
+									id="migration-url"
+									{...register("target_url")}
 									placeholder="https://1.2.3.4:19443"
-									disabled={pending}
+									disabled={isSubmitting}
 								/>
-							</div>
-							<div className="flex flex-col gap-1">
-								<Label className="text-xs">{labels.token}</Label>
+								<FieldError errors={[errors.target_url]} />
+							</Field>
+							<Field>
+								<FieldLabel htmlFor="migration-token">{labels.token}</FieldLabel>
 								<Input
-									value={migrationToken}
-									onChange={(e) => setMigrationToken(e.target.value)}
+									id="migration-token"
+									{...register("migration_token")}
 									placeholder="migration token from VPS-B"
-									disabled={pending}
+									disabled={isSubmitting}
 								/>
-							</div>
-							<Button
-								type="submit"
-								size="sm"
-								disabled={!targetUrl || !migrationToken || pending}
-							>
-								{labels.startMigration}
+								<FieldError errors={[errors.migration_token]} />
+							</Field>
+							<Button type="submit" size="sm" disabled={isSubmitting}>
+								{isSubmitting ? "…" : labels.startMigration}
 							</Button>
 						</form>
 					</div>
 
-					{/* Target side: prepare to receive */}
 					<div className="rounded-lg border p-4 flex flex-col gap-3">
 						<div>
 							<p className="text-sm font-medium">{labels.targetTitle}</p>
-							<p className="text-xs text-muted-foreground mt-0.5">
-								{labels.targetDesc}
-							</p>
+							<p className="text-xs text-muted-foreground mt-0.5">{labels.targetDesc}</p>
 						</div>
 						{receivedToken ? (
 							<div className="flex flex-col gap-2">
-								<p className="text-xs text-muted-foreground">
-									{labels.preparedToken}
-								</p>
+								<p className="text-xs text-muted-foreground">{labels.preparedToken}</p>
 								<div className="flex items-center gap-2">
 									<code className="text-xs font-mono bg-muted px-2 py-1 rounded break-all">
 										{receivedToken.slice(0, 24)}…
@@ -250,7 +245,7 @@ export function MigrationSection({ initial, labels }: Props) {
 								size="sm"
 								variant="outline"
 								onClick={handlePrepare}
-								disabled={pending}
+								disabled={preparePending}
 							>
 								{labels.prepareBtn}
 							</Button>
@@ -259,7 +254,6 @@ export function MigrationSection({ initial, labels }: Props) {
 				</div>
 			)}
 
-			{/* Active migration controls */}
 			{isActive && (
 				<div className="flex items-center gap-2">
 					{state.status === "waiting_agents" &&
@@ -269,7 +263,7 @@ export function MigrationSection({ initial, labels }: Props) {
 								size="sm"
 								variant="destructive"
 								onClick={handleShutdown}
-								disabled={pending}
+								disabled={shutdownPending}
 							>
 								{labels.confirmShutdown}
 							</Button>
@@ -278,7 +272,7 @@ export function MigrationSection({ initial, labels }: Props) {
 						size="sm"
 						variant="outline"
 						onClick={handleAbort}
-						disabled={pending}
+						disabled={abortPending}
 					>
 						{labels.abortBtn}
 					</Button>

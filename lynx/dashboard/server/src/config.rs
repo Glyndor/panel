@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
 use zeroize::Zeroizing;
 
+use crate::crypto::pki;
+
 pub struct Config {
     pub database_url: String,
     pub redis_url: String,
@@ -18,10 +20,18 @@ pub struct Config {
     pub jwt_enc_private_bytes: Zeroizing<[u8; 32]>,
     /// X25519 public key (32 bytes)
     pub jwt_enc_public_bytes: [u8; 32],
-    /// CA Ed25519 seed (32 bytes) — signs agent certificates
+    /// CA Ed25519 seed (32 bytes) — signs agent JSON certificates
     pub ca_private_seed: Zeroizing<[u8; 32]>,
-    /// CA Ed25519 public key (32 bytes) — distributed to agents for verification
+    /// CA Ed25519 public key (32 bytes) — distributed to agents for JSON cert verification
     pub ca_public_bytes: [u8; 32],
+    /// X.509 CA certificate DER — stable trust anchor distributed to agents for mTLS
+    pub x509_ca_cert_der: Vec<u8>,
+    /// X.509 CA private key DER (PKCS#8) — used to sign agent/client X.509 certs
+    pub x509_ca_key_der: Zeroizing<Vec<u8>>,
+    /// X.509 dashboard client certificate DER — presented to agents during mTLS handshake
+    pub x509_client_cert_der: Vec<u8>,
+    /// X.509 dashboard client private key DER (PKCS#8)
+    pub x509_client_key_der: Zeroizing<Vec<u8>>,
 }
 
 impl Config {
@@ -33,6 +43,10 @@ impl Config {
         let (jwt_sign_private_seed, jwt_sign_public_bytes) = load_or_gen_ed25519()?;
         let (jwt_enc_private_bytes, jwt_enc_public_bytes) = load_or_gen_x25519()?;
         let (ca_private_seed, ca_public_bytes) = load_or_gen_ca_ed25519()?;
+        let (x509_ca_cert_der, x509_ca_key_der) = load_or_gen_x509_ca()?;
+        let (x509_client_cert_der, x509_client_key_der) =
+            pki::issue_x509_dashboard_client_cert(&x509_ca_cert_der, &x509_ca_key_der)
+                .context("issue dashboard client cert")?;
 
         let database_url = load_secret("DATABASE_URL", "DATABASE_URL_FILE")
             .map(|s| s.as_str().to_owned())
@@ -54,6 +68,10 @@ impl Config {
             jwt_enc_public_bytes,
             ca_private_seed,
             ca_public_bytes,
+            x509_ca_cert_der,
+            x509_ca_key_der,
+            x509_client_cert_der,
+            x509_client_key_der,
         })
     }
 }
@@ -136,6 +154,22 @@ fn load_or_gen_x25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {
     let public = x25519_dalek::PublicKey::from(&secret);
 
     Ok((Zeroizing::new(priv_bytes), public.to_bytes()))
+}
+
+fn load_or_gen_x509_ca() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
+    let cert_raw = load_secret_opt("X509_CA_CERT", "X509_CA_CERT_FILE");
+    let key_raw = load_secret_opt("X509_CA_KEY", "X509_CA_KEY_FILE");
+
+    if let (Some(cert_b64), Some(key_b64)) = (cert_raw, key_raw) {
+        let cert_der = Base64::decode_vec(cert_b64.trim())
+            .context("X509_CA_CERT base64 decode")?;
+        let key_der = Base64::decode_vec(key_b64.trim())
+            .context("X509_CA_KEY base64 decode")?;
+        return Ok((cert_der, Zeroizing::new(key_der)));
+    }
+
+    tracing::warn!("X509_CA_CERT/KEY not configured — generating ephemeral X.509 CA (dev only; agents will reject certs after restart)");
+    pki::generate_x509_ca().context("generate ephemeral X.509 CA")
 }
 
 fn load_or_gen_ca_ed25519() -> Result<(Zeroizing<[u8; 32]>, [u8; 32])> {

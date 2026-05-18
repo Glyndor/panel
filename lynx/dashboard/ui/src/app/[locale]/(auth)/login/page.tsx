@@ -1,7 +1,7 @@
 
 import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
-import { LoginForm } from "./LoginForm";
+import { LoginForm } from "@/components/(auth)/login/LoginForm";
 
 async function fetchCompanyName(): Promise<string> {
 	try {

@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { changePassword } from "./profileActions";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { changePasswordSchema, type ChangePasswordInput } from "@/schemas/(dashboard)/app/settings";
+import { changePassword } from "@/actions/(dashboard)/app/settings/profile";
 
 interface Labels {
 	currentPassword: string;
@@ -24,50 +26,64 @@ interface Props {
 
 export function ChangePasswordForm({ locale, labels }: Props) {
 	const router = useRouter();
-	const [current, setCurrent] = useState("");
-	const [next, setNext] = useState("");
-	const [pending, startTransition] = useTransition();
 
-	const handleSubmit = (e: React.FormEvent) => {
-		e.preventDefault();
-		if (!current || !next) return;
-		startTransition(async () => {
-			const r = await changePassword(current, next);
-			if (r.ok) {
-				toast.success(labels.success);
-				// All sessions are invalidated — redirect to login
-				setTimeout(() => router.push(`/${locale}/login`), 1500);
-			} else if (r.status === 401) {
-				toast.error(labels.wrong);
-			} else {
-				toast.error(labels.error);
-			}
+	const {
+		register,
+		handleSubmit,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<ChangePasswordInput>({
+		resolver: zodResolver(changePasswordSchema),
+	});
+
+	const onSubmit = async (data: ChangePasswordInput) => {
+		const promise = changePassword(data.current_password, data.new_password).then((r) => {
+			if (!r.ok) throw new Error(r.status === 401 ? "wrong" : "error");
+			return r;
 		});
+
+		toast.promise(promise, {
+			loading: labels.btn,
+			success: labels.success,
+			error: (e: Error) => (e.message === "wrong" ? labels.wrong : labels.error),
+		});
+
+		try {
+			await promise;
+			reset();
+			router.push(`/${locale}/login`);
+		} catch {
+			// handled by toast
+		}
 	};
 
 	return (
-		<form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-sm">
-			<div className="flex flex-col gap-1.5">
-				<Label>{labels.currentPassword}</Label>
+		<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3 max-w-sm">
+			<Field>
+				<FieldLabel htmlFor="current_password">{labels.currentPassword}</FieldLabel>
 				<Input
+					id="current_password"
 					type="password"
-					value={current}
-					onChange={(e) => setCurrent(e.target.value)}
-					disabled={pending}
+					{...register("current_password")}
 					autoComplete="current-password"
+					disabled={isSubmitting}
 				/>
-			</div>
-			<div className="flex flex-col gap-1.5">
-				<Label>{labels.newPassword}</Label>
+				<FieldError errors={[errors.current_password]} />
+			</Field>
+
+			<Field>
+				<FieldLabel htmlFor="new_password">{labels.newPassword}</FieldLabel>
 				<Input
+					id="new_password"
 					type="password"
-					value={next}
-					onChange={(e) => setNext(e.target.value)}
-					disabled={pending}
+					{...register("new_password")}
 					autoComplete="new-password"
+					disabled={isSubmitting}
 				/>
-			</div>
-			<Button type="submit" disabled={!current || !next || pending}>
+				<FieldError errors={[errors.new_password]} />
+			</Field>
+
+			<Button type="submit" disabled={isSubmitting}>
 				{labels.btn}
 			</Button>
 		</form>

@@ -89,11 +89,17 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("connect to Redis")?;
 
+    let wg_psks = agents::wg::load_all_psks();
+    if !wg_psks.is_empty() {
+        tracing::info!(count = wg_psks.len(), "loaded WireGuard PSKs from secret files");
+    }
+
     let state = AppState {
         db,
         redis: redis_manager,
         config: Arc::new(config),
         latest_agent_version: Arc::new(tokio::sync::RwLock::new(None)),
+        wg_psks: Arc::new(tokio::sync::RwLock::new(wg_psks)),
     };
 
     let auth_layer = middleware::from_fn_with_state(state.clone(), auth::middleware::require_auth);
@@ -110,6 +116,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Record setup_token_issued_at on first boot without an admin (24h TTL window).
     record_setup_token_issuance(&state.db).await;
+
+    // Reconcile WireGuard peers against DB at startup.
+    agents::wg::reconcile_peers(&state.db).await;
 
     tokio::spawn(agents::heartbeat::run_scheduler(state.clone()));
     tokio::spawn(scheduler::run(state.clone()));

@@ -1,3 +1,4 @@
+pub mod client;
 pub mod handlers;
 pub mod heartbeat;
 pub mod router;
@@ -44,16 +45,22 @@ pub struct AgentSummary {
 }
 
 /// Returned after successful agent registration.
-/// `sync_token` and `cert` are shown once.
+/// `sync_token`, `cert`, and X.509 material are shown once.
 #[derive(Debug, Serialize)]
 pub struct RegisterAgentResponse {
     #[serde(flatten)]
     pub agent: Agent,
     pub sync_token: String,
-    /// CA-signed certificate for this agent (SignedCert JSON as string)
+    /// JSON-signed certificate for this agent — agent uses to verify command authority
     pub cert: crate::crypto::pki::SignedCert,
-    /// CA public key bytes (base64url) — agent uses this to verify future certs
+    /// CA Ed25519 public key (base64url) — for JSON cert verification
     pub ca_public_key: String,
+    /// X.509 agent server certificate DER (base64) — for mTLS listener
+    pub tls_cert_der: String,
+    /// X.509 agent private key DER PKCS#8 (base64) — for mTLS listener
+    pub tls_key_der: String,
+    /// X.509 CA certificate DER (base64) — agent verifies dashboard client certs against this
+    pub tls_ca_cert_der: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

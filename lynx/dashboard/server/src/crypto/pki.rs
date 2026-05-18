@@ -1,13 +1,15 @@
-//! Internal PKI — dashboard CA issues Ed25519-signed certificates to agents.
+//! Internal PKI — dashboard CA issues certificates to agents.
 //!
-//! A "certificate" here is a JSON payload signed by the CA's Ed25519 key.
-//! It is not X.509. Agents verify the CA signature to authenticate commands
-//! from the dashboard even if the WireGuard PSK were compromised.
+//! Two certificate systems in parallel:
+//! - JSON-signed certs (Ed25519): lightweight, used to verify dashboard command authority
+//! - X.509 certs (rcgen/Ed25519): used for mTLS between dashboard and agent HTTP endpoints
 
 use anyhow::{Context, Result};
 use base64ct::{Base64UrlUnpadded, Encoding};
 use chrono::{Duration, Utc};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType, PKCS_ED25519};
+use rustls::pki_types::CertificateDer as RustlsCertDer;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -94,4 +96,100 @@ pub fn gen_ca_keypair() -> (Zeroizing<[u8; 32]>, [u8; 32]) {
     let signing_key = SigningKey::from_bytes(&seed);
     let pub_bytes = signing_key.verifying_key().to_bytes();
     (Zeroizing::new(seed), pub_bytes)
+}
+
+// ---------------------------------------------------------------------------
+// X.509 mTLS certificate functions
+// ---------------------------------------------------------------------------
+
+/// Generate a self-signed X.509 CA certificate (Ed25519).
+/// Returns `(cert_der, key_der_pkcs8)`.
+pub fn generate_x509_ca() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
+    let key = KeyPair::generate_for(&PKCS_ED25519)
+        .context("generate CA Ed25519 key")?;
+
+    let mut params = CertificateParams::new(vec![])
+        .context("create CA cert params")?;
+    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.distinguished_name.push(DnType::CommonName, "Lynx Internal CA");
+    params.distinguished_name.push(DnType::OrganizationName, "Lynx");
+
+    let cert = params.self_signed(&key).context("self-sign CA cert")?;
+    let cert_der = cert.der().to_vec();
+    let key_der = Zeroizing::new(key.serialize_der());
+
+    Ok((cert_der, key_der))
+}
+
+/// Reconstruct an `rcgen::Certificate` from stored DER bytes.
+/// Used as the issuer when signing leaf certs.
+fn load_ca_rcgen(ca_cert_der: &[u8], ca_key_der: &[u8]) -> Result<(rcgen::Certificate, KeyPair)> {
+    let ca_key = KeyPair::try_from(ca_key_der).context("load CA key from DER")?;
+    let cert_der = RustlsCertDer::from(ca_cert_der.to_vec());
+    let ca_params = CertificateParams::from_ca_cert_der(&cert_der)
+        .context("parse CA cert params from DER")?;
+    let ca_cert = ca_params.self_signed(&ca_key).context("reconstruct CA cert")?;
+    Ok((ca_cert, ca_key))
+}
+
+/// Issue an X.509 server certificate for an agent (Ed25519).
+/// The cert includes the agent's WireGuard IP as a SAN.
+/// Returns `(cert_der, key_der_pkcs8)`.
+pub fn issue_x509_agent_cert(
+    ca_cert_der: &[u8],
+    ca_key_der: &[u8],
+    agent_id: Uuid,
+    wg_ip: &str,
+) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
+    let (ca_cert, ca_key) = load_ca_rcgen(ca_cert_der, ca_key_der)?;
+    let leaf_key = KeyPair::generate_for(&PKCS_ED25519)
+        .context("generate agent Ed25519 key")?;
+
+    let mut params = CertificateParams::new(vec![])
+        .context("create agent cert params")?;
+    params.distinguished_name.push(
+        DnType::CommonName,
+        format!("lynx-agent-{agent_id}"),
+    );
+    // Extended key usages: both server auth (listener) and client auth (future)
+    params.extended_key_usages = vec![
+        ExtendedKeyUsagePurpose::ServerAuth,
+        ExtendedKeyUsagePurpose::ClientAuth,
+    ];
+    if let Ok(ip) = wg_ip.parse::<std::net::IpAddr>() {
+        params.subject_alt_names.push(SanType::IpAddress(ip));
+    }
+
+    let cert = params
+        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .context("sign agent cert")?;
+    let cert_der = cert.der().to_vec();
+    let key_der = Zeroizing::new(leaf_key.serialize_der());
+
+    Ok((cert_der, key_der))
+}
+
+/// Issue an X.509 client certificate for the dashboard (Ed25519).
+/// Used by the dashboard's reqwest client when connecting to agent TLS endpoints.
+/// Returns `(cert_der, key_der_pkcs8)`.
+pub fn issue_x509_dashboard_client_cert(
+    ca_cert_der: &[u8],
+    ca_key_der: &[u8],
+) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
+    let (ca_cert, ca_key) = load_ca_rcgen(ca_cert_der, ca_key_der)?;
+    let leaf_key = KeyPair::generate_for(&PKCS_ED25519)
+        .context("generate dashboard client Ed25519 key")?;
+
+    let mut params = CertificateParams::new(vec![])
+        .context("create dashboard client cert params")?;
+    params.distinguished_name.push(DnType::CommonName, "lynx-dashboard");
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+
+    let cert = params
+        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .context("sign dashboard client cert")?;
+    let cert_der = cert.der().to_vec();
+    let key_der = Zeroizing::new(leaf_key.serialize_der());
+
+    Ok((cert_der, key_der))
 }

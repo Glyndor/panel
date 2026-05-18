@@ -1,6 +1,6 @@
 
 import { getTranslations } from "next-intl/server";
-import { RegisterForm } from "./RegisterForm";
+import { RegisterForm } from "@/components/(auth)/register/RegisterForm";
 
 export default async function RegisterPage({
 	params,

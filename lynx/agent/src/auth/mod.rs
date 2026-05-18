@@ -101,8 +101,9 @@ pub async fn verify_command(
 
 /// Returns Ok(()) if nonce is fresh, inserts it. Returns Err if already seen.
 async fn check_and_consume_nonce(db: &PgPool, nonce: &str) -> Result<()> {
-    // Also purge expired nonces (>60s old) opportunistically
-    sqlx::query!("DELETE FROM used_nonces WHERE created_at < NOW() - INTERVAL '60 seconds'")
+    // Purge nonces older than 5 minutes. Per spec: timestamp window is 30s, but nonces
+    // are retained for 5 minutes to account for clock skew before the 30s window kicks in.
+    sqlx::query!("DELETE FROM used_nonces WHERE created_at < NOW() - INTERVAL '5 minutes'")
         .execute(db)
         .await
         .context("purge expired nonces")?;

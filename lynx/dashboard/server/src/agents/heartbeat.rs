@@ -29,10 +29,10 @@ async fn poll_agents(state: &AppState) {
     };
 
     let token = &*state.config.internal_token;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .expect("build reqwest client");
+    let client = super::client::build_agent_client_with_timeout(
+        &state.config,
+        Duration::from_secs(5),
+    );
 
     let latest = state.latest_agent_version.read().await.clone();
 
@@ -128,10 +128,10 @@ async fn dispatch_update(
         }
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("build reqwest client");
+    let client = super::client::build_agent_client_with_timeout(
+        &state.config,
+        Duration::from_secs(10),
+    );
 
     let url = format!("http://{wg_ip}:{api_port}/cmd");
     let result = client

@@ -1,64 +1,88 @@
 "use client";
 
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { useActionState } from "react";
-import { toast } from "sonner";
-import { loginAction } from "./actions";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { loginSchema, type LoginInput } from "@/schemas/(auth)/login";
+import { loginAction } from "@/actions/(auth)/login";
 
 type Props = { locale: string };
 
 export function LoginForm({ locale }: Props) {
 	const t = useTranslations("auth.login");
+	const router = useRouter();
 
-	const [state, formAction, pending] = useActionState(
-		loginAction.bind(null, locale),
-		null,
-	);
+	const {
+		register,
+		handleSubmit,
+		formState: { errors, isSubmitting },
+	} = useForm<LoginInput>({
+		resolver: zodResolver(loginSchema),
+	});
 
-	if (state && !state.success) {
-		const msg =
-			state.error === "rateLimited"
-				? t("rateLimited", { minutes: state.retryAfter ?? 15 })
-				: state.error === "invalidCredentials"
-					? t("invalidCredentials")
-					: t("serverError");
-		toast.error(msg);
-	}
+	const onSubmit = async (data: LoginInput) => {
+		const promise = loginAction(locale, data).then((r) => {
+			if (!r.success) throw new Error(r.error);
+			return r;
+		});
+
+		toast.promise(promise, {
+			loading: t("submitting"),
+			success: t("submit"),
+			error: (e: Error) => {
+				if (e.message === "rateLimited") return t("rateLimited", { minutes: 15 });
+				if (e.message === "invalidCredentials") return t("invalidCredentials");
+				return t("serverError");
+			},
+		});
+
+		try {
+			const r = await promise;
+			if (r.forcePasswordChange) {
+				router.push(`/${locale}/app/settings?change_password=1`);
+			} else {
+				router.push(`/${locale}/app`);
+			}
+		} catch {
+			// handled by toast
+		}
+	};
 
 	return (
-		<form action={formAction} className="flex flex-col gap-5">
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="username">{t("username")}</Label>
+		<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+			<Field>
+				<FieldLabel htmlFor="username">{t("username")}</FieldLabel>
 				<Input
 					id="username"
-					name="username"
-					type="text"
+					{...register("username")}
 					autoComplete="username"
-					required
-					disabled={pending}
+					disabled={isSubmitting}
 					className="h-10"
 				/>
-			</div>
+				<FieldError errors={[errors.username]} />
+			</Field>
 
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="password">{t("password")}</Label>
+			<Field>
+				<FieldLabel htmlFor="password">{t("password")}</FieldLabel>
 				<Input
 					id="password"
-					name="password"
 					type="password"
+					{...register("password")}
 					autoComplete="current-password"
-					required
-					disabled={pending}
+					disabled={isSubmitting}
 					className="h-10"
 				/>
-			</div>
+				<FieldError errors={[errors.password]} />
+			</Field>
 
-			<Button type="submit" disabled={pending} className="w-full h-10 mt-1">
-				{pending ? t("submitting") : t("submit")}
+			<Button type="submit" disabled={isSubmitting} className="w-full h-10 mt-1">
+				{isSubmitting ? t("submitting") : t("submit")}
 			</Button>
 
 			<p className="text-center text-sm text-muted-foreground">

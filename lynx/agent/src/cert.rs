@@ -8,7 +8,6 @@ use base64ct::{Base64UrlUnpadded, Encoding};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zeroize::Zeroizing;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignedCert {

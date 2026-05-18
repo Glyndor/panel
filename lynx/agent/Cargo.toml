@@ -17,6 +17,9 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 axum = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+tower = { workspace = true }
 tower-http = { workspace = true }
 
 # database
@@ -30,6 +33,9 @@ base64ct = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
 rand = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
 
 # HTTP client (audit log sync to dashboard)
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }

@@ -1,5 +1,9 @@
 "use client";
 
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -11,11 +15,10 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { BACKEND_URL } from "@/lib/api";
 import { Plus } from "lucide-react";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { registerAgentSchema, type RegisterAgentInput } from "@/schemas/(dashboard)/app/agents";
 
 type RegisteredAgent = {
 	id: string;
@@ -47,42 +50,45 @@ export function RegisterAgentDialog({
 	doneLabel,
 }: Props) {
 	const [open, setOpen] = useState(false);
-	const [name, setName] = useState("");
 	const [registered, setRegistered] = useState<RegisteredAgent | null>(null);
-	const [pending, start] = useTransition();
 
-	function handleRegister() {
-		if (!name.trim()) return;
-		start(async () => {
-			try {
-				const res = await fetch(`${BACKEND_URL}/agents`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${token}`,
-					},
-					body: JSON.stringify({ name: name.trim() }),
-				});
-				if (!res.ok) {
-					toast.error("Failed to register agent");
-					return;
-				}
-				const data = (await res.json()) as RegisteredAgent;
-				setRegistered(data);
-			} catch {
-				toast.error("Network error");
-			}
-		});
-	}
+	const {
+		register,
+		handleSubmit,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<RegisterAgentInput>({
+		resolver: zodResolver(registerAgentSchema),
+	});
+
+	const onSubmit = (data: RegisterAgentInput) => {
+		toast.promise(
+			fetch(`${BACKEND_URL}/agents`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+				body: JSON.stringify({ name: data.name }),
+			}).then(async (res) => {
+				if (!res.ok) throw new Error("failed");
+				const agent = (await res.json()) as RegisteredAgent;
+				setRegistered(agent);
+				return agent;
+			}),
+			{
+				loading: "Registering…",
+				success: successTitle,
+				error: "Failed to register agent",
+			},
+		);
+	};
 
 	function handleClose() {
 		setOpen(false);
 		setRegistered(null);
-		setName("");
+		reset();
 	}
 
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}>
 			<DialogTrigger asChild>
 				<Button size="sm">
 					<Plus className="size-4 mr-1" />
@@ -98,25 +104,23 @@ export function RegisterAgentDialog({
 								Provide a name for the agent. A WireGuard IP will be assigned automatically.
 							</DialogDescription>
 						</DialogHeader>
-						<div className="flex flex-col gap-3 py-2">
-							<Label htmlFor="agent-name">Name</Label>
-							<Input
-								id="agent-name"
-								placeholder="prod-vps-01"
-								value={name}
-								onChange={(e) => setName(e.target.value)}
-								onKeyDown={(e) => e.key === "Enter" && handleRegister()}
-								disabled={pending}
-							/>
-						</div>
-						<DialogFooter>
-							<Button
-								onClick={handleRegister}
-								disabled={pending || !name.trim()}
-							>
-								{pending ? "Registering…" : "Register"}
-							</Button>
-						</DialogFooter>
+						<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3 py-2">
+							<Field>
+								<FieldLabel htmlFor="agent-name">Name</FieldLabel>
+								<Input
+									id="agent-name"
+									placeholder="prod-vps-01"
+									{...register("name")}
+									disabled={isSubmitting}
+								/>
+								<FieldError errors={[errors.name]} />
+							</Field>
+							<DialogFooter>
+								<Button type="submit" disabled={isSubmitting}>
+									{isSubmitting ? "Registering…" : "Register"}
+								</Button>
+							</DialogFooter>
+						</form>
 					</>
 				) : (
 					<>
@@ -125,9 +129,9 @@ export function RegisterAgentDialog({
 							<DialogDescription>{successDesc}</DialogDescription>
 						</DialogHeader>
 						<div className="flex flex-col gap-3 py-2 text-sm">
-							<Field label={agentIdLabel} value={registered.id} />
-							<Field label={wgIpLabel} value={registered.wg_ip} />
-							<Field label={syncTokenLabel} value={registered.sync_token} secret />
+							<AgentField label={agentIdLabel} value={registered.id} />
+							<AgentField label={wgIpLabel} value={registered.wg_ip} />
+							<AgentField label={syncTokenLabel} value={registered.sync_token} secret />
 						</div>
 						<p className="text-xs text-destructive font-medium">{warnOnce}</p>
 						<DialogFooter>
@@ -140,17 +144,8 @@ export function RegisterAgentDialog({
 	);
 }
 
-function Field({
-	label,
-	value,
-	secret,
-}: {
-	label: string;
-	value: string;
-	secret?: boolean;
-}) {
+function AgentField({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
 	const [revealed, setRevealed] = useState(!secret);
-
 	return (
 		<div className="space-y-1">
 			<p className="text-xs font-medium text-muted-foreground">{label}</p>
@@ -159,12 +154,7 @@ function Field({
 					{revealed ? value : "•".repeat(Math.min(value.length, 32))}
 				</code>
 				{secret && (
-					<Button
-						variant="ghost"
-						size="sm"
-						className="shrink-0 text-xs"
-						onClick={() => setRevealed((r) => !r)}
-					>
+					<Button variant="ghost" size="sm" className="shrink-0 text-xs" onClick={() => setRevealed((r) => !r)}>
 						{revealed ? "Hide" : "Reveal"}
 					</Button>
 				)}

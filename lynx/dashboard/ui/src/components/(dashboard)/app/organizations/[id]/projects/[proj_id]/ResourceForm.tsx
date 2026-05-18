@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { updateContainerResources } from "./actions";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { resourceFormSchema, type ResourceFormInput } from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
+import { updateContainerResources } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]";
 
 interface Props {
 	orgId: string;
@@ -21,78 +23,79 @@ interface Props {
 }
 
 export function ResourceForm({ orgId, projId, labels }: Props) {
-	const [containerName, setContainerName] = useState("");
-	const [cpus, setCpus] = useState("");
-	const [memoryMb, setMemoryMb] = useState("");
-	const [isPending, startTransition] = useTransition();
+	const {
+		register,
+		handleSubmit,
+		formState: { errors, isSubmitting },
+	} = useForm<ResourceFormInput>({
+		resolver: zodResolver(resourceFormSchema),
+	});
 
-	function handleSubmit(e: React.FormEvent) {
-		e.preventDefault();
-		if (!containerName.trim()) return;
-		const cpuVal = cpus ? parseFloat(cpus) : null;
-		const memVal = memoryMb ? parseInt(memoryMb, 10) : null;
-		if (cpuVal !== null && (isNaN(cpuVal) || cpuVal <= 0)) return;
-		if (memVal !== null && (isNaN(memVal) || memVal <= 0)) return;
-
-		startTransition(async () => {
-			const result = await updateContainerResources(
+	const onSubmit = (data: ResourceFormInput) => {
+		toast.promise(
+			updateContainerResources(
 				orgId,
 				projId,
-				containerName.trim(),
-				cpuVal,
-				memVal,
-			);
-			if (result.ok) {
-				toast.success(labels.success);
-			} else {
-				toast.error(labels.error, { description: result.error });
-			}
-		});
-	}
+				data.container_name,
+				data.cpus ?? null,
+				data.memory_mb ?? null,
+			).then((r) => {
+				if (!r.ok) throw new Error(r.error);
+				return r;
+			}),
+			{
+				loading: labels.apply,
+				success: labels.success,
+				error: labels.error,
+			},
+		);
+	};
 
 	return (
-		<form onSubmit={handleSubmit} className="flex flex-col gap-4">
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="container-name">{labels.containerName}</Label>
+		<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+			<Field>
+				<FieldLabel htmlFor="container-name">{labels.containerName}</FieldLabel>
 				<Input
 					id="container-name"
-					value={containerName}
-					onChange={(e) => setContainerName(e.target.value)}
+					{...register("container_name")}
 					placeholder="web"
-					required
+					disabled={isSubmitting}
 				/>
-			</div>
+				<FieldError errors={[errors.container_name]} />
+			</Field>
 
 			<div className="flex gap-4">
-				<div className="flex flex-col gap-1.5 flex-1">
-					<Label htmlFor="cpus">{labels.cpus}</Label>
+				<Field className="flex-1">
+					<FieldLabel htmlFor="cpus">{labels.cpus}</FieldLabel>
 					<Input
 						id="cpus"
 						type="number"
 						min="0.1"
 						step="0.1"
-						value={cpus}
-						onChange={(e) => setCpus(e.target.value)}
+						{...register("cpus")}
 						placeholder="1.0"
+						disabled={isSubmitting}
 					/>
-				</div>
-				<div className="flex flex-col gap-1.5 flex-1">
-					<Label htmlFor="memory-mb">{labels.memoryMb}</Label>
+					<FieldError errors={[errors.cpus]} />
+				</Field>
+				<Field className="flex-1">
+					<FieldLabel htmlFor="memory-mb">{labels.memoryMb}</FieldLabel>
 					<Input
 						id="memory-mb"
 						type="number"
 						min="64"
 						step="64"
-						value={memoryMb}
-						onChange={(e) => setMemoryMb(e.target.value)}
+						{...register("memory_mb")}
 						placeholder="512"
+						disabled={isSubmitting}
 					/>
-				</div>
+					<FieldError errors={[errors.memory_mb]} />
+				</Field>
 			</div>
 
 			<div>
-				<Button type="submit" size="sm" disabled={isPending}>
-					{isPending ? "…" : labels.apply}
+				<Button type="submit" size="sm" disabled={isSubmitting}>
+					{isSubmitting ? "…" : labels.apply}
 				</Button>
 			</div>
 		</form>

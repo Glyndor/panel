@@ -2,17 +2,17 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
-import { SessionList } from "./SessionList";
-import { SessionListSkeleton } from "./SessionListSkeleton";
-import { RotateButton } from "./RotateButton";
-import { BrandingForm } from "./BrandingForm";
-import { UpdateSection } from "./UpdateSection";
-import { DomainSection } from "./DomainSection";
-import { MigrationSection } from "./MigrationSection";
-import { getMigrationStatus } from "./migrationActions";
-import { ChangePasswordForm } from "./ChangePasswordForm";
-import { getMe } from "./profileActions";
-import { RotationLog } from "./RotationLog";
+import { SessionList } from "@/components/(dashboard)/app/settings/SessionList";
+import { SessionListSkeleton } from "@/components/(dashboard)/app/settings/SessionListSkeleton";
+import { RotateButton } from "@/components/(dashboard)/app/settings/RotateButton";
+import { BrandingForm } from "@/components/(dashboard)/app/settings/BrandingForm";
+import { UpdateSection } from "@/components/(dashboard)/app/settings/UpdateSection";
+import { DomainSection } from "@/components/(dashboard)/app/settings/DomainSection";
+import { MigrationSection } from "@/components/(dashboard)/app/settings/MigrationSection";
+import { getMigrationStatus } from "@/actions/(dashboard)/app/settings/migration";
+import { ChangePasswordForm } from "@/components/(dashboard)/app/settings/ChangePasswordForm";
+import { getMe } from "@/actions/(dashboard)/app/settings/profile";
+import { RotationLog } from "@/components/(dashboard)/app/settings/RotationLog";
 
 interface Branding {
 	company_name: string;

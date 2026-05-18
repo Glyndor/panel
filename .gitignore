@@ -1,6 +1,3 @@
-# Private Claude instructions (per-repo, not shared)
-CLAUDE.md
-
 # Personal dev scratch space
 dev/
 
@@ -13,9 +10,21 @@ target/
 .DS_Store
 **/.DS_Store
 
-# Claude Code / AI agent files
+# AI tools — nothing AI-related goes to the repo
+CLAUDE.md
+.claude/
+**/.claude/
 **/.agents/
 **/skills-lock.json
+.cursor/
+**/.cursor/
+.copilot/
+**/.copilot/
+.windsurf/
+**/.windsurf/
+.aider*
+.continue/
+**/.continue/
 
 # Env files (real ones — .env.example is tracked)
 .env

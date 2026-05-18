@@ -67,9 +67,23 @@ pub async fn register_agent(
     .fetch_one(&state.db)
     .await?;
 
-    if let Err(e) = wg::add_peer(&req.wg_pubkey, wg_ip.parse().unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))) {
+    let psk = match wg::create_psk(req.agent_id) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(agent_id = %req.agent_id, error = %e, "failed to create WG PSK");
+            return Err(AppError::Internal(e));
+        }
+    };
+
+    if let Err(e) = wg::add_peer(
+        &req.wg_pubkey,
+        wg_ip.parse().unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+        &psk,
+    ) {
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
     }
+
+    state.wg_psks.write().await.insert(req.agent_id, psk);
 
     let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
         .map_err(anyhow::Error::from)?;
@@ -83,8 +97,20 @@ pub async fn register_agent(
     .execute(&state.db)
     .await?;
 
+    // Issue X.509 mTLS server cert for the agent.
+    let (tls_cert_der, tls_key_der) = pki::issue_x509_agent_cert(
+        &state.config.x509_ca_cert_der,
+        &state.config.x509_ca_key_der,
+        agent.id,
+        &wg_ip,
+    )
+    .map_err(anyhow::Error::from)?;
+
     use base64ct::Encoding as _;
     let ca_public_key = base64ct::Base64UrlUnpadded::encode_string(&state.config.ca_public_bytes);
+    let tls_cert_b64 = base64ct::Base64::encode_string(&tls_cert_der);
+    let tls_key_b64 = base64ct::Base64::encode_string(&tls_key_der);
+    let tls_ca_cert_b64 = base64ct::Base64::encode_string(&state.config.x509_ca_cert_der);
 
     let event_id = uuid::Uuid::now_v7();
     sqlx::query!(
@@ -97,7 +123,6 @@ pub async fn register_agent(
     .execute(&state.db)
     .await?;
 
-    // Refresh wg_ip reference for the event detail (now stored as string)
     let _ = &wg_ip;
 
     Ok((
@@ -107,6 +132,9 @@ pub async fn register_agent(
             sync_token,
             cert,
             ca_public_key,
+            tls_cert_der: tls_cert_b64,
+            tls_key_der: tls_key_b64,
+            tls_ca_cert_der: tls_ca_cert_b64,
         }),
     ))
 }
@@ -123,6 +151,10 @@ pub async fn remove_agent(
     if let Err(e) = wg::remove_peer(&agent.wg_pubkey) {
         tracing::error!(agent_id = %id, error = %e, "failed to remove WG peer");
     }
+
+    // Delete PSK from memory and Podman secrets.
+    state.wg_psks.write().await.remove(&id);
+    wg::delete_psk(id);
 
     // Release IP back to pool before deleting the agent row (FK constraint).
     if let Err(e) = wg::release_ip(&state.db, id).await {

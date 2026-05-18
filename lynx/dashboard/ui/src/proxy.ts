@@ -2,7 +2,7 @@ import createMiddleware from "next-intl/middleware";
 import { type NextRequest, NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8080";
 
 const handleI18n = createMiddleware(routing);
 

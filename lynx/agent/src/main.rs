@@ -7,11 +7,11 @@ mod error;
 mod handlers;
 mod metrics;
 mod nftables;
+mod nginx;
 mod podman;
 mod state;
 mod sync;
 mod update;
-
 
 use anyhow::Context;
 use axum::{
@@ -29,6 +29,93 @@ use std::sync::{
 };
 use tokio::time::{interval, Duration};
 use tracing::info;
+
+fn build_tls_acceptor(config: &config::Config) -> Option<tokio_rustls::TlsAcceptor> {
+    let cert_der = config.tls_cert_der.as_ref()?;
+    let key_der = config.tls_key_der.as_ref()?;
+    let ca_cert_der = config.tls_ca_cert_der.as_ref()?;
+
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use std::sync::Arc as StdArc;
+
+    // Clone into owned data so the resulting ServerConfig is 'static.
+    let cert_chain = vec![CertificateDer::from(cert_der.clone())];
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der.to_vec()));
+
+    // Build client cert verifier trusting only the dashboard CA.
+    let mut root_store = rustls::RootCertStore::empty();
+    if let Err(e) = root_store.add(CertificateDer::from(ca_cert_der.clone())) {
+        tracing::warn!("TLS CA cert add failed: {e} — falling back to plain HTTP");
+        return None;
+    }
+
+    let client_verifier =
+        match rustls::server::WebPkiClientVerifier::builder(StdArc::new(root_store)).build() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("TLS client verifier build failed: {e} — falling back to plain HTTP");
+                return None;
+            }
+        };
+
+    let server_config = match rustls::ServerConfig::builder()
+        .with_client_cert_verifier(client_verifier)
+        .with_single_cert(cert_chain, key)
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("TLS ServerConfig build failed: {e} — falling back to plain HTTP");
+            return None;
+        }
+    };
+
+    Some(tokio_rustls::TlsAcceptor::from(StdArc::new(server_config)))
+}
+
+async fn serve_tls(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    acceptor: tokio_rustls::TlsAcceptor,
+) -> anyhow::Result<()> {
+    use hyper::server::conn::http1;
+    use hyper_util::rt::TokioIo;
+
+    loop {
+        let (tcp_stream, _remote_addr) = listener.accept().await.context("accept TCP")?;
+        let acceptor = acceptor.clone();
+        let app = app.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(tcp_stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::debug!("TLS handshake failed: {e}");
+                    return;
+                }
+            };
+
+            let io = TokioIo::new(tls_stream);
+
+            // Bridge hyper::body::Incoming → axum::body::Body so the router can handle it.
+            let svc = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+                let app = app.clone();
+                async move {
+                    use tower::ServiceExt;
+                    let req = req.map(axum::body::Body::new);
+                    app.oneshot(req).await
+                }
+            });
+
+            if let Err(e) = http1::Builder::new()
+                .serve_connection(io, svc)
+                .with_upgrades()
+                .await
+            {
+                tracing::debug!("HTTP connection error: {e}");
+            }
+        });
+    }
+}
 
 /// Agent enters lockdown if no heartbeat received from dashboard within this window.
 const HEARTBEAT_TIMEOUT_SECS: u64 = 300;
@@ -122,6 +209,9 @@ async fn main() -> anyhow::Result<()> {
     // Conflicting software check (every 5 minutes)
     tokio::spawn(conflict::run_conflict_check(state.clone()));
 
+    // nginx watchdog (every 60 seconds)
+    tokio::spawn(nginx::run_nginx_watchdog(state.clone()));
+
     // Heartbeat watchdog task
     let lockdown_clone = lockdown.clone();
     let heartbeat_clone = last_heartbeat.clone();
@@ -139,6 +229,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Build TLS acceptor before moving state into router.
+    let tls_acceptor = build_tls_acceptor(&state.config);
+
     // Pass last_heartbeat to the heartbeat route via extension
     let hb = last_heartbeat.clone();
     let app = Router::new()
@@ -155,8 +248,18 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
-    info!("lynx-agent listening on {listen_addr}");
-    axum::serve(listener, app).await?;
+
+    match tls_acceptor {
+        Some(acceptor) => {
+            info!("lynx-agent listening on {listen_addr} (mTLS)");
+            serve_tls(listener, app, acceptor).await?;
+        }
+        None => {
+            info!("lynx-agent listening on {listen_addr} (plain HTTP — TLS certs not configured)");
+            axum::serve(listener, app).await?;
+        }
+    }
+
     Ok(())
 }
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,7 +14,7 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import {
 	Select,
 	SelectContent,
@@ -21,7 +23,8 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Trash2, Plus, Network } from "lucide-react";
-import { addHorizontalScale, teardownHorizontalScale } from "./scaleActions";
+import { addTunnelSchema, type AddTunnelInput } from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
+import { addHorizontalScale, teardownHorizontalScale } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]/scale";
 
 interface Agent {
 	id: string;
@@ -68,11 +71,7 @@ interface Props {
 
 function StatusBadge({ status }: { status: string }) {
 	const variant =
-		status === "active"
-			? "default"
-			: status === "pending"
-				? "secondary"
-				: "destructive";
+		status === "active" ? "default" : status === "pending" ? "secondary" : "destructive";
 	return <Badge variant={variant}>{status}</Badge>;
 }
 
@@ -88,7 +87,6 @@ function TeardownButton({
 	labels: { teardownSuccess: string; teardownError: string };
 }) {
 	const [pending, startTransition] = useTransition();
-
 	return (
 		<Button
 			variant="ghost"
@@ -120,38 +118,39 @@ function AddTunnelDialog({
 	labels: Labels;
 }) {
 	const [open, setOpen] = useState(false);
-	const [targetAgentId, setTargetAgentId] = useState("");
-	const [image, setImage] = useState("");
-	const [replicas, setReplicas] = useState("1");
-	const [pending, startTransition] = useTransition();
-
 	const onlineAgents = agents.filter((a) => a.status === "online");
 
-	const handleSubmit = (e: React.FormEvent) => {
-		e.preventDefault();
-		if (!targetAgentId || !image) return;
-		startTransition(async () => {
-			const r = await addHorizontalScale(
-				orgId,
-				projId,
-				targetAgentId,
-				image,
-				Math.max(1, parseInt(replicas) || 1),
-			);
-			if (r.ok) {
-				toast.success(labels.success);
-				setOpen(false);
-				setImage("");
-				setReplicas("1");
-				setTargetAgentId("");
-			} else {
-				toast.error(labels.error);
-			}
-		});
+	const {
+		register,
+		handleSubmit,
+		control,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<AddTunnelInput>({
+		resolver: zodResolver(addTunnelSchema),
+		defaultValues: { replica_count: 1 },
+	});
+
+	const onSubmit = (data: AddTunnelInput) => {
+		toast.promise(
+			addHorizontalScale(orgId, projId, data.target_agent_id, data.image, data.replica_count).then(
+				(r) => {
+					if (!r.ok) throw new Error(r.error);
+					setOpen(false);
+					reset({ replica_count: 1 });
+					return r;
+				},
+			),
+			{
+				loading: labels.confirm,
+				success: labels.success,
+				error: labels.error,
+			},
+		);
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset({ replica_count: 1 }); }}>
 			<DialogTrigger asChild>
 				<Button size="sm" variant="outline" className="gap-1.5">
 					<Plus className="size-3.5" />
@@ -162,47 +161,57 @@ function AddTunnelDialog({
 				<DialogHeader>
 					<DialogTitle>{labels.dialogTitle}</DialogTitle>
 				</DialogHeader>
-				<form onSubmit={handleSubmit} className="flex flex-col gap-4">
-					<div className="flex flex-col gap-1.5">
-						<Label>{labels.targetAgent}</Label>
+				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+					<Field>
+						<FieldLabel>{labels.targetAgent}</FieldLabel>
 						{onlineAgents.length === 0 ? (
 							<p className="text-sm text-muted-foreground">{labels.error}</p>
 						) : (
-							<Select value={targetAgentId} onValueChange={setTargetAgentId}>
-								<SelectTrigger>
-									<SelectValue placeholder={labels.targetAgent} />
-								</SelectTrigger>
-								<SelectContent>
-									{onlineAgents.map((a) => (
-										<SelectItem key={a.id} value={a.id}>
-											{a.name} ({a.wg_ip})
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
+							<Controller
+								control={control}
+								name="target_agent_id"
+								render={({ field }) => (
+									<Select value={field.value} onValueChange={field.onChange} disabled={isSubmitting}>
+										<SelectTrigger>
+											<SelectValue placeholder={labels.targetAgent} />
+										</SelectTrigger>
+										<SelectContent>
+											{onlineAgents.map((a) => (
+												<SelectItem key={a.id} value={a.id}>
+													{a.name} ({a.wg_ip})
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								)}
+							/>
 						)}
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label>{labels.image}</Label>
+						<FieldError errors={[errors.target_agent_id]} />
+					</Field>
+					<Field>
+						<FieldLabel htmlFor="tunnel-image">{labels.image}</FieldLabel>
 						<Input
-							value={image}
-							onChange={(e) => setImage(e.target.value)}
+							id="tunnel-image"
+							{...register("image")}
 							placeholder="docker.io/nginx:latest"
-							required
+							disabled={isSubmitting}
 						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label>{labels.replicas}</Label>
+						<FieldError errors={[errors.image]} />
+					</Field>
+					<Field>
+						<FieldLabel htmlFor="tunnel-replicas">{labels.replicas}</FieldLabel>
 						<Input
+							id="tunnel-replicas"
 							type="number"
 							min={1}
 							max={20}
-							value={replicas}
-							onChange={(e) => setReplicas(e.target.value)}
+							{...register("replica_count")}
+							disabled={isSubmitting}
 						/>
-					</div>
-					<Button type="submit" disabled={pending || !targetAgentId || !image}>
-						{labels.confirm}
+						<FieldError errors={[errors.replica_count]} />
+					</Field>
+					<Button type="submit" disabled={isSubmitting || onlineAgents.length === 0}>
+						{isSubmitting ? "…" : labels.confirm}
 					</Button>
 				</form>
 			</DialogContent>
@@ -210,13 +219,7 @@ function AddTunnelDialog({
 	);
 }
 
-export function HorizontalScaleSection({
-	orgId,
-	projId,
-	tunnels,
-	agents,
-	labels,
-}: Props) {
+export function HorizontalScaleSection({ orgId, projId, tunnels, agents, labels }: Props) {
 	return (
 		<section className="flex flex-col gap-3">
 			<div className="flex items-center justify-between">
@@ -224,12 +227,7 @@ export function HorizontalScaleSection({
 					<Network className="size-3.5" />
 					{labels.title}
 				</h2>
-				<AddTunnelDialog
-					orgId={orgId}
-					projId={projId}
-					agents={agents}
-					labels={labels}
-				/>
+				<AddTunnelDialog orgId={orgId} projId={projId} agents={agents} labels={labels} />
 			</div>
 			<p className="text-sm text-muted-foreground">{labels.desc}</p>
 			{tunnels.length === 0 ? (
@@ -237,10 +235,7 @@ export function HorizontalScaleSection({
 			) : (
 				<div className="rounded-lg border divide-y">
 					{tunnels.map((t) => (
-						<div
-							key={t.id}
-							className="flex items-center justify-between p-3 text-sm"
-						>
+						<div key={t.id} className="flex items-center justify-between p-3 text-sm">
 							<div className="flex flex-col gap-0.5">
 								<span className="font-mono text-xs text-muted-foreground">
 									{t.agent_a_wg_ip} → {t.agent_b_wg_ip}
@@ -251,12 +246,7 @@ export function HorizontalScaleSection({
 							</div>
 							<div className="flex items-center gap-2">
 								<StatusBadge status={t.status} />
-								<TeardownButton
-									orgId={orgId}
-									projId={projId}
-									tunnelId={t.id}
-									labels={labels}
-								/>
+								<TeardownButton orgId={orgId} projId={projId} tunnelId={t.id} labels={labels} />
 							</div>
 						</div>
 					))}

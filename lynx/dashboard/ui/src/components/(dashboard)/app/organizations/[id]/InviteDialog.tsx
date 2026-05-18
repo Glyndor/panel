@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -12,8 +14,9 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { inviteMember } from "./actions";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { inviteMemberSchema, type InviteMemberInput } from "@/schemas/(dashboard)/app/organizations/[id]";
+import { inviteMember } from "@/actions/(dashboard)/app/organizations/[id]";
 
 interface Props {
 	orgId: string;
@@ -31,29 +34,35 @@ interface Props {
 export function InviteDialog({ orgId, labels }: Props) {
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
-	const [username, setUsername] = useState("");
-	const [role, setRole] = useState("member");
-	const [isPending, startTransition] = useTransition();
 
-	function handleSubmit(e: React.FormEvent) {
-		e.preventDefault();
-		if (!username.trim()) return;
-		startTransition(async () => {
-			const result = await inviteMember(orgId, username.trim(), role);
-			if (result.ok) {
-				toast.success(labels.success);
+	const {
+		register,
+		handleSubmit,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<InviteMemberInput>({
+		resolver: zodResolver(inviteMemberSchema),
+		defaultValues: { role: "member" },
+	});
+
+	const onSubmit = (data: InviteMemberInput) => {
+		toast.promise(
+			inviteMember(orgId, data.username, data.role).then((r) => {
+				if (!r.ok) throw new Error(r.error);
 				setOpen(false);
-				setUsername("");
-				setRole("member");
+				reset();
 				router.refresh();
-			} else {
-				toast.error(labels.error, { description: result.error });
-			}
-		});
-	}
+			}),
+			{
+				loading: labels.invite,
+				success: labels.success,
+				error: labels.error,
+			},
+		);
+	};
 
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
 			<DialogTrigger asChild>
 				<Button size="sm">{labels.trigger}</Button>
 			</DialogTrigger>
@@ -61,32 +70,33 @@ export function InviteDialog({ orgId, labels }: Props) {
 				<DialogHeader>
 					<DialogTitle>{labels.title}</DialogTitle>
 				</DialogHeader>
-				<form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="invite-username">{labels.username}</Label>
+				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 mt-2">
+					<Field>
+						<FieldLabel htmlFor="invite-username">{labels.username}</FieldLabel>
 						<Input
 							id="invite-username"
-							value={username}
-							onChange={(e) => setUsername(e.target.value)}
+							{...register("username")}
 							autoComplete="off"
-							required
+							disabled={isSubmitting}
 						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="invite-role">{labels.role}</Label>
+						<FieldError errors={[errors.username]} />
+					</Field>
+					<Field>
+						<FieldLabel htmlFor="invite-role">{labels.role}</FieldLabel>
 						<select
 							id="invite-role"
-							value={role}
-							onChange={(e) => setRole(e.target.value)}
+							{...register("role")}
+							disabled={isSubmitting}
 							className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
 						>
 							<option value="viewer">Viewer</option>
 							<option value="member">Member</option>
 							<option value="admin">Admin</option>
 						</select>
-					</div>
-					<Button type="submit" disabled={isPending}>
-						{isPending ? "…" : labels.invite}
+						<FieldError errors={[errors.role]} />
+					</Field>
+					<Button type="submit" disabled={isSubmitting}>
+						{isSubmitting ? "…" : labels.invite}
 					</Button>
 				</form>
 			</DialogContent>

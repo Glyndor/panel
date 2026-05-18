@@ -4,10 +4,10 @@ import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { ResourceForm } from "./ResourceForm";
-import { ContainerCard } from "./ContainerCard";
-import { DeployForm } from "./DeployForm";
-import { HorizontalScaleSection } from "./HorizontalScaleSection";
+import { ResourceForm } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/ResourceForm";
+import { ContainerCard } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/ContainerCard";
+import { DeployForm } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/DeployForm";
+import { HorizontalScaleSection } from "@/components/(dashboard)/app/organizations/[id]/projects/[proj_id]/HorizontalScaleSection";
 
 interface Project {
 	id: string;

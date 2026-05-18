@@ -4,9 +4,9 @@ import { getTranslations } from "next-intl/server";
 import { BACKEND_URL } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { InviteDialog } from "./InviteDialog";
-import { RemoveMemberButton } from "./RemoveMemberButton";
-import { CreateProjectDialog } from "./CreateProjectDialog";
+import { InviteDialog } from "@/components/(dashboard)/app/organizations/[id]/InviteDialog";
+import { RemoveMemberButton } from "@/components/(dashboard)/app/organizations/[id]/RemoveMemberButton";
+import { CreateProjectDialog } from "@/components/(dashboard)/app/organizations/[id]/CreateProjectDialog";
 
 interface Org {
 	id: string;

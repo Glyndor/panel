@@ -1,9 +1,9 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
-import { OrgList } from "./OrgList";
-import { OrgListSkeleton } from "./OrgListSkeleton";
-import { CreateOrgDialog } from "./CreateOrgDialog";
+import { OrgList } from "@/components/(dashboard)/app/organizations/OrgList";
+import { OrgListSkeleton } from "@/components/(dashboard)/app/organizations/OrgListSkeleton";
+import { CreateOrgDialog } from "@/components/(dashboard)/app/organizations/CreateOrgDialog";
 
 export default async function OrganizationsPage({
 	params,

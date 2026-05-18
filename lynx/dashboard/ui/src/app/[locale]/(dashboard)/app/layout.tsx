@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { BACKEND_URL } from "@/lib/api";
-import { Sidebar } from "./Sidebar";
+import { Sidebar } from "@/components/(dashboard)/app/Sidebar";
 
 interface Branding {
 	company_name: string;

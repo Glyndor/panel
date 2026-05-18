@@ -53,7 +53,7 @@ LISTEN_PORT=19443
 AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
 DASHBOARD_WG_IP="10.100.0.1"
-WG_SUBNET="10.100.0.0/24"
+WG_SUBNET="10.100.0.0/16"
 CONTAINER_RUNTIME="podman"
 
 # --- Root check -------------------------------------------------------------
@@ -144,7 +144,12 @@ _cleanup_existing() {
     # Remove secrets
     for secret in lynx-dashboard-pg-root lynx-dashboard-pg-pass lynx-dashboard-redis-pass \
                   lynx-dashboard-database-url lynx-dashboard-redis-url \
-                  lynx-dashboard-api-token lynx-dashboard-kek lynx-dashboard-pepper; do
+                  lynx-dashboard-api-token lynx-dashboard-kek lynx-dashboard-pepper \
+                  lynx-dashboard-jwt-sign-private lynx-dashboard-jwt-sign-public \
+                  lynx-dashboard-jwt-enc-private lynx-dashboard-jwt-enc-public \
+                  lynx-dashboard-ca-private lynx-dashboard-ca-public \
+                  lynx-dashboard-setup-token \
+                  lynx-dashboard-local-agent-psk; do
         podman secret rm "$secret" 2>/dev/null || true
     done
 
@@ -245,6 +250,37 @@ openssl rand -base64 32 | tr -d '\n' | podman secret create lynx-dashboard-kek -
 
 log_info "Generating pepper..."
 openssl rand -hex 32 | podman secret create lynx-dashboard-pepper -
+
+log_info "Generating JWT signing keypair (Ed25519)..."
+(
+    PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
+    PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
+    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private -
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public -
+)
+
+log_info "Generating JWT encryption keypair (X25519)..."
+(
+    PRIV_PEM=$(openssl genpkey -algorithm x25519 2>/dev/null)
+    PRIV_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
+    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
+    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private -
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public -
+)
+
+log_info "Generating CA keypair (Ed25519)..."
+(
+    PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
+    PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
+    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private -
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public -
+)
+
+log_info "Generating setup token (one-time bootstrap)..."
+SETUP_TOKEN=$(openssl rand -hex 32)
+printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token -
 
 log_ok "All secrets generated — values purged from memory"
 
@@ -390,7 +426,7 @@ printf '%s' "$AGENT_PSK" | podman secret create lynx-dashboard-local-agent-psk -
 cat > "$WG_CONF" << EOF
 [Interface]
 PrivateKey = ${DASHBOARD_PRIV}
-Address = ${DASHBOARD_WG_IP}/24
+Address = ${DASHBOARD_WG_IP}/16
 ListenPort = ${AGENT_WG_PORT}
 
 # Peer block added by agent install script after bootstrap:
@@ -413,48 +449,81 @@ log_section "Configuring nftables"
 
 cat > /etc/nftables-lynx-dashboard.conf << 'EOF'
 table inet lynx-dashboard {
-    # WireGuard peer interfaces — populated dynamically
-    set wg_peers { type ifname; }
-
     chain input {
-        type filter hook input priority 0; policy drop;
+        type filter hook input priority filter; policy drop;
 
         # Loopback
         iifname "lo" accept
 
+        # Drop invalid state immediately
+        ct state invalid drop
+
         # Established / related
         ct state established,related accept
 
-        # ICMP
-        ip  protocol icmp  accept
-        ip6 nexthdr  icmpv6 accept
+        # Required ICMP types (path MTU, traceroute, diagnostics)
+        ip  protocol icmp  icmp type  { destination-unreachable, time-exceeded, parameter-problem } accept
+        ip6 nexthdr  icmpv6 icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
 
-        # SSH — always open
-        tcp dport 22 accept
+        # ICMPv6 NDP — required for IPv6 neighbor discovery
+        ip6 nexthdr ipv6-icmp icmpv6 type { nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
+
+        # ICMP echo — rate limited
+        ip  protocol icmp  icmp type  echo-request ct state new limit rate 3/second burst 10 packets accept
+        ip6 nexthdr  icmpv6 icmpv6 type echo-request ct state new limit rate 3/second burst 10 packets accept
+
+        # TCP flag anomalies — drop port scans and malformed packets
+        tcp flags == 0x0 drop
+        tcp flags & (fin | psh | urg) == fin | psh | urg drop
+        tcp flags ack ct state new drop
+
+        # SSH — rate limited
+        tcp dport 22 ct state new limit rate 10/minute burst 5 packets accept
 
         # Dashboard panel
-        tcp dport 19443 accept
+        tcp dport 19443 ct state new accept
 
-        # WireGuard (for agent tunnels)
+        # WireGuard (agent tunnels)
         udp dport 51820 accept
 
-        # Drop everything else
         drop
     }
 
     chain forward {
-        type filter hook forward priority 0; policy drop;
+        type filter hook forward priority filter; policy drop;
+
+        ct state established,related accept
+
+        # Allow backend container traffic to/from WireGuard (dashboard ↔ agents)
+        oifname "wg-lynx-dashboard" accept
+        iifname "wg-lynx-dashboard" accept
     }
 
     chain output {
-        type filter hook output priority 0; policy accept;
+        type filter hook output priority filter; policy accept;
+
+        # Ports this server should never initiate outbound connections to
+        tcp dport { 25, 465, 587 } drop  # SMTP — no email relay
+        tcp dport 23 drop                 # Telnet
+        tcp dport { 20, 21 } drop         # FTP
+        udp dport { 137, 138 } drop       # NetBIOS
+        tcp dport { 139, 445 } drop       # SMB
+        tcp dport 6667 drop               # IRC (common botnet C2)
+        tcp dport 111 drop                # RPC
+        udp dport 111 drop
+        udp dport 69 drop                 # TFTP
+        tcp dport 6000-6063 drop          # X11
+        tcp dport 1080 drop               # SOCKS proxy
+        udp dport 5353 drop               # mDNS
+        tcp dport 6881-6889 drop          # BitTorrent
+        udp dport 6881-6889 drop
     }
 }
 EOF
 
 # Apply ruleset
 nft -f /etc/nftables-lynx-dashboard.conf
-log_ok "nftables rules applied (ports: 22, 19443, 51820 UDP)"
+log_ok "nftables rules applied (ports: 22 rate-limited, 19443, 51820 UDP)"
 
 # Persist across reboots
 if [[ -f /etc/nftables.conf ]]; then
@@ -476,6 +545,14 @@ echo -e "${GREEN}${BOLD}Lynx Dashboard is running!${RESET}"
 echo ""
 echo -e "  ${BOLD}URL:${RESET}               ${CYAN}https://${HOST_IP}:${LISTEN_PORT}${RESET}"
 echo -e "  ${BOLD}Cert expires:${RESET}      ${CERT_EXPIRY}"
+echo ""
+echo -e "${BOLD}${YELLOW}=== Create your admin account ===${RESET}"
+echo -e "  Open this URL in your browser ${BOLD}(one-time use, expires in 24 hours):${RESET}"
+echo -e "  ${CYAN}https://${HOST_IP}:${LISTEN_PORT}/register?setup_token=${SETUP_TOKEN}${RESET}"
+echo -e "${YELLOW}This is the only time the setup token is shown. Save the link now.${RESET}"
+echo ""
+SETUP_TOKEN="$(openssl rand -hex 32)"  # overwrite in memory
+unset SETUP_TOKEN
 echo ""
 echo -e "${BOLD}${YELLOW}=== WireGuard bootstrap data (copy for agent install) ===${RESET}"
 echo -e "  ${BOLD}Dashboard endpoint:${RESET}  ${HOST_IP}:${AGENT_WG_PORT}"

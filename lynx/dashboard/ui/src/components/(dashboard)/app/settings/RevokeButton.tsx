@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { revokeSession } from "./actions";
+import { revokeSession } from "@/actions/(dashboard)/app/settings";
 
 type Props = {
 	sessionId: string;

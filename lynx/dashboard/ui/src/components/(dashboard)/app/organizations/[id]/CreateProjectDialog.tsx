@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -12,8 +14,9 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { createProject } from "./projectActions";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { createProjectSchema, type CreateProjectInput } from "@/schemas/(dashboard)/app/organizations/[id]";
+import { createProject } from "@/actions/(dashboard)/app/organizations/[id]/projects";
 
 interface Agent {
 	id: string;
@@ -39,55 +42,48 @@ interface Props {
 }
 
 function deriveSlug(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "");
+	return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 export function CreateProjectDialog({ orgId, agents, labels }: Props) {
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
-	const [name, setName] = useState("");
-	const [slug, setSlug] = useState("");
-	const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
-	const [slugTouched, setSlugTouched] = useState(false);
-	const [isPending, startTransition] = useTransition();
+	const slugTouched = useRef(false);
 
-	function handleNameChange(v: string) {
-		setName(v);
-		if (!slugTouched) setSlug(deriveSlug(v));
-	}
+	const {
+		register,
+		handleSubmit,
+		setValue,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<CreateProjectInput>({
+		resolver: zodResolver(createProjectSchema),
+		defaultValues: { agent_id: agents[0]?.id ?? "" },
+	});
 
-	function handleSubmit(e: React.FormEvent) {
-		e.preventDefault();
-		if (!name.trim() || !slug.trim() || !agentId) return;
-		startTransition(async () => {
-			const result = await createProject(orgId, name.trim(), slug.trim(), agentId);
-			if (result.ok) {
-				toast.success(labels.success);
+	const onSubmit = (data: CreateProjectInput) => {
+		toast.promise(
+			createProject(orgId, data.name, data.slug, data.agent_id).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "error");
 				setOpen(false);
-				setName("");
-				setSlug("");
-				setSlugTouched(false);
-				setAgentId(agents[0]?.id ?? "");
+				slugTouched.current = false;
+				reset({ agent_id: agents[0]?.id ?? "" });
 				router.refresh();
-			} else if (result.error === "slug_conflict") {
-				toast.error(labels.slugConflict);
-			} else {
-				toast.error(labels.error, { description: result.error });
-			}
-		});
-	}
+			}),
+			{
+				loading: labels.create,
+				success: labels.success,
+				error: (e: Error) => (e.message === "slug_conflict" ? labels.slugConflict : labels.error),
+			},
+		);
+	};
 
 	if (agents.length === 0) {
-		return (
-			<p className="text-xs text-muted-foreground">{labels.noAgents}</p>
-		);
+		return <p className="text-xs text-muted-foreground">{labels.noAgents}</p>;
 	}
 
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { slugTouched.current = false; reset({ agent_id: agents[0]?.id ?? "" }); } }}>
 			<DialogTrigger asChild>
 				<Button size="sm">{labels.trigger}</Button>
 			</DialogTrigger>
@@ -95,35 +91,37 @@ export function CreateProjectDialog({ orgId, agents, labels }: Props) {
 				<DialogHeader>
 					<DialogTitle>{labels.title}</DialogTitle>
 				</DialogHeader>
-				<form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="proj-name">{labels.name}</Label>
+				<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 mt-2">
+					<Field>
+						<FieldLabel htmlFor="proj-name">{labels.name}</FieldLabel>
 						<Input
 							id="proj-name"
-							value={name}
-							onChange={(e) => handleNameChange(e.target.value)}
-							required
+							{...register("name", {
+								onChange: (e) => {
+									if (!slugTouched.current) setValue("slug", deriveSlug(e.target.value));
+								},
+							})}
+							disabled={isSubmitting}
 						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="proj-slug">{labels.slug}</Label>
+						<FieldError errors={[errors.name]} />
+					</Field>
+					<Field>
+						<FieldLabel htmlFor="proj-slug">{labels.slug}</FieldLabel>
 						<Input
 							id="proj-slug"
-							value={slug}
-							onChange={(e) => {
-								setSlug(e.target.value);
-								setSlugTouched(true);
-							}}
-							pattern="[a-z0-9-]+"
-							required
+							{...register("slug", {
+								onChange: () => { slugTouched.current = true; },
+							})}
+							disabled={isSubmitting}
 						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="proj-agent">{labels.agent}</Label>
+						<FieldError errors={[errors.slug]} />
+					</Field>
+					<Field>
+						<FieldLabel htmlFor="proj-agent">{labels.agent}</FieldLabel>
 						<select
 							id="proj-agent"
-							value={agentId}
-							onChange={(e) => setAgentId(e.target.value)}
+							{...register("agent_id")}
+							disabled={isSubmitting}
 							className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
 						>
 							{agents.map((a) => (
@@ -132,9 +130,10 @@ export function CreateProjectDialog({ orgId, agents, labels }: Props) {
 								</option>
 							))}
 						</select>
-					</div>
-					<Button type="submit" disabled={isPending}>
-						{isPending ? "…" : labels.create}
+						<FieldError errors={[errors.agent_id]} />
+					</Field>
+					<Button type="submit" disabled={isSubmitting}>
+						{isSubmitting ? "…" : labels.create}
 					</Button>
 				</form>
 			</DialogContent>

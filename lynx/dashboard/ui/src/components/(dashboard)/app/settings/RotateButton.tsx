@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { rotateKeys } from "./actions";
+import { rotateKeys } from "@/actions/(dashboard)/app/settings";
 
 type Props = {
 	locale: string;

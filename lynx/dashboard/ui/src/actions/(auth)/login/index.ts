@@ -2,27 +2,24 @@
 
 import { apiFetch } from "@/lib/api";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import type { LoginInput } from "@/schemas/(auth)/login";
 
 type LoginResult =
-	| { success: true }
+	| { success: true; forcePasswordChange?: boolean }
 	| { success: false; error: string; retryAfter?: number };
 
 export async function loginAction(
 	locale: string,
-	_prev: unknown,
-	formData: FormData,
+	data: LoginInput,
 ): Promise<LoginResult> {
-	const username = (formData.get("username") as string | null)?.trim() ?? "";
-	const password = (formData.get("password") as string | null) ?? "";
-
 	const result = await apiFetch<{
 		access_token: string;
 		refresh_token: string;
 		expires_in: number;
+		force_password_change: boolean;
 	}>("/auth/login", {
 		method: "POST",
-		body: JSON.stringify({ username, password }),
+		body: JSON.stringify({ username: data.username, password: data.password }),
 	});
 
 	if (!result.ok) {
@@ -30,9 +27,7 @@ export async function loginAction(
 			return { success: false, error: "invalidCredentials" };
 		}
 		if (result.error === "rate_limited") {
-			const minutes = result.retryAfter
-				? Math.ceil(result.retryAfter / 60)
-				: 15;
+			const minutes = result.retryAfter ? Math.ceil(result.retryAfter / 60) : 15;
 			return { success: false, error: "rateLimited", retryAfter: minutes };
 		}
 		return { success: false, error: "serverError" };
@@ -56,5 +51,5 @@ export async function loginAction(
 		path: "/",
 	});
 
-	redirect(`/${locale}/app`);
+	return { success: true, forcePasswordChange: result.data.force_password_change };
 }

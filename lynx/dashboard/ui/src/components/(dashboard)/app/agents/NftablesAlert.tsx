@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { resolveNftables } from "./actions";
+import { resolveNftables } from "@/actions/(dashboard)/app/agents";
 
 interface Props {
 	agentId: string;

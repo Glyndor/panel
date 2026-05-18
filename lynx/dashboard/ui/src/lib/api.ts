@@ -1,5 +1,5 @@
 export const BACKEND_URL =
-	process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+	process.env.BACKEND_URL ?? "http://localhost:8080";
 
 export type ApiResult<T> =
 	| { ok: true; data: T }

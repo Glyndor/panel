@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { containerAction } from "./containerActions";
+import { containerAction } from "@/actions/(dashboard)/app/organizations/[id]/projects/[proj_id]/containers";
 
 interface Container {
 	Names: string[];

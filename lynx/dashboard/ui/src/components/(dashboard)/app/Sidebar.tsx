@@ -12,7 +12,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTransition } from "react";
-import { logoutAction } from "./logout-action";
+import { logoutAction } from "@/actions/(dashboard)/app/logout";
 
 type Props = { locale: string; companyName: string; logoUrl: string | null };
 

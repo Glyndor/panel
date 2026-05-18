@@ -54,7 +54,7 @@ AGENT_PORT=9090
 LYNX_AGENT_USER="lynx-agent"
 PG_NETWORK="lynx-agent-db"
 PG_CONTAINER="lynx-agent-postgres"
-PG_IMAGE="docker.io/library/postgres:18"
+PG_IMAGE="docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359"
 PG_DB="lynx_agent"
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
@@ -260,12 +260,18 @@ log_info "PostgreSQL root password..."
 )
 
 log_info "PostgreSQL app password + database URL..."
+mkdir -p /etc/lynx/credentials
+chmod 700 /etc/lynx/credentials
 (
     PG_PASS=$(openssl rand -hex 32)
+    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@localhost:5434/${PG_DB}"
     printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass -
-    printf 'postgresql://lynx_agent_app:%s@localhost:5434/%s' "$PG_PASS" "$PG_DB" \
-        | podman secret create lynx-agent-database-url -
+    printf '%s' "$DB_URL" | podman secret create lynx-agent-database-url -
+    # Write credential file now — only moment we have the URL in memory
+    printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
+    chmod 600 /etc/lynx/credentials/database-url
     PG_PASS="$(openssl rand -hex 32)"
+    DB_URL="$(openssl rand -hex 32)"
 )
 
 log_info "Internal bearer token..."
@@ -371,12 +377,10 @@ EOF
 chmod 600 "$AGENT_CONF"
 log_ok "Config: $AGENT_CONF"
 
-# Store DATABASE_URL and INTERNAL_TOKEN as systemd credentials (tmpfs, never disk)
-mkdir -p /etc/lynx/credentials
-podman secret inspect lynx-agent-database-url --format '{{.SecretData}}' 2>/dev/null \
-    > /etc/lynx/credentials/database-url 2>/dev/null || true
+# Write INTERNAL_TOKEN to systemd credential file (source on disk, 600 root-only;
+# systemd LoadCredential exposes it at /run/credentials/... tmpfs at service start)
 printf '%s' "$INTERNAL_TOKEN" > /etc/lynx/credentials/internal-token
-chmod 600 /etc/lynx/credentials/*
+chmod 600 /etc/lynx/credentials/internal-token
 
 # Clear INTERNAL_TOKEN from memory
 INTERNAL_TOKEN="$(openssl rand -hex 32)"

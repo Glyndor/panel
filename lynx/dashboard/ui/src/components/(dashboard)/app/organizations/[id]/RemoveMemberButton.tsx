@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { removeMember } from "./actions";
+import { removeMember } from "@/actions/(dashboard)/app/organizations/[id]";
 
 interface Props {
 	orgId: string;

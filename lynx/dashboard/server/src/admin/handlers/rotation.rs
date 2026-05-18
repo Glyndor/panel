@@ -118,29 +118,27 @@ async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
 }
 
 async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(), AppError> {
+    use crate::agents::wg;
+    use std::io::Write;
+
     let agents =
-        sqlx::query!("SELECT id, wg_pubkey, wg_ip, api_port FROM agents WHERE status = 'online'")
+        sqlx::query!("SELECT id, wg_pubkey, wg_ip::text AS wg_ip, api_port FROM agents WHERE status = 'online'")
             .fetch_all(&state.db)
             .await?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+    let client = crate::agents::client::build_agent_client(&state.config);
 
     for agent in &agents {
-        let psk_out = std::process::Command::new("wg").arg("genpsk").output();
-
-        let new_psk = match psk_out {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
-            }
-            _ => {
-                tracing::warn!(agent_id = %agent.id, "wg genpsk failed — skipping agent");
+        // Generate new PSK and persist to Podman secret (replaces old one).
+        let new_psk = match wg::create_psk(agent.id) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(agent_id = %agent.id, "PSK generation failed: {e} — skipping");
                 continue;
             }
         };
 
+        // Update WireGuard interface on dashboard side.
         let psk_update = std::process::Command::new("wg")
             .args([
                 "set",
@@ -153,7 +151,6 @@ async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(
             .stdin(std::process::Stdio::piped())
             .spawn()
             .and_then(|mut child| {
-                use std::io::Write;
                 if let Some(stdin) = child.stdin.as_mut() {
                     let _ = stdin.write_all(new_psk.as_bytes());
                 }
@@ -164,9 +161,13 @@ async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(
             tracing::warn!(agent_id = %agent.id, "wg set preshared-key failed: {e}");
         }
 
+        // Update in-memory PSK cache.
+        state.wg_psks.write().await.insert(agent.id, new_psk.clone());
+
+        // Send new PSK to agent via signed command.
         let command = serde_json::json!({
             "type": "wg.rotate_psk",
-            "new_psk": new_psk,
+            "new_psk": *new_psk,
         });
 
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
@@ -199,10 +200,7 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
         .fetch_all(&state.db)
         .await?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+    let client = crate::agents::client::build_agent_client(&state.config);
 
     for agent in &agents {
         let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)
@@ -284,10 +282,7 @@ pub async fn rotate_expiring_certs(state: &AppState, threshold_days: i64) -> Res
         "rotating expiring agent certs"
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
+    let client = crate::agents::client::build_agent_client(&state.config);
 
     for agent in &agents {
         let cert = pki::issue_cert(&state.config.ca_private_seed, agent.id)

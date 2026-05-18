@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { updateBranding } from "./actions";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { brandingSchema, type BrandingInput } from "@/schemas/(dashboard)/app/settings";
+import { updateBranding } from "@/actions/(dashboard)/app/settings";
 
 interface Props {
 	initial: {
@@ -27,111 +30,134 @@ interface Props {
 	};
 }
 
-function ColorField({
-	id,
-	label,
-	value,
-	onChange,
-}: {
-	id: string;
-	label: string;
-	value: string;
-	onChange: (v: string) => void;
-}) {
+function ColorPreview({ value }: { value: string | undefined }) {
 	return (
-		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={id}>{label}</Label>
-			<div className="flex items-center gap-2">
-				<div
-					className="size-7 rounded border shrink-0"
-					style={{ background: value }}
-				/>
-				<Input
-					id={id}
-					value={value}
-					onChange={(e) => onChange(e.target.value)}
-					placeholder="#000000"
-					maxLength={7}
-					className="font-mono text-sm w-32"
-				/>
-			</div>
-		</div>
+		<div
+			className="size-7 rounded border shrink-0"
+			style={{ background: value || "#000000" }}
+		/>
 	);
 }
 
 export function BrandingForm({ initial, labels }: Props) {
-	const [companyName, setCompanyName] = useState(initial.company_name);
-	const [logoUrl, setLogoUrl] = useState(initial.logo_url ?? "");
-	const [primaryColor, setPrimaryColor] = useState(initial.primary_color);
-	const [secondaryColor, setSecondaryColor] = useState(initial.secondary_color);
-	const [accentColor, setAccentColor] = useState(initial.accent_color);
-	const [isPending, startTransition] = useTransition();
+	const {
+		register,
+		handleSubmit,
+		control,
+		formState: { errors, isSubmitting },
+	} = useForm<BrandingInput>({
+		resolver: zodResolver(brandingSchema),
+		defaultValues: {
+			company_name: initial.company_name,
+			logo_url: initial.logo_url ?? "",
+			primary_color: initial.primary_color,
+			secondary_color: initial.secondary_color,
+			accent_color: initial.accent_color,
+		},
+	});
 
-	function handleSubmit(e: React.FormEvent) {
-		e.preventDefault();
-		startTransition(async () => {
-			const result = await updateBranding({
-				company_name: companyName || undefined,
-				logo_url: logoUrl || null,
-				primary_color: primaryColor || undefined,
-				secondary_color: secondaryColor || undefined,
-				accent_color: accentColor || undefined,
-			});
-			if (result.ok) {
-				toast.success(labels.saved);
-			} else {
-				toast.error(labels.error, { description: result.error });
-			}
-		});
-	}
+	const [primary, secondary, accent] = useWatch({
+		control,
+		name: ["primary_color", "secondary_color", "accent_color"],
+	});
+
+	const onSubmit = (data: BrandingInput) => {
+		toast.promise(
+			updateBranding({
+				company_name: data.company_name || undefined,
+				logo_url: data.logo_url || null,
+				primary_color: data.primary_color || undefined,
+				secondary_color: data.secondary_color || undefined,
+				accent_color: data.accent_color || undefined,
+			}).then((r) => {
+				if (!r.ok) throw new Error(r.error);
+				return r;
+			}),
+			{
+				loading: labels.save,
+				success: labels.saved,
+				error: labels.error,
+			},
+		);
+	};
 
 	return (
-		<form onSubmit={handleSubmit} className="flex flex-col gap-5">
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="company-name">{labels.companyName}</Label>
+		<form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+			<Field>
+				<FieldLabel htmlFor="company_name">{labels.companyName}</FieldLabel>
 				<Input
-					id="company-name"
-					value={companyName}
-					onChange={(e) => setCompanyName(e.target.value)}
+					id="company_name"
+					{...register("company_name")}
 					maxLength={80}
+					disabled={isSubmitting}
 				/>
-			</div>
+				<FieldError errors={[errors.company_name]} />
+			</Field>
 
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="logo-url">{labels.logoUrl}</Label>
+			<Field>
+				<FieldLabel htmlFor="logo_url">{labels.logoUrl}</FieldLabel>
 				<Input
-					id="logo-url"
-					type="url"
-					value={logoUrl}
-					onChange={(e) => setLogoUrl(e.target.value)}
+					id="logo_url"
+					{...register("logo_url")}
 					placeholder="https://example.com/logo.png"
+					disabled={isSubmitting}
 				/>
-			</div>
+				<FieldError errors={[errors.logo_url]} />
+			</Field>
 
 			<div className="flex flex-wrap gap-6">
-				<ColorField
-					id="primary-color"
-					label={labels.primaryColor}
-					value={primaryColor}
-					onChange={setPrimaryColor}
-				/>
-				<ColorField
-					id="secondary-color"
-					label={labels.secondaryColor}
-					value={secondaryColor}
-					onChange={setSecondaryColor}
-				/>
-				<ColorField
-					id="accent-color"
-					label={labels.accentColor}
-					value={accentColor}
-					onChange={setAccentColor}
-				/>
+				<Field>
+					<FieldLabel htmlFor="primary_color">{labels.primaryColor}</FieldLabel>
+					<div className="flex items-center gap-2">
+						<ColorPreview value={primary} />
+						<Input
+							id="primary_color"
+							{...register("primary_color")}
+							placeholder="#000000"
+							maxLength={7}
+							className="font-mono text-sm w-32"
+							disabled={isSubmitting}
+						/>
+					</div>
+					<FieldError errors={[errors.primary_color]} />
+				</Field>
+
+				<Field>
+					<FieldLabel htmlFor="secondary_color">{labels.secondaryColor}</FieldLabel>
+					<div className="flex items-center gap-2">
+						<ColorPreview value={secondary} />
+						<Input
+							id="secondary_color"
+							{...register("secondary_color")}
+							placeholder="#000000"
+							maxLength={7}
+							className="font-mono text-sm w-32"
+							disabled={isSubmitting}
+						/>
+					</div>
+					<FieldError errors={[errors.secondary_color]} />
+				</Field>
+
+				<Field>
+					<FieldLabel htmlFor="accent_color">{labels.accentColor}</FieldLabel>
+					<div className="flex items-center gap-2">
+						<ColorPreview value={accent} />
+						<Input
+							id="accent_color"
+							{...register("accent_color")}
+							placeholder="#000000"
+							maxLength={7}
+							className="font-mono text-sm w-32"
+							disabled={isSubmitting}
+						/>
+					</div>
+					<FieldError errors={[errors.accent_color]} />
+				</Field>
 			</div>
 
 			<div>
-				<Button type="submit" disabled={isPending} size="sm">
-					{isPending ? "…" : labels.save}
+				<Button type="submit" disabled={isSubmitting} size="sm">
+					{isSubmitting ? "…" : labels.save}
 				</Button>
 			</div>
 		</form>
