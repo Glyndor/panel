@@ -295,7 +295,7 @@ export default async function SettingsPage({
 								statusCompleted: t("migrationStatusCompleted"),
 								statusAborted: t("migrationStatusAborted"),
 								statusError: t("migrationStatusError"),
-								agentsProgress: t("migrationAgentsProgress"),
+								agentsProgress: t("migrationAgentsProgress", { confirmed: "{confirmed}", total: "{total}" }),
 								error: t("migrationStatusError"),
 								prepareError: t("migrationPrepareError"),
 								startError: t("migrationStartError"),
