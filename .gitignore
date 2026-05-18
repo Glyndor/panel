@@ -1,2 +1,36 @@
-CLAUDE.md
+# Personal dev scratch space
 dev/
+
+# Rust build artifacts
+lynx/target/
+target/
+*.rs.bk
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# AI tools — nothing AI-related goes to the repo
+CLAUDE.md
+.claude/
+**/.claude/
+**/.agents/
+**/skills-lock.json
+.cursor/
+**/.cursor/
+.copilot/
+**/.copilot/
+.windsurf/
+**/.windsurf/
+.aider*
+.continue/
+**/.continue/
+
+# Env files (real ones — .env.example is tracked)
+.env
+.env.local
+.env.*.local
+
+# Editor
+*.swp
+*.swo
