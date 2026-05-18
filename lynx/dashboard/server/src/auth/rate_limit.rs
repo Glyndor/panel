@@ -3,6 +3,8 @@ use redis::{aio::ConnectionManager, AsyncCommands};
 
 const LOGIN_LIMIT: i64 = 5;
 const LOGIN_WINDOW: i64 = 900;
+// Per-username limit: 10 attempts across all IPs per 15 min — stops credential stuffing.
+const LOGIN_USER_LIMIT: i64 = 10;
 const REGISTER_LIMIT: i64 = 3;
 const REGISTER_WINDOW: i64 = 3600;
 const REFRESH_LIMIT: i64 = 10;
@@ -10,6 +12,17 @@ const REFRESH_WINDOW: i64 = 300;
 
 pub async fn check_login(redis: &mut ConnectionManager, ip: &str) -> Result<()> {
     check(redis, &format!("rl:login:{ip}"), LOGIN_LIMIT, LOGIN_WINDOW).await
+}
+
+/// Called after confirming the username exists, to rate-limit per username.
+pub async fn check_login_username(redis: &mut ConnectionManager, username: &str) -> Result<()> {
+    check(
+        redis,
+        &format!("rl:login:u:{username}"),
+        LOGIN_USER_LIMIT,
+        LOGIN_WINDOW,
+    )
+    .await
 }
 
 pub async fn check_register(redis: &mut ConnectionManager, ip: &str) -> Result<()> {

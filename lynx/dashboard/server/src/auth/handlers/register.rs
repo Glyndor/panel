@@ -58,11 +58,13 @@ pub async fn register(
             .map(|s| s.as_bytes())
             .unwrap_or(b"");
 
-        let token_ok: bool = if provided.len() == expected.len() && !expected.is_empty() {
-            provided.ct_eq(expected).into()
-        } else {
-            false
-        };
+        // Hash both to fixed length before comparing so neither branch nor
+        // length difference leaks timing info. Always executes both digests.
+        use sha2::{Digest, Sha256};
+        let h_provided = Sha256::digest(provided);
+        let h_expected = Sha256::digest(expected);
+        let token_ok: bool = (!expected.is_empty())
+            & bool::from(h_provided.ct_eq(&h_expected));
 
         if !token_ok {
             password::zeroize_str(&mut body.password);
