@@ -11,32 +11,34 @@ const FRONTEND_CONTAINER: &str = "lynx-dashboard-frontend";
 const PODMAN_SOCKET: &str = "/run/podman/podman.sock";
 const MAX_DOWNLOAD_BYTES: usize = 200 * 1024 * 1024;
 
-pub async fn perform_dashboard_update(
-    version: String,
-    backend_url: String,
-    backend_sig_url: String,
-    frontend_url: String,
-    frontend_sig_url: String,
-    frontend_assets_url: String,
-    frontend_assets_sig_url: String,
-    log_id: Uuid,
-    db: sqlx::PgPool,
-) {
+pub struct DashboardUpdateParams {
+    pub version: String,
+    pub backend_url: String,
+    pub backend_sig_url: String,
+    pub frontend_url: String,
+    pub frontend_sig_url: String,
+    pub frontend_assets_url: String,
+    pub frontend_assets_sig_url: String,
+    pub log_id: Uuid,
+    pub db: sqlx::PgPool,
+}
+
+pub async fn perform_dashboard_update(p: DashboardUpdateParams) {
     let result = run_full_update(
-        &version,
-        &backend_url,
-        &backend_sig_url,
-        &frontend_url,
-        &frontend_sig_url,
-        &frontend_assets_url,
-        &frontend_assets_sig_url,
+        &p.version,
+        &p.backend_url,
+        &p.backend_sig_url,
+        &p.frontend_url,
+        &p.frontend_sig_url,
+        &p.frontend_assets_url,
+        &p.frontend_assets_sig_url,
     )
     .await;
 
     let status = match result {
         Ok(()) => "success",
         Err(ref e) => {
-            tracing::error!(version, "dashboard self-update failed: {e:#}");
+            tracing::error!(version = p.version, "dashboard self-update failed: {e:#}");
             "failed"
         }
     };
@@ -44,14 +46,14 @@ pub async fn perform_dashboard_update(
     let _ = sqlx::query!(
         "UPDATE update_log SET status = $1 WHERE id = $2",
         status,
-        log_id
+        p.log_id
     )
-    .execute(&db)
+    .execute(&p.db)
     .await;
 
     if result.is_ok() {
         tracing::info!(
-            version,
+            version = p.version,
             "dashboard update complete — exiting for Podman restart"
         );
         std::process::exit(0);

@@ -225,15 +225,17 @@ async fn trigger_dashboard_update(state: &AppState, version: &str) {
     );
 
     tokio::spawn(crate::update::perform_dashboard_update(
-        version.to_string(),
-        backend_url,
-        backend_sig,
-        frontend_url,
-        frontend_sig,
-        frontend_assets_url,
-        frontend_assets_sig,
-        log_id,
-        state.db.clone(),
+        crate::update::DashboardUpdateParams {
+            version: version.to_string(),
+            backend_url,
+            backend_sig_url: backend_sig,
+            frontend_url,
+            frontend_sig_url: frontend_sig,
+            frontend_assets_url,
+            frontend_assets_sig_url: frontend_assets_sig,
+            log_id,
+            db: state.db.clone(),
+        },
     ));
 }
 

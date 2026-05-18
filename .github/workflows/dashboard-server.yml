@@ -167,3 +167,4 @@ jobs:
         env:
           DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
           REDIS_URL: redis://localhost:6379
+          LYNX_SKIP_RATE_LIMIT: "1"
