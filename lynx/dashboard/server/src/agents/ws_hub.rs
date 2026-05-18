@@ -181,10 +181,16 @@ async fn handle_agent_message(
                 .get("version")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let arch = msg
+                .data
+                .get("arch")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             sqlx::query!(
-                "UPDATE agents SET status=$1, last_heartbeat=NOW(), version=$2 WHERE id=$3",
+                "UPDATE agents SET status=$1, last_heartbeat=NOW(), version=$2, arch=$3 WHERE id=$4",
                 status,
                 version,
+                arch,
                 agent_id
             )
             .execute(&state.db)

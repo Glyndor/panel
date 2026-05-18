@@ -11,12 +11,15 @@ const ROTATION_INTERVAL_DAYS: i64 = 90;
 
 /// Top-level scheduler: runs hourly GitHub release check + periodic cert/key rotation.
 pub async fn run(state: AppState) {
+    // Run immediately at startup — don't wait an hour for first check.
+    check_releases(&state).await;
+    check_rotation(&state).await;
+
     let mut ticker = interval(Duration::from_secs(CHECK_INTERVAL_SECS));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         ticker.tick().await;
-
         check_releases(&state).await;
         check_rotation(&state).await;
     }
@@ -92,8 +95,8 @@ async fn check_releases(state: &AppState) {
 
 async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
     let outdated = match sqlx::query!(
-        "SELECT id, wg_ip::text AS wg_ip, api_port FROM agents \
-         WHERE status = 'online' AND (version IS NULL OR version != $1)",
+        "SELECT id, wg_ip::text AS wg_ip, api_port, COALESCE(arch, 'x86_64') AS arch \
+         FROM agents WHERE status = 'online' AND (version IS NULL OR version != $1)",
         latest
     )
     .fetch_all(&state.db)
@@ -125,11 +128,12 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
     let system_user_id = Uuid::nil();
 
     for agent in &outdated {
+        let arch = agent.arch.as_deref().unwrap_or("x86_64");
         let download_url = format!(
-            "https://github.com/{GITHUB_REPO}/releases/download/agent@{latest}/lynx-agent-linux-x86_64"
+            "https://github.com/{GITHUB_REPO}/releases/download/agent@{latest}/lynx-agent-linux-{arch}"
         );
         let sig_url = format!(
-            "https://github.com/{GITHUB_REPO}/releases/download/agent@{latest}/lynx-agent-linux-x86_64.sig"
+            "https://github.com/{GITHUB_REPO}/releases/download/agent@{latest}/lynx-agent-linux-{arch}.sig"
         );
         let command = serde_json::json!({
             "type": "update.self",
@@ -182,15 +186,23 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
 }
 
 async fn trigger_dashboard_update(state: &AppState, version: &str) {
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        a => a,
+    };
     let github_repo = "Jaro-c/Lynx";
     let backend_url = format!(
-        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-backend-linux-x86_64"
+        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-backend-linux-{arch}"
     );
     let backend_sig = format!("{backend_url}.sig");
     let frontend_url = format!(
-        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-frontend-linux-x86_64"
+        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-frontend-linux-{arch}"
     );
     let frontend_sig = format!("{frontend_url}.sig");
+    let frontend_assets_url = format!(
+        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-frontend-assets-linux-{arch}.tar.gz"
+    );
+    let frontend_assets_sig = format!("{frontend_assets_url}.sig");
 
     let log_id = Uuid::now_v7();
     let _ = sqlx::query!(
@@ -206,21 +218,20 @@ async fn trigger_dashboard_update(state: &AppState, version: &str) {
 
     tracing::info!(
         version,
+        arch,
         backend_url = %backend_url,
-        backend_sig = %backend_sig,
         frontend_url = %frontend_url,
-        frontend_sig = %frontend_sig,
         "scheduler: dashboard self-update initiated"
     );
 
-    // Actual binary swap happens in crate::update (agent-side pattern).
-    // For dashboard: download + verify + swap is triggered here, restart handled by Podman.
     tokio::spawn(crate::update::perform_dashboard_update(
         version.to_string(),
         backend_url,
         backend_sig,
         frontend_url,
         frontend_sig,
+        frontend_assets_url,
+        frontend_assets_sig,
         log_id,
         state.db.clone(),
     ));
