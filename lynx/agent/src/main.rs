@@ -182,6 +182,52 @@ async fn main() -> anyhow::Result<()> {
         cmd_rejected_window: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
+    // Reload nftables state from DB and re-apply on startup (rules don't persist across reboots).
+    {
+        let rows = sqlx::query!(
+            "SELECT chain, body, wg_port FROM nftables_state ORDER BY chain"
+        )
+        .fetch_all(&state.db)
+        .await;
+
+        if let Ok(rows) = rows {
+            let mut global_body = String::new();
+            let mut local_body = String::new();
+            let mut wg_port = 51820u16;
+
+            for row in &rows {
+                match row.chain.as_str() {
+                    "lynx-global" => global_body = row.body.clone(),
+                    "lynx-local"  => local_body  = row.body.clone(),
+                    _ => {}
+                }
+                wg_port = row.wg_port as u16;
+            }
+
+            state.set_nft_global_body(global_body);
+            state.set_nft_local_body(local_body);
+            state.set_nft_wg_port(wg_port);
+
+            let ruleset = nftables::Ruleset {
+                wireguard_port: wg_port,
+                org_networks: vec![],
+                global_body: state.nft_global_body(),
+                local_body: state.nft_local_body(),
+            };
+
+            match nftables::apply(&ruleset) {
+                Ok(rendered) => {
+                    if let Ok(checksum) = nftables::current_checksum() {
+                        state.set_nft_checksum(checksum);
+                    }
+                    state.set_nft_last_ruleset(rendered);
+                    tracing::info!("nftables ruleset re-applied from DB on startup");
+                }
+                Err(e) => tracing::warn!(error = %e, "nftables startup apply failed — will retry on first dashboard push"),
+            }
+        }
+    }
+
     // Nonce cleanup: run at startup then every hour.
     {
         let db = state.db.clone();

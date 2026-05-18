@@ -36,6 +36,35 @@ pub struct CreateRuleRequest {
     pub priority: Option<i32>,
 }
 
+/// Convert individual rule fields into nft rule lines.
+/// Used for system-level command generation without constructing a full NftRule.
+pub fn rule_line(
+    kind: &str,
+    port: Option<u16>,
+    protocol: Option<&str>,
+    ip_list: &[String],
+    rate_per_min: Option<u32>,
+) -> String {
+    let rule = NftRule {
+        id: Uuid::nil(),
+        scope: "global".into(),
+        agent_id: None,
+        kind: kind.to_string(),
+        port: port.map(|p| p as i32),
+        protocol: protocol.map(|s| s.to_string()),
+        ip_list: ip_list.to_vec(),
+        ip_version: "both".into(),
+        rate_per_min: rate_per_min.map(|r| r as i32),
+        description: None,
+        priority: 0,
+        enabled: true,
+        created_by: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    rule_to_nft_lines(&rule).join("\n")
+}
+
 /// Convert a list of NftRules into the body of an nftables chain.
 /// Returns lines suitable for insertion inside `chain <name> { ... }`.
 pub fn rules_to_nft_chain(rules: &[NftRule]) -> String {

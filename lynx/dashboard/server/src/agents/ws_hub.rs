@@ -1,4 +1,4 @@
-use super::AuditSyncEntry;
+use super::{handlers::broadcast_event, AuditSyncEntry};
 use crate::{crypto::hash::sha256_hex, error::AppError, state::{AgentWsConn, AppState}};
 use axum::{
     extract::{
@@ -79,6 +79,19 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
 
     tracing::info!(agent_id = %agent_id, "agent WS connected");
 
+    // Record connect event + push to browser WS sessions.
+    let event_id = Uuid::now_v7();
+    let _ = sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'connected', NULL)",
+        event_id, agent_id
+    )
+    .execute(&state.db)
+    .await;
+    broadcast_event(&state, agent_id, "connected", None);
+
+    // Push pending global rule syncs if the agent missed any while offline.
+    push_pending_global_sync(&state, agent_id).await;
+
     loop {
         tokio::select! {
             Some(msg) = rx.recv() => {
@@ -123,6 +136,16 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
     let _ = sqlx::query!("UPDATE agents SET status='offline' WHERE id=$1", agent_id)
         .execute(&state.db)
         .await;
+
+    // Record disconnect event + push to browser WS sessions.
+    let event_id = Uuid::now_v7();
+    let _ = sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'disconnected', NULL)",
+        event_id, agent_id
+    )
+    .execute(&state.db)
+    .await;
+    broadcast_event(&state, agent_id, "disconnected", None);
 
     tracing::info!(agent_id = %agent_id, "agent WS disconnected");
 }
@@ -279,4 +302,78 @@ pub async fn push_command(
 pub async fn is_connected(state: &AppState, agent_id: Uuid) -> bool {
     let map = state.agent_ws_conns.read().await;
     map.contains_key(&agent_id)
+}
+
+/// Push current global rules to an agent that has pending unsynced entries.
+/// Called on WS connect — catches up agents that were offline during a global push.
+async fn push_pending_global_sync(state: &AppState, agent_id: Uuid) {
+    let has_pending = sqlx::query_scalar!(
+        "SELECT 1 FROM global_rule_sync WHERE agent_id = $1 AND synced_at IS NULL LIMIT 1",
+        agent_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .is_some();
+
+    if !has_pending {
+        return;
+    }
+
+    // Generate current global chain body from all enabled global rules.
+    let rules = match sqlx::query!(
+        r#"SELECT kind, port, protocol, ip_list, rate_per_min, priority
+           FROM nftables_rules
+           WHERE scope = 'global' AND enabled = true
+           ORDER BY priority ASC, created_at ASC"#
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(agent_id = %agent_id, error = %e, "pending_sync: failed to fetch global rules");
+            return;
+        }
+    };
+
+    // Convert DB rows to nft chain body text.
+    let body = rules.iter().map(|r| {
+        crate::nftables::rule_line(
+            &r.kind,
+            r.port.map(|p| p as u16),
+            r.protocol.as_deref(),
+            &r.ip_list,
+            r.rate_per_min.map(|r| r as u32),
+        )
+    }).collect::<Vec<_>>().join("\n");
+
+    let signed = match crate::crypto::cmd::sign_command_system(
+        &state.config,
+        agent_id,
+        "write",
+        &serde_json::json!({
+            "type": "nftables.apply",
+            "chain": "lynx-global",
+            "rules": body,
+        }),
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(agent_id = %agent_id, error = %e, "pending_sync: sign failed");
+            return;
+        }
+    };
+
+    let signed_val = serde_json::to_value(&signed).unwrap_or_default();
+    if push_command(state, agent_id, signed_val).await.is_some() {
+        let _ = sqlx::query!(
+            "UPDATE global_rule_sync SET synced_at = NOW() WHERE agent_id = $1 AND synced_at IS NULL",
+            agent_id
+        )
+        .execute(&state.db)
+        .await;
+        tracing::info!(agent_id = %agent_id, "pending global rules synced on reconnect");
+    }
 }

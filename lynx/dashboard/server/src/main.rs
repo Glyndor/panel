@@ -103,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         wg_psks: Arc::new(tokio::sync::RwLock::new(wg_psks)),
         agent_ws_conns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         agent_metric_tx: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        events_tx: Arc::new(tokio::sync::broadcast::channel::<Arc<String>>(256).0),
     };
 
     let auth_layer = middleware::from_fn_with_state(state.clone(), auth::middleware::require_auth);

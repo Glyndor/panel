@@ -4,9 +4,10 @@ use crate::{
     nftables,
     state::AppState,
 };
+
 use serde_json::{json, Value};
 
-pub fn handle_nftables_apply(
+pub async fn handle_nftables_apply(
     state: &AppState,
     cmd: &crate::auth::VerifiedCommand,
 ) -> std::result::Result<Value, AgentError> {
@@ -24,12 +25,21 @@ pub fn handle_nftables_apply(
             .to_string();
 
         match chain {
-            "lynx-global" => state.set_nft_global_body(rules),
-            "lynx-local"  => state.set_nft_local_body(rules),
+            "lynx-global" => state.set_nft_global_body(rules.clone()),
+            "lynx-local"  => state.set_nft_local_body(rules.clone()),
             _ => return Err(AgentError::BadRequest("unknown chain: must be lynx-global or lynx-local")),
         }
 
-        return apply_current_ruleset(state);
+        let result = apply_current_ruleset(state)?;
+        // Persist chain body so the agent can re-apply after reboot.
+        let wg = state.nft_wg_port() as i32;
+        let _ = sqlx::query!(
+            "UPDATE nftables_state SET body = $1, wg_port = $2, updated_at = NOW() WHERE chain = $3",
+            rules, wg, chain
+        )
+        .execute(&state.db)
+        .await;
+        return Ok(result);
     }
 
     // Full apply: { wireguard_port: 51820 }
@@ -41,7 +51,16 @@ pub fn handle_nftables_apply(
 
     state.set_nft_wg_port(wg_port);
 
-    apply_current_ruleset(state)
+    let result = apply_current_ruleset(state)?;
+    // Persist wg_port for both chains.
+    let wg = wg_port as i32;
+    let _ = sqlx::query!(
+        "UPDATE nftables_state SET wg_port = $1, updated_at = NOW()",
+        wg
+    )
+    .execute(&state.db)
+    .await;
+    Ok(result)
 }
 
 fn apply_current_ruleset(state: &AppState) -> std::result::Result<Value, AgentError> {

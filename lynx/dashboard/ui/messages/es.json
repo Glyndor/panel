@@ -342,6 +342,18 @@
         "offline": "Desconectado"
       }
     },
+    "notifications": {
+      "label": "Notificaciones",
+      "title": "Notificaciones",
+      "clearAll": "Limpiar todo",
+      "empty": "Sin alertas",
+      "event": {
+        "heartbeat_lost": "Latido perdido",
+        "lockdown": "Agente en bloqueo",
+        "nftables_divergence": "Divergencia nftables",
+        "conflicting_software_detected": "Software incompatible"
+      }
+    },
     "overview": {
       "title": "Resumen",
       "agentsOnline": "Agentes en línea",

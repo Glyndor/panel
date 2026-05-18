@@ -342,6 +342,18 @@
         "offline": "Offline"
       }
     },
+    "notifications": {
+      "label": "Notifications",
+      "title": "Notifications",
+      "clearAll": "Clear all",
+      "empty": "No alerts",
+      "event": {
+        "heartbeat_lost": "Heartbeat lost",
+        "lockdown": "Agent in lockdown",
+        "nftables_divergence": "nftables divergence",
+        "conflicting_software_detected": "Conflicting software"
+      }
+    },
     "overview": {
       "title": "Overview",
       "agentsOnline": "Agents Online",

@@ -14,6 +14,17 @@ pub struct SignedCommand {
     pub signature: String,
 }
 
+/// Sign a command on behalf of the system (no human user).
+/// Uses nil UUID as user_id — for internal pushes like pending_sync on reconnect.
+pub fn sign_command_system(
+    config: &Config,
+    agent_id: Uuid,
+    permission: &str,
+    command: &Value,
+) -> Result<SignedCommand> {
+    sign_command(config, agent_id, Uuid::nil(), permission, command)
+}
+
 pub fn sign_command(
     config: &Config,
     agent_id: Uuid,

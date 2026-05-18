@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/nftables-resolve", post(handlers::nftables_resolve))
         .route("/{id}/audit-log", get(handlers::list_audit_log))
         .route("/{id}/metrics/ws", get(handlers::frontend_metrics_ws))
+        .route("/events/ws", get(handlers::frontend_events_ws))
 }
 
 /// Routes that agents call directly (own sync token, not user JWT)

@@ -10,7 +10,20 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use std::sync::Arc;
 use uuid::Uuid;
+
+/// Serialize an event frame and broadcast to all subscribed browser WS sessions.
+pub fn broadcast_event(state: &AppState, agent_id: Uuid, event: &str, detail: Option<&str>) {
+    let frame = serde_json::json!({
+        "type": "agent_event",
+        "agent_id": agent_id,
+        "event": event,
+        "detail": detail,
+    });
+    let text = Arc::new(frame.to_string());
+    let _ = state.events_tx.send(text);
+}
 
 pub async fn receive_event(
     State(state): State<AppState>,
@@ -69,6 +82,9 @@ pub async fn receive_event(
     )
     .execute(&state.db)
     .await?;
+
+    // Broadcast to all subscribed browser WS sessions.
+    broadcast_event(&state, id, event, detail.as_deref());
 
     tracing::info!(agent_id = %id, event, "agent event received");
 

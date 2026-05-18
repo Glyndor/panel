@@ -171,7 +171,7 @@ async fn command_dispatch(
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
     {
-        "nftables.apply" => handle_nftables_apply(state, cmd),
+        "nftables.apply" => handle_nftables_apply(state, cmd).await,
         "nftables.restore" => handle_nftables_restore(state, cmd),
         "nftables.accept" => handle_nftables_accept(state, cmd),
         "container.list" => handle_container_list(cmd),

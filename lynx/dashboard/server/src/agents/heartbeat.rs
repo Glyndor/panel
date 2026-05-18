@@ -1,4 +1,4 @@
-use crate::{agents::ws_hub, crypto::cmd, state::AppState};
+use crate::{agents::{handlers::broadcast_event, ws_hub}, alerts, crypto::cmd, state::AppState};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ pub async fn run_scheduler(state: AppState) {
 
 async fn poll_agents(state: &AppState) {
     let agents = match sqlx::query!(
-        "SELECT id, wg_ip::text AS wg_ip, api_port FROM agents WHERE status != 'lockdown'"
+        "SELECT id, wg_ip::text AS wg_ip, api_port, status FROM agents WHERE status != 'lockdown'"
     )
     .fetch_all(&state.db)
     .await
@@ -103,6 +103,20 @@ async fn poll_agents(state: &AppState) {
         }
 
         tracing::debug!(agent_id = %id, status = new_status, version = ?reported_version, "heartbeat polled");
+
+        // Fire heartbeat_lost event when a previously-online agent becomes unreachable.
+        if new_status == "offline" && agent.status == "online" {
+            let event_id = uuid::Uuid::now_v7();
+            let _ = sqlx::query!(
+                "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",
+                event_id, id
+            )
+            .execute(&state.db)
+            .await;
+            broadcast_event(state, id, "heartbeat_lost", None);
+            alerts::fire(&state.db, "heartbeat_lost", None, id).await;
+            tracing::warn!(agent_id = %id, "heartbeat lost — agent went offline");
+        }
 
         // Trigger update.self if agent is online, version known, and outdated.
         if new_status == "online" {

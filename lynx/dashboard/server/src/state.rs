@@ -29,4 +29,6 @@ pub struct AppState {
     /// Per-agent broadcast channels for real-time metric fan-out to frontend WS clients.
     /// Keyed by agent_id. Channels are created on agent connect, dropped on disconnect.
     pub agent_metric_tx: Arc<RwLock<HashMap<Uuid, broadcast::Sender<Arc<String>>>>>,
+    /// Global broadcast channel for agent events pushed to all subscribed admin browser sessions.
+    pub events_tx: Arc<broadcast::Sender<Arc<String>>>,
 }
