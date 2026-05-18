@@ -66,6 +66,10 @@ pub fn build_router(state: AppState) -> Router {
             header::HeaderName::from_static("referrer-policy"),
             HeaderValue::from_static("no-referrer"),
         ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::HeaderName::from_static("strict-transport-security"),
+            HeaderValue::from_static("max-age=63072000; includeSubDomains"),
+        ))
 }
 
 async fn health() -> impl IntoResponse {
