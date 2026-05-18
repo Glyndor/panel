@@ -201,7 +201,9 @@ impl BuildConfig {
     pub fn dockerfile_inline(&self) -> Option<&str> {
         match self {
             BuildConfig::Context(_) => None,
-            BuildConfig::Config { dockerfile_inline, .. } => dockerfile_inline.as_deref(),
+            BuildConfig::Config {
+                dockerfile_inline, ..
+            } => dockerfile_inline.as_deref(),
         }
     }
 }

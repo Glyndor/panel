@@ -44,11 +44,7 @@ fn first_file_wins_for_duplicate_keys() {
     let mut b = std::fs::File::create(dir.path().join("b.env")).unwrap();
     writeln!(b, "KEY=from_b").unwrap();
 
-    let map = load_env_files(
-        &["a.env".to_string(), "b.env".to_string()],
-        dir.path(),
-    )
-    .unwrap();
+    let map = load_env_files(&["a.env".to_string(), "b.env".to_string()], dir.path()).unwrap();
     assert_eq!(map["KEY"], "from_a");
 }
 

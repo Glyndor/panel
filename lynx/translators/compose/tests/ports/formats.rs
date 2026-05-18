@@ -30,7 +30,10 @@ fn ip_host_container() {
 
 #[test]
 fn udp_protocol() {
-    assert_eq!(parse_ports(&[short("514:514/udp")]).unwrap()[0].protocol, "udp");
+    assert_eq!(
+        parse_ports(&[short("514:514/udp")]).unwrap()[0].protocol,
+        "udp"
+    );
 }
 
 #[test]

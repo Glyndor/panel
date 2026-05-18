@@ -9,14 +9,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::build::{BuildConfig, ExtendsConfig};
-use super::{
-    BlkioConfig, Command, DependsOn, EnvFile, EnvVars, GpuSpec, HealthCheck, Labels, LifecycleHook,
-    LoggingConfig, PortMapping, RestartPolicy, StringOrList, Sysctls, UlimitConfig,
-};
 use super::deploy::DeployConfig;
 use super::develop::DevelopConfig;
 use super::network::ServiceNetworks;
 use super::volume::{ServiceConfigRef, ServiceSecretRef, VolumeMount};
+use super::{
+    BlkioConfig, Command, DependsOn, EnvFile, EnvVars, GpuSpec, HealthCheck, Labels, LifecycleHook,
+    LoggingConfig, PortMapping, RestartPolicy, StringOrList, Sysctls, UlimitConfig,
+};
 
 /// A single service definition.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

@@ -96,7 +96,10 @@ impl Engine {
             labels.extend(l.to_map());
         }
 
-        let network_owned = if let BuildConfig::Config { network: Some(n), .. } = build {
+        let network_owned = if let BuildConfig::Config {
+            network: Some(n), ..
+        } = build
+        {
             n.clone()
         } else {
             String::new()
@@ -106,7 +109,11 @@ impl Engine {
         } else {
             String::new()
         };
-        let shmsize = build.shm_size().and_then(size::parse_memory).map(|s| s as u64).unwrap_or(0);
+        let shmsize = build
+            .shm_size()
+            .and_then(size::parse_memory)
+            .map(|s| s as u64)
+            .unwrap_or(0);
         let extrahosts = build.extra_hosts().join(",");
 
         let options = BuildImageOptions::<String> {
@@ -120,7 +127,11 @@ impl Engine {
             networkmode: network_owned,
             platform: platform_owned,
             shmsize: if shmsize > 0 { Some(shmsize) } else { None },
-            extrahosts: if extrahosts.is_empty() { None } else { Some(extrahosts) },
+            extrahosts: if extrahosts.is_empty() {
+                None
+            } else {
+                Some(extrahosts)
+            },
             cachefrom: build.cache_from().to_vec(),
             ..Default::default()
         };
@@ -195,15 +206,20 @@ fn build_context_tar_with_inline(context: &Path, inline: &str) -> Result<(Vec<u8
             continue;
         }
         if abs.is_dir() {
-            tar.append_dir(rel, abs).map_err(|e| ComposeError::Build(e.to_string()))?;
+            tar.append_dir(rel, abs)
+                .map_err(|e| ComposeError::Build(e.to_string()))?;
         } else {
             tar.append_path_with_name(abs, rel)
                 .map_err(|e| ComposeError::Build(e.to_string()))?;
         }
     }
 
-    let gz = tar.into_inner().map_err(|e| ComposeError::Build(e.to_string()))?;
-    let bytes = gz.finish().map_err(|e| ComposeError::Build(e.to_string()))?;
+    let gz = tar
+        .into_inner()
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
+    let bytes = gz
+        .finish()
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
     Ok((bytes, inline_name.to_string()))
 }
 
@@ -292,15 +308,20 @@ fn build_context_tar_with_target(
             continue; // Replaced by truncated version above.
         }
         if abs.is_dir() {
-            tar.append_dir(rel, abs).map_err(|e| ComposeError::Build(e.to_string()))?;
+            tar.append_dir(rel, abs)
+                .map_err(|e| ComposeError::Build(e.to_string()))?;
         } else {
             tar.append_path_with_name(abs, rel)
                 .map_err(|e| ComposeError::Build(e.to_string()))?;
         }
     }
 
-    let gz = tar.into_inner().map_err(|e| ComposeError::Build(e.to_string()))?;
-    let bytes = gz.finish().map_err(|e| ComposeError::Build(e.to_string()))?;
+    let gz = tar
+        .into_inner()
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
+    let bytes = gz
+        .finish()
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
     Ok((bytes, dockerfile.to_string()))
 }
 

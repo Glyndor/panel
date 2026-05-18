@@ -108,7 +108,11 @@ async fn main() -> anyhow::Result<()> {
     let engine = lynx_compose::Engine::with_base_dir(docker, cli.project, base_dir);
 
     match cli.command {
-        Commands::Up { detach, watch, remove_orphans } => {
+        Commands::Up {
+            detach,
+            watch,
+            remove_orphans,
+        } => {
             if remove_orphans {
                 engine.remove_orphans(&file).await?;
             }

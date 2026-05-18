@@ -108,7 +108,10 @@ impl EnvFile {
     /// Return just the paths (strips `required` / `format` info).
     /// Kept for test compatibility; prefer `to_entries()` in engine code.
     pub fn to_list(&self) -> Vec<String> {
-        self.to_entries().into_iter().map(|e| e.path().to_string()).collect()
+        self.to_entries()
+            .into_iter()
+            .map(|e| e.path().to_string())
+            .collect()
     }
 
     pub fn is_empty(&self) -> bool {

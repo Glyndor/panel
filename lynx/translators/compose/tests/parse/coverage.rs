@@ -133,7 +133,14 @@ services:
 "#;
     let svc = &parse_str(yaml).unwrap().services["app"];
     let deploy = svc.deploy.as_ref().unwrap();
-    let devs = &deploy.resources.as_ref().unwrap().reservations.as_ref().unwrap().devices;
+    let devs = &deploy
+        .resources
+        .as_ref()
+        .unwrap()
+        .reservations
+        .as_ref()
+        .unwrap()
+        .devices;
     assert_eq!(devs.len(), 2);
     assert!(devs[0].capabilities.contains(&"gpu".to_string()));
     assert_eq!(devs[1].device_ids.len(), 2);
@@ -241,7 +248,10 @@ services:
     assert_eq!(hook.privileged, Some(false));
     assert_eq!(hook.working_dir.as_deref(), Some("/app"));
     let env = hook.environment.to_map();
-    assert_eq!(env.get("CLEANUP").and_then(|v| v.clone()).as_deref(), Some("true"));
+    assert_eq!(
+        env.get("CLEANUP").and_then(|v| v.clone()).as_deref(),
+        Some("true")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +270,9 @@ services:
       - path: .env.local
         required: true
 "#;
-    let entries = parse_str(yaml).unwrap().services["app"].env_file.to_entries();
+    let entries = parse_str(yaml).unwrap().services["app"]
+        .env_file
+        .to_entries();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].path(), ".env.prod");
     assert!(!entries[0].required());
@@ -278,7 +290,9 @@ services:
       - path: .env
         format: dotenv
 "#;
-    let entries = parse_str(yaml).unwrap().services["app"].env_file.to_entries();
+    let entries = parse_str(yaml).unwrap().services["app"]
+        .env_file
+        .to_entries();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].path(), ".env");
 }
@@ -294,7 +308,9 @@ services:
       - path: .env.local
         required: false
 "#;
-    let entries = parse_str(yaml).unwrap().services["app"].env_file.to_entries();
+    let entries = parse_str(yaml).unwrap().services["app"]
+        .env_file
+        .to_entries();
     assert_eq!(entries.len(), 2);
     assert!(entries[0].required()); // short form defaults to required
     assert!(!entries[1].required());
@@ -345,7 +361,10 @@ secrets:
 "#;
     let s = &parse_str(yaml).unwrap().secrets["db_pass"];
     assert_eq!(s.driver.as_deref(), Some("vault"));
-    assert_eq!(s.driver_opts.get("path").map(|s| s.as_str()), Some("secret/db"));
+    assert_eq!(
+        s.driver_opts.get("path").map(|s| s.as_str()),
+        Some("secret/db")
+    );
     assert!(!s.labels.to_map().is_empty());
 }
 
@@ -392,7 +411,10 @@ configs:
       [server]
       port = 8080
 "#;
-    let content = parse_str(yaml).unwrap().configs["app_conf"].content.clone().unwrap();
+    let content = parse_str(yaml).unwrap().configs["app_conf"]
+        .content
+        .clone()
+        .unwrap();
     assert!(content.contains("port = 8080"));
 }
 
@@ -464,7 +486,10 @@ networks:
     assert_eq!(ipam.config.len(), 1);
     assert_eq!(ipam.config[0].subnet.as_deref(), Some("192.168.90.0/24"));
     assert_eq!(ipam.config[0].gateway.as_deref(), Some("192.168.90.1"));
-    assert_eq!(ipam.config[0].ip_range.as_deref(), Some("192.168.90.128/25"));
+    assert_eq!(
+        ipam.config[0].ip_range.as_deref(),
+        Some("192.168.90.128/25")
+    );
 }
 
 #[test]
@@ -481,7 +506,10 @@ networks:
     let file = parse_str(yaml).unwrap();
     let net = file.networks["mynet"].as_ref().unwrap();
     let pool = &net.ipam.as_ref().unwrap().config[0];
-    assert_eq!(pool.aux_addresses.get("host1").map(|s| s.as_str()), Some("172.16.238.5"));
+    assert_eq!(
+        pool.aux_addresses.get("host1").map(|s| s.as_str()),
+        Some("172.16.238.5")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +519,10 @@ networks:
 #[test]
 fn pids_limit_service_field() {
     let yaml = "services:\n  app:\n    image: alpine\n    pids_limit: 256\n";
-    assert_eq!(parse_str(yaml).unwrap().services["app"].pids_limit, Some(256));
+    assert_eq!(
+        parse_str(yaml).unwrap().services["app"].pids_limit,
+        Some(256)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -512,8 +543,13 @@ services:
         window: 120s
 "#;
     let file = parse_str(yaml).unwrap();
-    let rp = file.services["app"].deploy.as_ref().unwrap()
-        .restart_policy.as_ref().unwrap();
+    let rp = file.services["app"]
+        .deploy
+        .as_ref()
+        .unwrap()
+        .restart_policy
+        .as_ref()
+        .unwrap();
     assert_eq!(rp.condition.as_deref(), Some("on-failure"));
     assert_eq!(rp.max_attempts, Some(3));
 }
@@ -532,8 +568,13 @@ services:
         order: start-first
 "#;
     let file = parse_str(yaml).unwrap();
-    let uc = file.services["app"].deploy.as_ref().unwrap()
-        .update_config.as_ref().unwrap();
+    let uc = file.services["app"]
+        .deploy
+        .as_ref()
+        .unwrap()
+        .update_config
+        .as_ref()
+        .unwrap();
     assert_eq!(uc.parallelism, Some(2));
     assert_eq!(uc.failure_action.as_deref(), Some("rollback"));
 }
@@ -550,8 +591,13 @@ services:
         delay: 5s
 "#;
     let file = parse_str(yaml).unwrap();
-    let rc = file.services["app"].deploy.as_ref().unwrap()
-        .rollback_config.as_ref().unwrap();
+    let rc = file.services["app"]
+        .deploy
+        .as_ref()
+        .unwrap()
+        .rollback_config
+        .as_ref()
+        .unwrap();
     assert_eq!(rc.parallelism, Some(1));
 }
 
@@ -569,8 +615,13 @@ services:
         max_replicas_per_node: 3
 "#;
     let file = parse_str(yaml).unwrap();
-    let pl = file.services["app"].deploy.as_ref().unwrap()
-        .placement.as_ref().unwrap();
+    let pl = file.services["app"]
+        .deploy
+        .as_ref()
+        .unwrap()
+        .placement
+        .as_ref()
+        .unwrap();
     assert_eq!(pl.constraints.len(), 2);
     assert_eq!(pl.max_replicas_per_node, Some(3));
 }
@@ -638,7 +689,11 @@ services:
       context: .
       privileged: true
 "#;
-    match parse_str(yaml).unwrap().services["app"].build.as_ref().unwrap() {
+    match parse_str(yaml).unwrap().services["app"]
+        .build
+        .as_ref()
+        .unwrap()
+    {
         BuildConfig::Config { privileged, .. } => assert_eq!(*privileged, Some(true)),
         _ => panic!("expected long-form build"),
     }
@@ -669,9 +724,19 @@ services:
       additional_contexts:
         mylib: /path/to/mylib
 "#;
-    match parse_str(yaml).unwrap().services["app"].build.as_ref().unwrap() {
-        BuildConfig::Config { additional_contexts, .. } => {
-            assert_eq!(additional_contexts.get("mylib").map(|s| s.as_str()), Some("/path/to/mylib"));
+    match parse_str(yaml).unwrap().services["app"]
+        .build
+        .as_ref()
+        .unwrap()
+    {
+        BuildConfig::Config {
+            additional_contexts,
+            ..
+        } => {
+            assert_eq!(
+                additional_contexts.get("mylib").map(|s| s.as_str()),
+                Some("/path/to/mylib")
+            );
         }
         _ => panic!("expected long-form build"),
     }
@@ -706,7 +771,11 @@ services:
       secrets:
         - server-certificate
 "#;
-    match parse_str(yaml).unwrap().services["app"].build.as_ref().unwrap() {
+    match parse_str(yaml).unwrap().services["app"]
+        .build
+        .as_ref()
+        .unwrap()
+    {
         BuildConfig::Config { ssh, secrets, .. } => {
             assert_eq!(ssh.len(), 1);
             assert_eq!(secrets.len(), 1);
@@ -734,7 +803,10 @@ services:
         gw_priority: 100
 "#;
     let file = parse_str(yaml).unwrap();
-    let cfg = file.services["app"].networks.config_for("frontend").unwrap();
+    let cfg = file.services["app"]
+        .networks
+        .config_for("frontend")
+        .unwrap();
     assert_eq!(cfg.gw_priority, Some(100));
 }
 
@@ -835,10 +907,15 @@ services:
 "#;
     let v = &parse_str(yaml).unwrap().services["app"].volumes[0];
     match v {
-        VolumeMount::Long { volume: Some(vo), .. } => {
+        VolumeMount::Long {
+            volume: Some(vo), ..
+        } => {
             let dc = vo.driver_config.as_ref().unwrap();
             assert_eq!(dc.name.as_deref(), Some("nfs"));
-            assert_eq!(dc.options.get("addr").map(|s| s.as_str()), Some("nfs.example.com"));
+            assert_eq!(
+                dc.options.get("addr").map(|s| s.as_str()),
+                Some("nfs.example.com")
+            );
         }
         _ => panic!("expected long-form volume with options"),
     }
@@ -859,7 +936,9 @@ services:
 "#;
     let v = &parse_str(yaml).unwrap().services["app"].volumes[0];
     match v {
-        VolumeMount::Long { volume: Some(vo), .. } => {
+        VolumeMount::Long {
+            volume: Some(vo), ..
+        } => {
             assert_eq!(vo.subpath.as_deref(), Some("subdir/nested"));
         }
         _ => panic!("expected long-form volume"),
@@ -882,7 +961,9 @@ services:
 "#;
     let v = &parse_str(yaml).unwrap().services["app"].volumes[0];
     match v {
-        VolumeMount::Long { volume: Some(vo), .. } => {
+        VolumeMount::Long {
+            volume: Some(vo), ..
+        } => {
             let labels = vo.labels.to_map();
             assert_eq!(labels.get("backup").map(|s| s.as_str()), Some("daily"));
         }
@@ -929,7 +1010,9 @@ services:
 #[test]
 fn label_file_single() {
     let yaml = "services:\n  app:\n    image: alpine\n    label_file: ./labels.properties\n";
-    let list = parse_str(yaml).unwrap().services["app"].label_file.to_list();
+    let list = parse_str(yaml).unwrap().services["app"]
+        .label_file
+        .to_list();
     assert_eq!(list, vec!["./labels.properties"]);
 }
 
@@ -943,7 +1026,9 @@ services:
       - ./labels.properties
       - ./extra.labels
 "#;
-    let list = parse_str(yaml).unwrap().services["app"].label_file.to_list();
+    let list = parse_str(yaml).unwrap().services["app"]
+        .label_file
+        .to_list();
     assert_eq!(list.len(), 2);
 }
 
@@ -960,13 +1045,19 @@ fn attach_field() {
 #[test]
 fn uts_host() {
     let yaml = "services:\n  app:\n    image: alpine\n    uts: host\n";
-    assert_eq!(parse_str(yaml).unwrap().services["app"].uts.as_deref(), Some("host"));
+    assert_eq!(
+        parse_str(yaml).unwrap().services["app"].uts.as_deref(),
+        Some("host")
+    );
 }
 
 #[test]
 fn cgroup_field() {
     let yaml = "services:\n  app:\n    image: alpine\n    cgroup: host\n";
-    assert_eq!(parse_str(yaml).unwrap().services["app"].cgroup.as_deref(), Some("host"));
+    assert_eq!(
+        parse_str(yaml).unwrap().services["app"].cgroup.as_deref(),
+        Some("host")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -982,7 +1073,11 @@ services:
       context: .
       isolation: hyperv
 "#;
-    match parse_str(yaml).unwrap().services["app"].build.as_ref().unwrap() {
+    match parse_str(yaml).unwrap().services["app"]
+        .build
+        .as_ref()
+        .unwrap()
+    {
         BuildConfig::Config { isolation, .. } => assert_eq!(isolation.as_deref(), Some("hyperv")),
         _ => panic!("expected long-form build"),
     }
@@ -999,7 +1094,11 @@ services:
         - network.host
         - security.insecure
 "#;
-    match parse_str(yaml).unwrap().services["app"].build.as_ref().unwrap() {
+    match parse_str(yaml).unwrap().services["app"]
+        .build
+        .as_ref()
+        .unwrap()
+    {
         BuildConfig::Config { entitlements, .. } => {
             assert_eq!(entitlements.len(), 2);
             assert!(entitlements.contains(&"network.host".to_string()));
@@ -1017,7 +1116,11 @@ services:
       context: .
       sbom: true
 "#;
-    match parse_str(yaml).unwrap().services["app"].build.as_ref().unwrap() {
+    match parse_str(yaml).unwrap().services["app"]
+        .build
+        .as_ref()
+        .unwrap()
+    {
         BuildConfig::Config { sbom, .. } => assert_eq!(*sbom, Some(true)),
         _ => panic!("expected long-form build"),
     }
@@ -1038,7 +1141,12 @@ networks:
         foo: bar
 "#;
     let file = parse_str(yaml).unwrap();
-    let ipam = file.networks["mynet"].as_ref().unwrap().ipam.as_ref().unwrap();
+    let ipam = file.networks["mynet"]
+        .as_ref()
+        .unwrap()
+        .ipam
+        .as_ref()
+        .unwrap();
     assert_eq!(ipam.driver.as_deref(), Some("custom"));
     assert_eq!(ipam.options.get("foo").map(|s| s.as_str()), Some("bar"));
 }
@@ -1097,7 +1205,9 @@ services:
       - example.com
       - internal.local
 "#;
-    let list = parse_str(yaml).unwrap().services["app"].dns_search.to_list();
+    let list = parse_str(yaml).unwrap().services["app"]
+        .dns_search
+        .to_list();
     assert!(list.contains(&"example.com".to_string()));
 }
 

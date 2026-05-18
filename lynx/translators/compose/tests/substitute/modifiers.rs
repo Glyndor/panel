@@ -3,7 +3,10 @@ use lynx_compose::ComposeError;
 use std::collections::HashMap;
 
 fn vars(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 #[test]
@@ -13,12 +16,18 @@ fn bare_dollar_sign() {
 
 #[test]
 fn double_dollar_escape() {
-    assert_eq!(substitute("$$VAR", &vars(&[("VAR", "hello")])).unwrap(), "$VAR");
+    assert_eq!(
+        substitute("$$VAR", &vars(&[("VAR", "hello")])).unwrap(),
+        "$VAR"
+    );
 }
 
 #[test]
 fn bare_var_set() {
-    assert_eq!(substitute("$FOO bar", &vars(&[("FOO", "hello")])).unwrap(), "hello bar");
+    assert_eq!(
+        substitute("$FOO bar", &vars(&[("FOO", "hello")])).unwrap(),
+        "hello bar"
+    );
 }
 
 #[test]
@@ -28,7 +37,10 @@ fn bare_var_unset() {
 
 #[test]
 fn braced_var_set() {
-    assert_eq!(substitute("${FOO}", &vars(&[("FOO", "world")])).unwrap(), "world");
+    assert_eq!(
+        substitute("${FOO}", &vars(&[("FOO", "world")])).unwrap(),
+        "world"
+    );
 }
 
 #[test]
@@ -38,12 +50,18 @@ fn braced_var_unset() {
 
 #[test]
 fn default_if_unset_or_empty_nonempty() {
-    assert_eq!(substitute("${FOO:-def}", &vars(&[("FOO", "bar")])).unwrap(), "bar");
+    assert_eq!(
+        substitute("${FOO:-def}", &vars(&[("FOO", "bar")])).unwrap(),
+        "bar"
+    );
 }
 
 #[test]
 fn default_if_unset_or_empty_empty() {
-    assert_eq!(substitute("${FOO:-def}", &vars(&[("FOO", "")])).unwrap(), "def");
+    assert_eq!(
+        substitute("${FOO:-def}", &vars(&[("FOO", "")])).unwrap(),
+        "def"
+    );
 }
 
 #[test]
@@ -63,17 +81,26 @@ fn default_if_unset_unset() {
 
 #[test]
 fn default_if_unset_set_nonempty() {
-    assert_eq!(substitute("${FOO-def}", &vars(&[("FOO", "bar")])).unwrap(), "bar");
+    assert_eq!(
+        substitute("${FOO-def}", &vars(&[("FOO", "bar")])).unwrap(),
+        "bar"
+    );
 }
 
 #[test]
 fn alt_if_set_and_nonempty() {
-    assert_eq!(substitute("${FOO:+alt}", &vars(&[("FOO", "bar")])).unwrap(), "alt");
+    assert_eq!(
+        substitute("${FOO:+alt}", &vars(&[("FOO", "bar")])).unwrap(),
+        "alt"
+    );
 }
 
 #[test]
 fn alt_if_set_empty_value() {
-    assert_eq!(substitute("${FOO:+alt}", &vars(&[("FOO", "")])).unwrap(), "");
+    assert_eq!(
+        substitute("${FOO:+alt}", &vars(&[("FOO", "")])).unwrap(),
+        ""
+    );
 }
 
 #[test]
@@ -83,7 +110,10 @@ fn alt_if_set_unset() {
 
 #[test]
 fn alt_if_set_counts_empty() {
-    assert_eq!(substitute("${FOO+alt}", &vars(&[("FOO", "")])).unwrap(), "alt");
+    assert_eq!(
+        substitute("${FOO+alt}", &vars(&[("FOO", "")])).unwrap(),
+        "alt"
+    );
 }
 
 #[test]
@@ -93,7 +123,10 @@ fn alt_if_set_unset_returns_empty() {
 
 #[test]
 fn error_if_unset_or_empty_nonempty() {
-    assert_eq!(substitute("${FOO:?err}", &vars(&[("FOO", "bar")])).unwrap(), "bar");
+    assert_eq!(
+        substitute("${FOO:?err}", &vars(&[("FOO", "bar")])).unwrap(),
+        "bar"
+    );
 }
 
 #[test]

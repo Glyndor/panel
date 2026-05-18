@@ -60,7 +60,9 @@ impl<'de> Deserialize<'de> for WatchAction {
             "restart" => Ok(WatchAction::Restart),
             "sync+restart" => Ok(WatchAction::SyncAndRestart),
             "sync+exec" => Ok(WatchAction::SyncAndExec),
-            other => Err(serde::de::Error::custom(format!("unknown watch action: {other}"))),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown watch action: {other}"
+            ))),
         }
     }
 }

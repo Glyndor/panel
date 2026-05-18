@@ -1,5 +1,5 @@
-use lynx_compose::parse_str;
 use lynx_compose::parse_file;
+use lynx_compose::parse_str;
 use std::io::Write;
 
 #[test]
@@ -49,8 +49,14 @@ services:
 "#;
     let file = parse_str(yaml).unwrap();
     let env = file.services["app"].environment.to_map();
-    assert_eq!(env.get("NODE_ENV").and_then(|v| v.clone()).as_deref(), Some("production"));
-    assert_eq!(env.get("PORT").and_then(|v| v.clone()).as_deref(), Some("3000"));
+    assert_eq!(
+        env.get("NODE_ENV").and_then(|v| v.clone()).as_deref(),
+        Some("production")
+    );
+    assert_eq!(
+        env.get("PORT").and_then(|v| v.clone()).as_deref(),
+        Some("3000")
+    );
 }
 
 #[test]
@@ -69,7 +75,10 @@ services:
 "#;
     let file = parse_str(yaml).unwrap();
     assert_eq!(
-        file.services["app"].restart.as_ref().map(|r| format!("{r:?}")),
+        file.services["app"]
+            .restart
+            .as_ref()
+            .map(|r| format!("{r:?}")),
         Some("Always".to_string())
     );
     assert!(file.services["app"]

@@ -12,7 +12,10 @@ services:
       - net.ipv4.ip_forward=1
 "#;
     let sc = parse_str(yaml).unwrap().services["app"].sysctls.to_map();
-    assert_eq!(sc.get("net.core.somaxconn").map(|s| s.as_str()), Some("1024"));
+    assert_eq!(
+        sc.get("net.core.somaxconn").map(|s| s.as_str()),
+        Some("1024")
+    );
     assert_eq!(sc.get("net.ipv4.ip_forward").map(|s| s.as_str()), Some("1"));
 }
 
@@ -26,7 +29,10 @@ services:
       net.core.somaxconn: "1024"
 "#;
     let sc = parse_str(yaml).unwrap().services["app"].sysctls.to_map();
-    assert_eq!(sc.get("net.core.somaxconn").map(|s| s.as_str()), Some("1024"));
+    assert_eq!(
+        sc.get("net.core.somaxconn").map(|s| s.as_str()),
+        Some("1024")
+    );
 }
 
 #[test]
@@ -89,7 +95,10 @@ services:
     let file = parse_str(yaml).unwrap();
     let logging = file.services["app"].logging.as_ref().unwrap();
     assert_eq!(logging.driver.as_deref(), Some("json-file"));
-    assert_eq!(logging.options.get("max-size").map(|s| s.as_str()), Some("10m"));
+    assert_eq!(
+        logging.options.get("max-size").map(|s| s.as_str()),
+        Some("10m")
+    );
 }
 
 #[test]
@@ -117,7 +126,9 @@ services:
 fn network_mode_host() {
     let yaml = "services:\n  app:\n    image: alpine\n    network_mode: host\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].network_mode.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .network_mode
+            .as_deref(),
         Some("host")
     );
 }
@@ -146,7 +157,10 @@ secrets:
     let file = parse_str(yaml).unwrap();
     assert_eq!(file.services["app"].secrets.len(), 2);
     assert_eq!(file.services["app"].secrets[0].source(), "my_secret");
-    assert_eq!(file.secrets["my_secret"].file.as_deref(), Some("./secret.txt"));
+    assert_eq!(
+        file.secrets["my_secret"].file.as_deref(),
+        Some("./secret.txt")
+    );
 }
 
 #[test]
@@ -182,7 +196,10 @@ fn restart_policies() {
 #[test]
 fn restart_on_failure_with_count() {
     let yaml = "services:\n  app:\n    image: alpine\n    restart: on-failure:5\n";
-    let r = parse_str(yaml).unwrap().services["app"].restart.clone().unwrap();
+    let r = parse_str(yaml).unwrap().services["app"]
+        .restart
+        .clone()
+        .unwrap();
     match r {
         RestartPolicy::OnFailure { max_attempts } => assert_eq!(max_attempts, Some(5)),
         other => panic!("expected OnFailure, got {other:?}"),
@@ -199,14 +216,20 @@ services:
       - "com.example.env=prod"
 "#;
     let labels = parse_str(yaml).unwrap().services["app"].labels.to_map();
-    assert_eq!(labels.get("com.example.env").map(|s| s.as_str()), Some("prod"));
+    assert_eq!(
+        labels.get("com.example.env").map(|s| s.as_str()),
+        Some("prod")
+    );
 }
 
 #[test]
 fn labels_as_map() {
     let yaml = "services:\n  app:\n    image: alpine\n    labels:\n      com.example.env: prod\n";
     let labels = parse_str(yaml).unwrap().services["app"].labels.to_map();
-    assert_eq!(labels.get("com.example.env").map(|s| s.as_str()), Some("prod"));
+    assert_eq!(
+        labels.get("com.example.env").map(|s| s.as_str()),
+        Some("prod")
+    );
 }
 
 #[test]
@@ -219,7 +242,10 @@ services:
       - "somehost:162.242.195.82"
       - "otherhost:50.31.209.229"
 "#;
-    assert_eq!(parse_str(yaml).unwrap().services["app"].extra_hosts.len(), 2);
+    assert_eq!(
+        parse_str(yaml).unwrap().services["app"].extra_hosts.len(),
+        2
+    );
 }
 
 #[test]
@@ -242,7 +268,9 @@ fn privileged_and_init() {
 fn stop_signal() {
     let yaml = "services:\n  app:\n    image: alpine\n    stop_signal: SIGTERM\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].stop_signal.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .stop_signal
+            .as_deref(),
         Some("SIGTERM")
     );
 }
@@ -266,7 +294,9 @@ fn cap_add_and_drop() {
     let yaml =
         "services:\n  app:\n    image: alpine\n    cap_add: [NET_ADMIN]\n    cap_drop: [ALL]\n";
     let file = parse_str(yaml).unwrap();
-    assert!(file.services["app"].cap_add.contains(&"NET_ADMIN".to_string()));
+    assert!(file.services["app"]
+        .cap_add
+        .contains(&"NET_ADMIN".to_string()));
     assert!(file.services["app"].cap_drop.contains(&"ALL".to_string()));
 }
 
@@ -290,7 +320,10 @@ services:
     let app = &file.services["app"];
     assert_eq!(app.image.as_deref(), Some("alpine"));
     let env = app.environment.to_map();
-    assert_eq!(env.get("LOG").and_then(|v| v.clone()).as_deref(), Some("info"));
+    assert_eq!(
+        env.get("LOG").and_then(|v| v.clone()).as_deref(),
+        Some("info")
+    );
 }
 
 #[test]
@@ -321,7 +354,10 @@ services:
     // parse_str does not resolve external files; the field should still parse,
     // but extends must remain unresolved (we expect an error from parse_str).
     let res = parse_str(yaml);
-    assert!(res.is_err(), "parse_str should reject extends.file references");
+    assert!(
+        res.is_err(),
+        "parse_str should reject extends.file references"
+    );
 }
 
 #[test]
@@ -449,7 +485,9 @@ services:
 "#;
     let v = &parse_str(yaml).unwrap().services["app"].volumes[0];
     match v {
-        VolumeMount::Long { volume: Some(vo), .. } => assert_eq!(vo.nocopy, Some(true)),
+        VolumeMount::Long {
+            volume: Some(vo), ..
+        } => assert_eq!(vo.nocopy, Some(true)),
         _ => panic!("expected long-form volume mount"),
     }
 }
@@ -606,7 +644,9 @@ services:
 fn network_mode_slirp4netns() {
     let yaml = "services:\n  app:\n    image: alpine\n    network_mode: slirp4netns\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].network_mode.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .network_mode
+            .as_deref(),
         Some("slirp4netns")
     );
 }
@@ -615,16 +655,21 @@ fn network_mode_slirp4netns() {
 fn network_mode_pasta() {
     let yaml = "services:\n  app:\n    image: alpine\n    network_mode: pasta\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].network_mode.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .network_mode
+            .as_deref(),
         Some("pasta")
     );
 }
 
 #[test]
 fn network_mode_ns_path() {
-    let yaml = "services:\n  app:\n    image: alpine\n    network_mode: \"ns:/run/netns/mynamespace\"\n";
+    let yaml =
+        "services:\n  app:\n    image: alpine\n    network_mode: \"ns:/run/netns/mynamespace\"\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].network_mode.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .network_mode
+            .as_deref(),
         Some("ns:/run/netns/mynamespace")
     );
 }

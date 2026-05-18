@@ -35,9 +35,18 @@ services:
     let file = parse_str(yaml).unwrap();
     let env = file.services["app"].environment.to_map();
     // Override wins for LOG, base value preserved for KEEP, override-only EXTRA present.
-    assert_eq!(env.get("LOG").and_then(|v| v.clone()).as_deref(), Some("debug"));
-    assert_eq!(env.get("KEEP").and_then(|v| v.clone()).as_deref(), Some("yes"));
-    assert_eq!(env.get("EXTRA").and_then(|v| v.clone()).as_deref(), Some("ok"));
+    assert_eq!(
+        env.get("LOG").and_then(|v| v.clone()).as_deref(),
+        Some("debug")
+    );
+    assert_eq!(
+        env.get("KEEP").and_then(|v| v.clone()).as_deref(),
+        Some("yes")
+    );
+    assert_eq!(
+        env.get("EXTRA").and_then(|v| v.clone()).as_deref(),
+        Some("ok")
+    );
 }
 
 #[test]

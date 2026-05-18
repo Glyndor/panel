@@ -17,7 +17,10 @@ use crate::error::{ComposeError, Result};
 ///
 /// Returns [`ComposeError::FileNotFound`] when an env file does not exist.
 pub fn load_env_files(paths: &[String], base_dir: &Path) -> Result<HashMap<String, String>> {
-    let entries: Vec<EnvFileEntry> = paths.iter().map(|p| EnvFileEntry::Path(p.clone())).collect();
+    let entries: Vec<EnvFileEntry> = paths
+        .iter()
+        .map(|p| EnvFileEntry::Path(p.clone()))
+        .collect();
     load_env_file_entries(&entries, base_dir)
 }
 
@@ -31,7 +34,10 @@ pub fn load_env_file_entries(
     let mut result: HashMap<String, String> = HashMap::new();
 
     for entry in entries {
-        if let EnvFileEntry::Config { format: Some(fmt), .. } = entry {
+        if let EnvFileEntry::Config {
+            format: Some(fmt), ..
+        } = entry
+        {
             if fmt != "dotenv" {
                 return Err(ComposeError::Unsupported(format!(
                     "env_file format '{fmt}' not supported (only 'dotenv')"

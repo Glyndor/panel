@@ -1,0 +1,5 @@
+[advisories]
+# RUSTSEC-2023-0071: Marvin Attack in rsa crate (via sqlx-mysql).
+# sqlx-mysql is an unselected optional dependency — not compiled into any binary.
+# Verified: `cargo tree --workspace` does not include sqlx-mysql or rsa.
+ignore = ["RUSTSEC-2023-0071"]

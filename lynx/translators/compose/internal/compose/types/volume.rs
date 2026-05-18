@@ -99,7 +99,11 @@ impl VolumeMount {
         match self {
             VolumeMount::Short(s) => {
                 let parts: Vec<&str> = s.splitn(3, ':').collect();
-                if parts.len() >= 2 { parts[1] } else { parts[0] }
+                if parts.len() >= 2 {
+                    parts[1]
+                } else {
+                    parts[0]
+                }
             }
             VolumeMount::Long { target, .. } => target,
         }

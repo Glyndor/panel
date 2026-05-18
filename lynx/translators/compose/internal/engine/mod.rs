@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bollard::container::{
-    ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+    ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions, StartContainerOptions,
+    StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
@@ -47,7 +47,11 @@ impl Engine {
     }
 
     pub fn with_base_dir(docker: Docker, project: String, base_dir: PathBuf) -> Self {
-        Self { docker, project, base_dir }
+        Self {
+            docker,
+            project,
+            base_dir,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -130,8 +134,10 @@ impl Engine {
                 } else {
                     format!("{}-{i}", self.container_name(name, service))
                 };
-                self.create_and_start(&container_name, name, service, file).await?;
-                self.connect_extra_networks(&container_name, service, file).await?;
+                self.create_and_start(&container_name, name, service, file)
+                    .await?;
+                self.connect_extra_networks(&container_name, service, file)
+                    .await?;
                 info!("started {container_name}");
 
                 // Execute post_start lifecycle hooks.
@@ -410,7 +416,10 @@ impl Engine {
                         .docker
                         .remove_container(
                             name,
-                            Some(RemoveContainerOptions { force: true, ..Default::default() }),
+                            Some(RemoveContainerOptions {
+                                force: true,
+                                ..Default::default()
+                            }),
                         )
                         .await;
                 }
@@ -487,11 +496,7 @@ impl Engine {
     // Internal
     // -----------------------------------------------------------------------
 
-    async fn run_lifecycle_hook(
-        &self,
-        container_name: &str,
-        hook: &LifecycleHook,
-    ) -> Result<()> {
+    async fn run_lifecycle_hook(&self, container_name: &str, hook: &LifecycleHook) -> Result<()> {
         use bollard::exec::{CreateExecOptions, StartExecResults};
 
         let cmd = hook.command.to_exec();
@@ -500,7 +505,11 @@ impl Engine {
             if m.is_empty() {
                 None
             } else {
-                Some(m.into_iter().filter_map(|(k, v)| v.map(|v| format!("{k}={v}"))).collect())
+                Some(
+                    m.into_iter()
+                        .filter_map(|(k, v)| v.map(|v| format!("{k}={v}")))
+                        .collect(),
+                )
             }
         };
 

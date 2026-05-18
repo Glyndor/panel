@@ -29,7 +29,9 @@ services:
       - PORT=3000
       - SECRET
 "#;
-    let env = parse_str(yaml).unwrap().services["app"].environment.to_map();
+    let env = parse_str(yaml).unwrap().services["app"]
+        .environment
+        .to_map();
     assert_eq!(env["NODE_ENV"].as_deref(), Some("production"));
     assert_eq!(env["PORT"].as_deref(), Some("3000"));
     assert!(env.contains_key("SECRET"));
@@ -45,7 +47,9 @@ services:
       NODE_ENV: production
       PORT: 3000
 "#;
-    let env = parse_str(yaml).unwrap().services["app"].environment.to_map();
+    let env = parse_str(yaml).unwrap().services["app"]
+        .environment
+        .to_map();
     assert_eq!(env["NODE_ENV"].as_deref(), Some("production"));
     assert_eq!(env["PORT"].as_deref(), Some("3000"));
 }
@@ -236,10 +240,14 @@ secrets:
 
 #[test]
 fn hostname_and_domainname() {
-    let yaml = "services:\n  app:\n    image: alpine\n    hostname: web1\n    domainname: example.com\n";
+    let yaml =
+        "services:\n  app:\n    image: alpine\n    hostname: web1\n    domainname: example.com\n";
     let file = parse_str(yaml).unwrap();
     assert_eq!(file.services["app"].hostname.as_deref(), Some("web1"));
-    assert_eq!(file.services["app"].domainname.as_deref(), Some("example.com"));
+    assert_eq!(
+        file.services["app"].domainname.as_deref(),
+        Some("example.com")
+    );
 }
 
 #[test]
@@ -255,7 +263,10 @@ fn mac_address() {
 #[test]
 fn read_only_root() {
     let yaml = "services:\n  app:\n    image: alpine\n    read_only: true\n";
-    assert_eq!(parse_str(yaml).unwrap().services["app"].read_only, Some(true));
+    assert_eq!(
+        parse_str(yaml).unwrap().services["app"].read_only,
+        Some(true)
+    );
 }
 
 #[test]
@@ -303,7 +314,13 @@ services:
       - /run
       - /tmp
 "#;
-    assert_eq!(parse_str(yaml).unwrap().services["app"].tmpfs.to_list().len(), 2);
+    assert_eq!(
+        parse_str(yaml).unwrap().services["app"]
+            .tmpfs
+            .to_list()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -349,9 +366,12 @@ services:
 
 #[test]
 fn userns_mode() {
-    let yaml = "services:\n  app:\n    image: alpine\n    userns_mode: \"keep-id:uid=1000,gid=1000\"\n";
+    let yaml =
+        "services:\n  app:\n    image: alpine\n    userns_mode: \"keep-id:uid=1000,gid=1000\"\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].userns_mode.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .userns_mode
+            .as_deref(),
         Some("keep-id:uid=1000,gid=1000")
     );
 }
@@ -369,7 +389,9 @@ fn shm_size() {
 fn cgroup_parent_field() {
     let yaml = "services:\n  app:\n    image: alpine\n    cgroup_parent: my-cgroup\n";
     assert_eq!(
-        parse_str(yaml).unwrap().services["app"].cgroup_parent.as_deref(),
+        parse_str(yaml).unwrap().services["app"]
+            .cgroup_parent
+            .as_deref(),
         Some("my-cgroup")
     );
 }

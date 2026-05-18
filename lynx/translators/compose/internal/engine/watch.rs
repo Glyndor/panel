@@ -12,9 +12,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bollard::container::LogOutput;
 use bollard::container::{StartContainerOptions, StopContainerOptions, UploadToContainerOptions};
 use bollard::exec::{CreateExecOptions, StartExecResults};
-use bollard::container::LogOutput;
 use bytes::Bytes;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -130,16 +130,13 @@ impl Engine {
                         continue;
                     }
 
-                    let rel = path
-                        .strip_prefix(&self.base_dir)
-                        .unwrap_or(path.as_path());
+                    let rel = path.strip_prefix(&self.base_dir).unwrap_or(path.as_path());
                     let rel_str = rel.to_string_lossy();
 
                     if is_ignored(&rel_str, &entry.rule.ignore) {
                         continue;
                     }
-                    if !entry.rule.include.is_empty()
-                        && !is_included(&rel_str, &entry.rule.include)
+                    if !entry.rule.include.is_empty() && !is_included(&rel_str, &entry.rule.include)
                     {
                         continue;
                     }
@@ -167,7 +164,8 @@ impl Engine {
         match &entry.rule.action {
             WatchAction::Sync => {
                 if let Some(target) = &entry.rule.target {
-                    self.sync_to_container(&entry.container_name, path, target).await?;
+                    self.sync_to_container(&entry.container_name, path, target)
+                        .await?;
                 }
             }
             WatchAction::Rebuild => {
@@ -178,16 +176,19 @@ impl Engine {
             }
             WatchAction::SyncAndRestart => {
                 if let Some(target) = &entry.rule.target {
-                    self.sync_to_container(&entry.container_name, path, target).await?;
+                    self.sync_to_container(&entry.container_name, path, target)
+                        .await?;
                 }
                 self.watch_restart(&entry.container_name).await?;
             }
             WatchAction::SyncAndExec => {
                 if let Some(target) = &entry.rule.target {
-                    self.sync_to_container(&entry.container_name, path, target).await?;
+                    self.sync_to_container(&entry.container_name, path, target)
+                        .await?;
                 }
                 if let Some(exec) = &entry.rule.exec {
-                    self.watch_exec(&entry.container_name, exec.command.clone()).await?;
+                    self.watch_exec(&entry.container_name, exec.command.clone())
+                        .await?;
                 }
             }
         }
@@ -235,7 +236,8 @@ impl Engine {
         info!("rebuilding {service_name}");
         self.build_service(service_name, service).await?;
         let container_name = self.container_name(service_name, service);
-        self.create_and_start(&container_name, service_name, service, file).await
+        self.create_and_start(&container_name, service_name, service, file)
+            .await
     }
 
     async fn watch_restart(&self, container_name: &str) -> Result<()> {
@@ -316,8 +318,12 @@ fn build_sync_tar(src: &Path) -> Result<Vec<u8>> {
             .map_err(|e| ComposeError::Build(e.to_string()))?;
     }
 
-    let gz = tar.into_inner().map_err(|e| ComposeError::Build(e.to_string()))?;
-    let bytes = gz.finish().map_err(|e| ComposeError::Build(e.to_string()))?;
+    let gz = tar
+        .into_inner()
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
+    let bytes = gz
+        .finish()
+        .map_err(|e| ComposeError::Build(e.to_string()))?;
     Ok(bytes)
 }
 
@@ -332,8 +338,7 @@ fn is_ignored(path: &str, patterns: &[String]) -> bool {
                 return true;
             }
         } else if path == pat.as_str()
-            || (path.starts_with(pat.as_str())
-                && path.as_bytes().get(pat.len()) == Some(&b'/'))
+            || (path.starts_with(pat.as_str()) && path.as_bytes().get(pat.len()) == Some(&b'/'))
         {
             return true;
         }

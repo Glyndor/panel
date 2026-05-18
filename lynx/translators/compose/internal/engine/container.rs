@@ -9,8 +9,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions};
 use bollard::container::NetworkingConfig;
+use bollard::container::{
+    Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
+};
 use bollard::models::{
     DeviceMapping, DeviceRequest, HealthConfig, HostConfig, HostConfigLogConfig,
     ResourcesBlkioWeightDevice, ResourcesUlimits, RestartPolicy as BollardRestart,
@@ -127,8 +129,15 @@ impl Engine {
             }
         }
 
-        let (mem_limit, mem_reservation, memswap, nano_cpus, cpu_quota_eff, cpu_period_eff, pids_limit) =
-            resolve_resources(service);
+        let (
+            mem_limit,
+            mem_reservation,
+            memswap,
+            nano_cpus,
+            cpu_quota_eff,
+            cpu_period_eff,
+            pids_limit,
+        ) = resolve_resources(service);
 
         let blkio = build_blkio_config(service);
 
@@ -139,14 +148,22 @@ impl Engine {
 
         let host_config = HostConfig {
             binds: opt_vec(all_binds),
-            mounts: if mounts.is_empty() { None } else { Some(mounts) },
+            mounts: if mounts.is_empty() {
+                None
+            } else {
+                Some(mounts)
+            },
             network_mode: network_mode.clone(),
             restart_policy,
             port_bindings: opt_map(port_bindings),
             cap_add: opt_vec(service.cap_add.clone()),
             cap_drop: opt_vec(service.cap_drop.clone()),
             sysctls: opt_map(sysctls),
-            ulimits: if ulimits.is_empty() { None } else { Some(ulimits) },
+            ulimits: if ulimits.is_empty() {
+                None
+            } else {
+                Some(ulimits)
+            },
             extra_hosts: opt_vec(extra_hosts),
             dns: opt_vec(dns),
             dns_search: opt_vec(dns_search),
@@ -193,7 +210,11 @@ impl Engine {
             blkio_device_write_bps: blkio.as_ref().and_then(|b| b.device_write_bps.clone()),
             blkio_device_read_iops: blkio.as_ref().and_then(|b| b.device_read_iops.clone()),
             blkio_device_write_iops: blkio.as_ref().and_then(|b| b.device_write_iops.clone()),
-            device_requests: if device_requests.is_empty() { None } else { Some(device_requests) },
+            device_requests: if device_requests.is_empty() {
+                None
+            } else {
+                Some(device_requests)
+            },
             annotations: opt_map(service.annotations.to_map()),
             ..Default::default()
         };
@@ -205,7 +226,9 @@ impl Engine {
             let mut endpoints = HashMap::new();
             let svc_net_cfg = service.networks.config_for(net);
             endpoints.insert(net.clone(), build_endpoint_settings(svc_net_cfg, file));
-            NetworkingConfig { endpoints_config: endpoints }
+            NetworkingConfig {
+                endpoints_config: endpoints,
+            }
         });
 
         let healthcheck = service.healthcheck.as_ref().map(build_healthcheck);
@@ -242,7 +265,10 @@ impl Engine {
             .docker
             .remove_container(
                 container_name,
-                Some(RemoveContainerOptions { force: true, ..Default::default() }),
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
             )
             .await;
 
@@ -275,9 +301,11 @@ fn build_env(service: &Service, base_dir: &Path) -> Result<Vec<String>> {
     } else {
         HashMap::new()
     };
-    Ok(env_file::merge_env(service.environment.to_map(), env_file_vars))
+    Ok(env_file::merge_env(
+        service.environment.to_map(),
+        env_file_vars,
+    ))
 }
-
 
 pub(crate) fn build_restart_policy(service: &Service) -> Option<BollardRestart> {
     if let Some(r) = &service.restart {
@@ -302,7 +330,11 @@ pub(crate) fn build_restart_policy(service: &Service) -> Option<BollardRestart> 
     }
     // Fall back to deploy.restart_policy when service.restart is absent.
     // delay/window are Swarm-specific and have no container API equivalent.
-    if let Some(drp) = service.deploy.as_ref().and_then(|d| d.restart_policy.as_ref()) {
+    if let Some(drp) = service
+        .deploy
+        .as_ref()
+        .and_then(|d| d.restart_policy.as_ref())
+    {
         let name = match drp.condition.as_deref().unwrap_or("any") {
             "none" => RestartPolicyNameEnum::NO,
             "on-failure" => RestartPolicyNameEnum::ON_FAILURE,
@@ -319,7 +351,11 @@ pub(crate) fn build_restart_policy(service: &Service) -> Option<BollardRestart> 
 fn build_log_config(logging: Option<&LoggingConfig>) -> Option<HostConfigLogConfig> {
     logging.map(|l| HostConfigLogConfig {
         typ: l.driver.clone(),
-        config: if l.options.is_empty() { None } else { Some(l.options.clone()) },
+        config: if l.options.is_empty() {
+            None
+        } else {
+            Some(l.options.clone())
+        },
     })
 }
 
@@ -339,18 +375,38 @@ fn build_healthcheck(hc: &HealthCheck) -> HealthConfig {
         interval: hc.interval.as_deref().and_then(size::parse_duration_nanos),
         timeout: hc.timeout.as_deref().and_then(size::parse_duration_nanos),
         retries: hc.retries.map(|r| r as i64),
-        start_period: hc.start_period.as_deref().and_then(size::parse_duration_nanos),
-        start_interval: hc.start_interval.as_deref().and_then(size::parse_duration_nanos),
+        start_period: hc
+            .start_period
+            .as_deref()
+            .and_then(size::parse_duration_nanos),
+        start_interval: hc
+            .start_interval
+            .as_deref()
+            .and_then(size::parse_duration_nanos),
     }
 }
 
 #[allow(clippy::type_complexity)]
 fn resolve_resources(
     service: &Service,
-) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
+) -> (
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+) {
     let mut memory = service.mem_limit.as_deref().and_then(size::parse_memory);
-    let mut mem_reservation = service.mem_reservation.as_deref().and_then(size::parse_memory);
-    let memswap = service.memswap_limit.as_deref().and_then(size::parse_memory);
+    let mut mem_reservation = service
+        .mem_reservation
+        .as_deref()
+        .and_then(size::parse_memory);
+    let memswap = service
+        .memswap_limit
+        .as_deref()
+        .and_then(size::parse_memory);
     let mut nano_cpus = service.cpus.as_deref().and_then(size::parse_cpus);
     let cpu_quota = service.cpu_quota;
     let cpu_period = service.cpu_period.map(|p| p as i64);
@@ -377,7 +433,15 @@ fn resolve_resources(
         }
     }
 
-    (memory, mem_reservation, memswap, nano_cpus, cpu_quota, cpu_period, pids_limit)
+    (
+        memory,
+        mem_reservation,
+        memswap,
+        nano_cpus,
+        cpu_quota,
+        cpu_period,
+        pids_limit,
+    )
 }
 
 pub(crate) fn parse_device(s: &str) -> DeviceMapping {
@@ -414,11 +478,19 @@ pub(crate) fn tmpfs_options_to_string(
 }
 
 pub(crate) fn opt_vec<T>(v: Vec<T>) -> Option<Vec<T>> {
-    if v.is_empty() { None } else { Some(v) }
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
 }
 
 pub(crate) fn opt_map<K, V>(m: HashMap<K, V>) -> Option<HashMap<K, V>> {
-    if m.is_empty() { None } else { Some(m) }
+    if m.is_empty() {
+        None
+    } else {
+        Some(m)
+    }
 }
 
 fn build_label_file_labels(service: &Service, base_dir: &Path) -> HashMap<String, String> {
@@ -600,21 +672,30 @@ mod tests {
 
     #[test]
     fn tmpfs_options_size_only() {
-        let opts = TmpfsOptions { size: Some(67108864), mode: None };
+        let opts = TmpfsOptions {
+            size: Some(67108864),
+            mode: None,
+        };
         let s = tmpfs_options_to_string(Some(&opts));
         assert_eq!(s, "size=67108864");
     }
 
     #[test]
     fn tmpfs_options_mode_only() {
-        let opts = TmpfsOptions { size: None, mode: Some(0o1755) };
+        let opts = TmpfsOptions {
+            size: None,
+            mode: Some(0o1755),
+        };
         let s = tmpfs_options_to_string(Some(&opts));
         assert_eq!(s, "mode=1755");
     }
 
     #[test]
     fn tmpfs_options_size_and_mode() {
-        let opts = TmpfsOptions { size: Some(1024), mode: Some(0o755) };
+        let opts = TmpfsOptions {
+            size: Some(1024),
+            mode: Some(0o755),
+        };
         let s = tmpfs_options_to_string(Some(&opts));
         assert!(s.contains("size=1024"));
         assert!(s.contains("mode=755"));

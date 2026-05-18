@@ -1,7 +1,7 @@
 //! Podman socket connection helpers.
 
-use bollard::Docker;
 use crate::error::Result;
+use bollard::Docker;
 
 const DEFAULT_PODMAN_SOCKET: &str = "/run/podman/podman.sock";
 

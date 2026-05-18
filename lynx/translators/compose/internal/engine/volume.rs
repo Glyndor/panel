@@ -138,15 +138,25 @@ pub(crate) fn build_binds(service: &Service, base_dir: &Path) -> Vec<String> {
 }
 
 fn needs_mount_api(volume: &Option<VolumeOptions>) -> bool {
-    volume.as_ref().is_some_and(|v| {
-        v.subpath.is_some() || !v.labels.is_empty() || v.driver_config.is_some()
-    })
+    volume
+        .as_ref()
+        .is_some_and(|v| v.subpath.is_some() || !v.labels.is_empty() || v.driver_config.is_some())
 }
 
 pub(crate) fn build_mounts(service: &Service) -> Vec<Mount> {
     let mut out = Vec::new();
     for v in &service.volumes {
-        if let VolumeMount::Long { volume_type, source, target, read_only, bind, volume, tmpfs, consistency } = v {
+        if let VolumeMount::Long {
+            volume_type,
+            source,
+            target,
+            read_only,
+            bind,
+            volume,
+            tmpfs,
+            consistency,
+        } = v
+        {
             if matches!(volume_type, VolumeType::Tmpfs) {
                 // Tmpfs via Mount API.
                 let tmpfs_options = tmpfs.as_ref().map(|t| MountTmpfsOptions {
@@ -184,10 +194,17 @@ pub(crate) fn build_mounts(service: &Service) -> Vec<Mount> {
                 } else {
                     Some(v.labels.to_map())
                 };
-                let driver_config = v.driver_config.as_ref().map(|dc| MountVolumeOptionsDriverConfig {
-                    name: dc.name.clone(),
-                    options: if dc.options.is_empty() { None } else { Some(dc.options.clone()) },
-                });
+                let driver_config =
+                    v.driver_config
+                        .as_ref()
+                        .map(|dc| MountVolumeOptionsDriverConfig {
+                            name: dc.name.clone(),
+                            options: if dc.options.is_empty() {
+                                None
+                            } else {
+                                Some(dc.options.clone())
+                            },
+                        });
                 MountVolumeOptions {
                     no_copy: v.nocopy,
                     labels,
@@ -235,32 +252,62 @@ impl Engine {
         for secret_ref in &service.secrets {
             let (name, target_override, ref_mode, ref_uid, ref_gid) = match secret_ref {
                 ServiceSecretRef::Short(s) => (s.clone(), None, None, None, None),
-                ServiceSecretRef::Long { source, target, mode, uid, gid } => {
-                    (source.clone(), target.clone(), *mode, uid.clone(), gid.clone())
-                }
+                ServiceSecretRef::Long {
+                    source,
+                    target,
+                    mode,
+                    uid,
+                    gid,
+                } => (
+                    source.clone(),
+                    target.clone(),
+                    *mode,
+                    uid.clone(),
+                    gid.clone(),
+                ),
             };
             if let Some(config) = file.secrets.get(&name) {
                 let target = target_override.unwrap_or_else(|| format!("/run/secrets/{name}"));
                 match config {
-                    SecretConfig { file: Some(host_path), .. } => {
+                    SecretConfig {
+                        file: Some(host_path),
+                        ..
+                    } => {
                         binds.push(format!("{host_path}:{target}:ro"));
                     }
-                    SecretConfig { content: Some(content), .. } => {
+                    SecretConfig {
+                        content: Some(content),
+                        ..
+                    } => {
                         let path = self.materialize_inline_full(
-                            "secrets", &name, content.as_bytes(),
-                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                            "secrets",
+                            &name,
+                            content.as_bytes(),
+                            ref_mode,
+                            ref_uid.as_deref(),
+                            ref_gid.as_deref(),
                         )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
-                    SecretConfig { environment: Some(env_var), .. } => {
+                    SecretConfig {
+                        environment: Some(env_var),
+                        ..
+                    } => {
                         let value = std::env::var(env_var).unwrap_or_default();
                         let path = self.materialize_inline_full(
-                            "secrets", &name, value.as_bytes(),
-                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                            "secrets",
+                            &name,
+                            value.as_bytes(),
+                            ref_mode,
+                            ref_uid.as_deref(),
+                            ref_gid.as_deref(),
                         )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
-                    SecretConfig { external: Some(true), .. } => {
+                    SecretConfig {
+                        external: Some(true),
+                        ..
+                    } => {
                         tracing::debug!("external secret {name} — relying on runtime injection");
                     }
                     _ => {}
@@ -279,32 +326,62 @@ impl Engine {
         for config_ref in &service.configs {
             let (name, target_override, ref_mode, ref_uid, ref_gid) = match config_ref {
                 ServiceConfigRef::Short(s) => (s.clone(), None, None, None, None),
-                ServiceConfigRef::Long { source, target, mode, uid, gid } => {
-                    (source.clone(), target.clone(), *mode, uid.clone(), gid.clone())
-                }
+                ServiceConfigRef::Long {
+                    source,
+                    target,
+                    mode,
+                    uid,
+                    gid,
+                } => (
+                    source.clone(),
+                    target.clone(),
+                    *mode,
+                    uid.clone(),
+                    gid.clone(),
+                ),
             };
             if let Some(cfg) = file.configs.get(&name) {
                 let target = target_override.unwrap_or_else(|| format!("/{name}"));
                 match cfg {
-                    ConfigConfig { file: Some(host_path), .. } => {
+                    ConfigConfig {
+                        file: Some(host_path),
+                        ..
+                    } => {
                         binds.push(format!("{host_path}:{target}:ro"));
                     }
-                    ConfigConfig { content: Some(content), .. } => {
+                    ConfigConfig {
+                        content: Some(content),
+                        ..
+                    } => {
                         let path = self.materialize_inline_full(
-                            "configs", &name, content.as_bytes(),
-                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                            "configs",
+                            &name,
+                            content.as_bytes(),
+                            ref_mode,
+                            ref_uid.as_deref(),
+                            ref_gid.as_deref(),
                         )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
-                    ConfigConfig { environment: Some(env_var), .. } => {
+                    ConfigConfig {
+                        environment: Some(env_var),
+                        ..
+                    } => {
                         let value = std::env::var(env_var).unwrap_or_default();
                         let path = self.materialize_inline_full(
-                            "configs", &name, value.as_bytes(),
-                            ref_mode, ref_uid.as_deref(), ref_gid.as_deref(),
+                            "configs",
+                            &name,
+                            value.as_bytes(),
+                            ref_mode,
+                            ref_uid.as_deref(),
+                            ref_gid.as_deref(),
                         )?;
                         binds.push(format!("{}:{target}:ro", path.display()));
                     }
-                    ConfigConfig { external: Some(true), .. } => {
+                    ConfigConfig {
+                        external: Some(true),
+                        ..
+                    } => {
                         tracing::debug!("external config {name} — relying on runtime injection");
                     }
                     _ => {}
@@ -406,7 +483,10 @@ mod tests {
     use std::path::Path;
 
     fn svc_with_volumes(vols: Vec<VolumeMount>) -> Service {
-        Service { volumes: vols, ..Default::default() }
+        Service {
+            volumes: vols,
+            ..Default::default()
+        }
     }
 
     #[test]

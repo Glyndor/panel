@@ -14,11 +14,7 @@ impl Engine {
     /// Poll a container until its health status is `healthy` or timeout.
     ///
     /// Uses `healthcheck.retries` (default 30) with a 2 s interval between probes.
-    pub(super) async fn wait_healthy(
-        &self,
-        container_name: &str,
-        service: &Service,
-    ) -> Result<()> {
+    pub(super) async fn wait_healthy(&self, container_name: &str, service: &Service) -> Result<()> {
         use bollard::models::HealthStatusEnum;
 
         let retries = service

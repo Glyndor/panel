@@ -132,7 +132,10 @@ pub fn build_vars_with_env_files(dir: &Path, extra: &[String]) -> HashMap<String
                 continue;
             }
             let (key, value) = if let Some(eq) = trimmed.find('=') {
-                (trimmed[..eq].trim().to_string(), trimmed[eq + 1..].to_string())
+                (
+                    trimmed[..eq].trim().to_string(),
+                    trimmed[eq + 1..].to_string(),
+                )
             } else {
                 (trimmed.to_string(), String::new())
             };
@@ -305,19 +308,12 @@ fn resolve_modifier(
 
         Modifier::ErrorIfUnsetOrEmpty(msg) => match value {
             Some(v) if !v.is_empty() => Ok(v.clone()),
-            _ => Err(ComposeError::RequiredVarNotSet {
-                var,
-                msg,
-            }),
+            _ => Err(ComposeError::RequiredVarNotSet { var, msg }),
         },
 
         Modifier::ErrorIfUnset(msg) => match value {
             Some(v) => Ok(v.clone()),
-            None => Err(ComposeError::RequiredVarNotSet {
-                var,
-                msg,
-            }),
+            None => Err(ComposeError::RequiredVarNotSet { var, msg }),
         },
     }
 }
-

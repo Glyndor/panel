@@ -23,7 +23,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "set-header", "limit"] }
 
 # database
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "ipnetwork"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "ipnetwork", "macros"] }
 
 # cache
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }

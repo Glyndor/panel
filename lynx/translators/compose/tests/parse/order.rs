@@ -3,7 +3,8 @@ use lynx_compose::{parse_str, resolve_order};
 
 #[test]
 fn no_deps() {
-    let yaml = "services:\n  a:\n    image: alpine\n  b:\n    image: alpine\n  c:\n    image: alpine\n";
+    let yaml =
+        "services:\n  a:\n    image: alpine\n  b:\n    image: alpine\n  c:\n    image: alpine\n";
     assert_eq!(resolve_order(&parse_str(yaml).unwrap()).unwrap().len(), 3);
 }
 

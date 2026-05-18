@@ -122,7 +122,10 @@ fn resolve_one_extends(
                 "service '{name}' extends.file must be relative, got absolute path: {file_path}"
             )));
         }
-        if fp.components().any(|c| c == std::path::Component::ParentDir) {
+        if fp
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
             return Err(ComposeError::Extends(format!(
                 "service '{name}' extends.file must not traverse parent directories: {file_path}"
             )));
@@ -215,15 +218,27 @@ pub(super) fn merge_service(base: Service, override_svc: Service) -> Service {
     }
 
     fn merge_vec<T: Clone>(base: Vec<T>, over: Vec<T>) -> Vec<T> {
-        if over.is_empty() { base } else { over }
+        if over.is_empty() {
+            base
+        } else {
+            over
+        }
     }
 
     fn merge_sol(base: StringOrList, over: StringOrList) -> StringOrList {
-        if over.is_empty() { base } else { over }
+        if over.is_empty() {
+            base
+        } else {
+            over
+        }
     }
 
     fn merge_env_file(base: EnvFile, over: EnvFile) -> EnvFile {
-        if over.is_empty() { base } else { over }
+        if over.is_empty() {
+            base
+        } else {
+            over
+        }
     }
 
     Service {

@@ -27,7 +27,11 @@ pub fn parse_file(path: &Path) -> Result<ComposeFile> {
     let includes = std::mem::take(&mut file.include);
     for inc in includes {
         let (extra_env_files, project_dir_override) = match &inc {
-            types::IncludeConfig::Long { env_file, project_directory, .. } => (
+            types::IncludeConfig::Long {
+                env_file,
+                project_directory,
+                ..
+            } => (
                 env_file.as_ref().map(|ef| ef.to_list()).unwrap_or_default(),
                 project_directory.as_ref().map(|pd| dir.join(pd)),
             ),
@@ -40,14 +44,20 @@ pub fn parse_file(path: &Path) -> Result<ComposeFile> {
                     "include path must be relative, got absolute path: {rel}"
                 )));
             }
-            if rel_path.components().any(|c| c == std::path::Component::ParentDir) {
+            if rel_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
                 return Err(ComposeError::Include(format!(
                     "include path must not traverse parent directories: {rel}"
                 )));
             }
             let inc_path = dir.join(&rel);
             let inc_dir = project_dir_override.clone().unwrap_or_else(|| {
-                inc_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| dir.clone())
+                inc_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| dir.clone())
             });
             let included = parse_file_inner_with_env(&inc_path, &inc_dir, &extra_env_files)?;
             include::merge_compose_file(&mut file, included);
@@ -113,10 +123,7 @@ pub fn resolve_order(file: &ComposeFile) -> Result<Vec<String>> {
     let mut order = Vec::new();
     while let Some(node) = queue.pop_front() {
         order.push(node.to_string());
-        let neighbors: Vec<&str> = graph
-            .get(node)
-            .map_or(&[][..], |v| v.as_slice())
-            .to_vec();
+        let neighbors: Vec<&str> = graph.get(node).map_or(&[][..], |v| v.as_slice()).to_vec();
         for neighbor in neighbors {
             if let Some(deg) = in_degree.get_mut(neighbor) {
                 *deg -= 1;

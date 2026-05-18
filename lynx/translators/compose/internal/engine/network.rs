@@ -8,7 +8,9 @@
 
 use std::collections::HashMap;
 
-use bollard::models::{EndpointIpamConfig, EndpointSettings, Ipam, IpamConfig as BollardIpamConfig};
+use bollard::models::{
+    EndpointIpamConfig, EndpointSettings, Ipam, IpamConfig as BollardIpamConfig,
+};
 use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
 use tracing::{debug, info};
 
@@ -193,6 +195,10 @@ fn build_ipam(ipam: &IpamConfig) -> Ipam {
     Ipam {
         driver: ipam.driver.clone(),
         config,
-        options: if ipam.options.is_empty() { None } else { Some(ipam.options.clone()) },
+        options: if ipam.options.is_empty() {
+            None
+        } else {
+            Some(ipam.options.clone())
+        },
     }
 }
