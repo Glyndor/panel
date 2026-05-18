@@ -54,7 +54,7 @@ export async function generateMetadata({
 	return {
 		title: branding.company_name,
 		description: "Distributed infrastructure orchestration",
-		robots: "noindex, nofollow",
+		robots: { index: false, follow: false },
 	};
 }
 
