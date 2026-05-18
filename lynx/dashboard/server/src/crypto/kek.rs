@@ -57,3 +57,73 @@ fn decrypt_aes_gcm(data: &[u8], key_bytes: &[u8; 32]) -> Result<Vec<u8>> {
         .decrypt(nonce, ciphertext)
         .map_err(|e| anyhow::anyhow!("AES-GCM decrypt: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_kek() -> [u8; 32] {
+        [0x11u8; 32]
+    }
+
+    #[test]
+    fn dek_encrypt_decrypt_roundtrip() {
+        let kek = test_kek();
+        let dek = gen_dek();
+        let ct = encrypt_dek(&dek, &kek).expect("encrypt");
+        let recovered = decrypt_dek(&ct, &kek).expect("decrypt");
+        assert_eq!(*dek, *recovered);
+    }
+
+    #[test]
+    fn dek_wrong_key_fails() {
+        let kek = test_kek();
+        let dek = gen_dek();
+        let ct = encrypt_dek(&dek, &kek).expect("encrypt");
+        let bad_kek = [0x22u8; 32];
+        assert!(decrypt_dek(&ct, &bad_kek).is_err(), "wrong key must fail");
+    }
+
+    #[test]
+    fn data_encrypt_decrypt_roundtrip() {
+        let dek: [u8; 32] = [0x33u8; 32];
+        let plaintext = b"hello lynx world";
+        let ct = encrypt_with_dek(plaintext, &dek).expect("encrypt");
+        let recovered = decrypt_with_dek(&ct, &dek).expect("decrypt");
+        assert_eq!(recovered, plaintext);
+    }
+
+    #[test]
+    fn nonce_prepended_makes_ciphertext_longer_than_plaintext() {
+        let dek: [u8; 32] = [0x44u8; 32];
+        let plaintext = b"test";
+        let ct = encrypt_with_dek(plaintext, &dek).expect("encrypt");
+        // nonce (12) + GCM tag (16) + plaintext length
+        assert!(ct.len() > plaintext.len() + 12);
+    }
+
+    #[test]
+    fn decrypt_too_short_fails() {
+        let dek: [u8; 32] = [0x44u8; 32];
+        assert!(decrypt_with_dek(&[0u8; 5], &dek).is_err());
+    }
+
+    #[test]
+    fn tampered_ciphertext_fails() {
+        let dek: [u8; 32] = [0x55u8; 32];
+        let plaintext = b"secret data";
+        let mut ct = encrypt_with_dek(plaintext, &dek).expect("encrypt");
+        ct[20] ^= 0xff; // flip a byte in the ciphertext
+        assert!(decrypt_with_dek(&ct, &dek).is_err(), "tamper must fail");
+    }
+
+    #[test]
+    fn each_encryption_uses_different_nonce() {
+        let dek: [u8; 32] = [0x66u8; 32];
+        let plaintext = b"same input";
+        let ct1 = encrypt_with_dek(plaintext, &dek).expect("ct1");
+        let ct2 = encrypt_with_dek(plaintext, &dek).expect("ct2");
+        // Different nonces → different ciphertexts
+        assert_ne!(ct1, ct2, "nonce must be random per encryption");
+    }
+}

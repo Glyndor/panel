@@ -193,3 +193,113 @@ fn x25519_public_jwk(pub_bytes: &[u8; 32]) -> Result<Jwk> {
     }))
     .context("build X25519 public JWK")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_keys() -> JwtKeys {
+        use ed25519_dalek::SigningKey;
+        use x25519_dalek::{PublicKey, StaticSecret};
+
+        let sign_seed: [u8; 32] = [0x42u8; 32];
+        let signing = SigningKey::from_bytes(&sign_seed);
+        let sign_pub: [u8; 32] = signing.verifying_key().to_bytes();
+
+        let enc_priv: [u8; 32] = [0x77u8; 32];
+        let enc_pub: [u8; 32] = *PublicKey::from(&StaticSecret::from(enc_priv)).as_bytes();
+
+        JwtKeys {
+            sign_private_seed: sign_seed,
+            sign_public_bytes: sign_pub,
+            enc_private_bytes: enc_priv,
+            enc_public_bytes: enc_pub,
+        }
+    }
+
+    fn dummy_uuid() -> Uuid {
+        Uuid::now_v7()
+    }
+
+    #[test]
+    fn roundtrip_valid_token() {
+        let keys = test_keys();
+        let user_id = dummy_uuid();
+        let jti = dummy_uuid();
+        let session_id = dummy_uuid();
+
+        let token =
+            issue_access_token(&keys, user_id, jti, session_id, "ip_hash_val", "ua_hash_val")
+                .expect("issue token");
+
+        let claims = verify_access_token(&keys, &token).expect("verify token");
+        assert_eq!(claims.sub, user_id);
+        assert_eq!(claims.jti, jti);
+        assert_eq!(claims.session_id, session_id);
+        assert_eq!(claims.ip_hash, "ip_hash_val");
+        assert_eq!(claims.ua_hash, "ua_hash_val");
+    }
+
+    #[test]
+    fn wrong_sign_key_rejected() {
+        let keys = test_keys();
+        let token = issue_access_token(
+            &keys,
+            dummy_uuid(),
+            dummy_uuid(),
+            dummy_uuid(),
+            "ip",
+            "ua",
+        )
+        .expect("issue");
+
+        let mut bad_keys = test_keys();
+        bad_keys.sign_public_bytes = [0u8; 32]; // invalid pub key → verify fails
+        assert!(verify_access_token(&bad_keys, &token).is_err());
+    }
+
+    #[test]
+    fn wrong_enc_key_rejected() {
+        let keys = test_keys();
+        let token = issue_access_token(
+            &keys,
+            dummy_uuid(),
+            dummy_uuid(),
+            dummy_uuid(),
+            "ip",
+            "ua",
+        )
+        .expect("issue");
+
+        let mut bad_keys = test_keys();
+        bad_keys.enc_private_bytes = [0u8; 32]; // wrong private key → decrypt fails
+        let enc_pub: [u8; 32] = {
+            use x25519_dalek::{PublicKey, StaticSecret};
+            let secret = StaticSecret::from([0u8; 32]);
+            *PublicKey::from(&secret).as_bytes()
+        };
+        bad_keys.enc_public_bytes = enc_pub;
+        assert!(verify_access_token(&bad_keys, &token).is_err());
+    }
+
+    #[test]
+    fn tampered_token_rejected() {
+        let keys = test_keys();
+        let token = issue_access_token(
+            &keys,
+            dummy_uuid(),
+            dummy_uuid(),
+            dummy_uuid(),
+            "ip",
+            "ua",
+        )
+        .expect("issue");
+
+        // Corrupt a character near the middle of the compact JWE string
+        let mut bytes = token.into_bytes();
+        let mid = bytes.len() / 2;
+        bytes[mid] ^= 0x01;
+        let corrupted = String::from_utf8_lossy(&bytes).into_owned();
+        assert!(verify_access_token(&keys, &corrupted).is_err());
+    }
+}

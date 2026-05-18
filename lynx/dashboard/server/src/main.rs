@@ -1,33 +1,8 @@
-mod admin;
-mod agents;
-mod alerts;
-mod auth;
-mod branding;
-mod config;
-mod crypto;
-mod domain;
-mod error;
-mod migration;
-mod nftables;
-mod organizations;
-mod scheduler;
-mod state;
-mod update;
+use lynx_dashboard_server::{agents, build_router, config, crypto, scheduler, state::AppState, update};
 
 use anyhow::Context;
-use axum::{
-    extract::State,
-    http::{header, HeaderValue, Request, StatusCode},
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
-    routing::get,
-    Router,
-};
 use clap::{Parser, Subcommand};
-use state::AppState;
 use std::sync::Arc;
-use subtle::ConstantTimeEq;
-use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 
 #[derive(Parser)]
@@ -106,22 +81,6 @@ async fn main() -> anyhow::Result<()> {
         events_tx: Arc::new(tokio::sync::broadcast::channel::<Arc<String>>(256).0),
     };
 
-    let auth_layer = middleware::from_fn_with_state(state.clone(), auth::middleware::require_auth);
-
-    let agents_router = agents::router::router().route_layer(auth_layer.clone());
-
-    let orgs_router = organizations::router::router().route_layer(auth_layer.clone());
-
-    let admin_router = admin::router::router(state.clone()).route_layer(auth_layer.clone());
-
-    let domain_router = domain::router::router().route_layer(auth_layer.clone());
-
-    let migration_router = migration::router::router().route_layer(auth_layer.clone());
-
-    let nftables_router = nftables::router::router().route_layer(auth_layer.clone());
-
-    let auth_protected_router = auth::router::protected_router().route_layer(auth_layer);
-
     // Record setup_token_issued_at on first boot without an admin (24h TTL window).
     record_setup_token_issuance(&state.db).await;
 
@@ -131,42 +90,13 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(agents::heartbeat::run_scheduler(state.clone()));
     tokio::spawn(scheduler::run(state.clone()));
 
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/branding", get(branding::handlers::get_branding))
-        .nest("/auth", auth::router::router())
-        .nest("/auth", auth_protected_router)
-        .nest("/agents", agents_router)
-        .nest("/agents", agents::router::agent_router())
-        .nest("/organizations", orgs_router)
-        .nest("/admin", admin_router)
-        .nest("/domain", domain_router)
-        .nest("/migration", migration_router)
-        .nest("/migration", migration::router::receive_router())
-        .nest("/nftables", nftables_router)
-        .with_state(state)
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("x-frame-options"),
-            HeaderValue::from_static("DENY"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("x-content-type-options"),
-            HeaderValue::from_static("nosniff"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("referrer-policy"),
-            HeaderValue::from_static("no-referrer"),
-        ));
+    let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     info!("listening on 0.0.0.0:8080");
     update::spawn_startup_health_guard();
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> impl IntoResponse {
-    StatusCode::OK
 }
 
 /// On first boot without any admin, record when the setup token window started.
@@ -283,31 +213,3 @@ fn generate_random_password() -> String {
     (0..24).map(|_| charset[rng.gen_range(0..charset.len())]).collect()
 }
 
-pub async fn bearer_auth(
-    State(state): State<AppState>,
-    req: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
-    let provided = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-
-    let expected = &*state.config.internal_token;
-    let a = provided.as_bytes();
-    let b = expected.as_bytes();
-
-    let ok: bool = if a.len() == b.len() {
-        a.ct_eq(b).into()
-    } else {
-        false
-    };
-
-    if ok {
-        next.run(req).await
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
-}

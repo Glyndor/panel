@@ -30,3 +30,41 @@ pub fn verify_dummy(password: &str) {
 pub fn zeroize_str(s: &mut String) {
     let _ = Zeroizing::new(std::mem::take(s));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_and_verify_correct() {
+        let h = hash("MyP@ssword123").expect("hash");
+        assert!(verify("MyP@ssword123", &h).expect("verify"), "correct password must verify");
+    }
+
+    #[test]
+    fn wrong_password_rejected() {
+        let h = hash("MyP@ssword123").expect("hash");
+        assert!(!verify("WrongP@ssword1", &h).expect("verify"), "wrong password must not verify");
+    }
+
+    #[test]
+    fn hashes_differ_for_same_input() {
+        // Different salts → different hashes
+        let h1 = hash("MyP@ssword123").expect("h1");
+        let h2 = hash("MyP@ssword123").expect("h2");
+        assert_ne!(h1, h2, "each hash must use a fresh salt");
+    }
+
+    #[test]
+    fn dummy_verify_does_not_panic() {
+        // verify_dummy must never panic regardless of input
+        verify_dummy("anything");
+        verify_dummy("");
+        verify_dummy(&"a".repeat(1000));
+    }
+
+    #[test]
+    fn invalid_hash_string_returns_err() {
+        assert!(verify("password", "not-a-valid-hash").is_err());
+    }
+}

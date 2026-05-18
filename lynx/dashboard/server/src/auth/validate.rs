@@ -64,3 +64,131 @@ pub fn email(s: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- username ---
+
+    #[test]
+    fn username_valid() {
+        assert!(username("alice").is_ok());
+        assert!(username("alice-bob").is_ok());
+        assert!(username("alice_bob").is_ok());
+        assert!(username("alice123").is_ok());
+        assert!(username("abc").is_ok());
+        assert!(username(&"a".repeat(32)).is_ok());
+    }
+
+    #[test]
+    fn username_too_short() {
+        assert!(username("ab").is_err());
+        assert!(username("").is_err());
+    }
+
+    #[test]
+    fn username_too_long() {
+        assert!(username(&"a".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn username_invalid_chars() {
+        assert!(username("Alice").is_err());       // uppercase
+        assert!(username("ali ce").is_err());      // space
+        assert!(username("ali@ce").is_err());      // @
+        assert!(username("ali.ce").is_err());      // dot
+    }
+
+    #[test]
+    fn username_bad_edge_chars() {
+        assert!(username("-alice").is_err());
+        assert!(username("alice-").is_err());
+        assert!(username("_alice").is_err());
+        assert!(username("alice_").is_err());
+    }
+
+    #[test]
+    fn username_reserved() {
+        for r in ["admin", "root", "system", "lynx", "support", "api", "null", "undefined"] {
+            assert!(username(r).is_err(), "{r} should be reserved");
+        }
+    }
+
+    // --- password ---
+
+    #[test]
+    fn password_valid() {
+        assert!(password("Abcdef1234!@").is_ok());
+        assert!(password("Hunter2#Correct").is_ok());
+    }
+
+    #[test]
+    fn password_too_short() {
+        assert!(password("Ab1!").is_err());
+        assert!(password("Ab1!defghijk").is_ok()); // exactly 12 → ok
+    }
+
+    #[test]
+    fn password_too_long() {
+        let p31 = "Aa1!".repeat(7) + "Aa1!Aa1"; // 31 chars
+        assert!(password(&p31).is_err());
+    }
+
+    #[test]
+    fn password_boundary_30() {
+        let p = "Aa1!".repeat(7) + "Aa"; // 30 chars
+        assert!(password(&p).is_ok());
+    }
+
+    #[test]
+    fn password_missing_uppercase() {
+        assert!(password("abcdef1234!@").is_err());
+    }
+
+    #[test]
+    fn password_missing_lowercase() {
+        assert!(password("ABCDEF1234!@").is_err());
+    }
+
+    #[test]
+    fn password_missing_digit() {
+        assert!(password("AbcdefGhij!@").is_err());
+    }
+
+    #[test]
+    fn password_missing_special() {
+        assert!(password("Abcdef123456").is_err());
+    }
+
+    // --- email ---
+
+    #[test]
+    fn email_valid() {
+        assert!(email("user@example.com").is_ok());
+        assert!(email("USER@EXAMPLE.COM").is_ok());
+        assert!(email("  user@example.com  ").is_ok()); // trimmed
+        assert!(email("a@b.c").is_ok());
+    }
+
+    #[test]
+    fn email_no_at() {
+        assert!(email("userexample.com").is_err());
+    }
+
+    #[test]
+    fn email_no_domain_dot() {
+        assert!(email("user@localhost").is_err());
+    }
+
+    #[test]
+    fn email_empty_local() {
+        assert!(email("@example.com").is_err());
+    }
+
+    #[test]
+    fn email_too_long() {
+        let long = "a".repeat(250) + "@x.co";
+        assert!(email(&long).is_err());
+    }
+}

@@ -65,14 +65,17 @@ pub async fn find_by_refresh_hash(db: &PgPool, hash: &str) -> Result<Option<Sess
     .context("find session by refresh hash")
 }
 
+/// Atomically swap `old_hash` → `new_hash` on the session row.
+/// Returns `Ok(true)` if the swap succeeded, `Ok(false)` if the token was
+/// already consumed by a concurrent request (0 rows affected).
 pub async fn rotate_refresh(
     db: &PgPool,
     session_id: Uuid,
     old_hash: &str,
     new_hash: &str,
     new_jti: Uuid,
-) -> Result<()> {
-    sqlx::query!(
+) -> Result<bool> {
+    let result = sqlx::query!(
         r#"
         UPDATE sessions
         SET refresh_token_hash = $1, last_used_at = NOW(), last_jti = $4
@@ -86,7 +89,8 @@ pub async fn rotate_refresh(
     .execute(db)
     .await
     .context("rotate refresh token")?;
-    Ok(())
+
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn delete_by_session_id(db: &PgPool, session_id: Uuid) -> Result<()> {

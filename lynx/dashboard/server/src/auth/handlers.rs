@@ -379,9 +379,15 @@ pub async fn refresh(
 
     let jti = Uuid::now_v7();
 
-    session::rotate_refresh(&state.db, record.id, &token_hash, &new_refresh_hash, jti)
+    let rotated = session::rotate_refresh(&state.db, record.id, &token_hash, &new_refresh_hash, jti)
         .await
         .map_err(anyhow::Error::from)?;
+
+    // 0 rows updated means another concurrent request already consumed this
+    // refresh token — the first one to rotate wins, the rest get 401.
+    if !rotated {
+        return Err(AppError::Unauthorized);
+    }
     let keys = build_jwt_keys(&state);
     let access_token = jwt::issue_access_token(
         &keys,
