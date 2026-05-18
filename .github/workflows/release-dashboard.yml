@@ -247,37 +247,33 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
-      - name: Stub dev-only modules for bun compile
+      - name: Copy static assets into standalone
         working-directory: lynx/dashboard/ui
         run: |
-          # Next.js conditionally requires dev modules that don't exist in production builds.
-          # Bun's static bundler can't resolve them — stub them so they bundle as empty objects.
-          # They are never called at runtime (NODE_ENV=production guard in Next.js code).
-          NEXT_SERVER=.next/standalone/node_modules/next/dist/server
-          mkdir -p "$NEXT_SERVER/dev" "$NEXT_SERVER/router-utils"
-          for f in \
-            "$NEXT_SERVER/dev/next-dev-server.js" \
-            "$NEXT_SERVER/router-utils/setup-dev-bundler.js"; do
-            [ -f "$f" ] || echo "module.exports = {};" > "$f"
-          done
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
 
       - name: Compile standalone binary
         working-directory: lynx/dashboard/ui
         run: |
+          # --packages=external + --compile-autoload-package-json: packages are resolved from the
+          # filesystem at runtime. The binary must be deployed alongside the standalone directory
+          # (node_modules/ and .next/server/ from the assets tarball).
           bun build --compile \
             --target ${{ matrix.bun-target }} \
             --define 'process.env.NODE_ENV="production"' \
+            --packages=external \
+            --compile-autoload-package-json \
             .next/standalone/server.js \
             --outfile "lynx-dashboard-frontend-linux-${{ matrix.arch }}"
 
       - name: Bundle static assets
         working-directory: lynx/dashboard/ui
         run: |
+          # Full standalone: node_modules/ + .next/ (server chunks + static + manifests) + public/
+          # Binary must be extracted into this same directory at deployment time.
           TARBALL="lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz"
-          tar -czf "$TARBALL" \
-            -C .next/standalone \
-            .next/static \
-            public
+          tar -czf "$TARBALL" -C .next/standalone .
           echo "assets tarball: $(du -sh "$TARBALL" | cut -f1)"
 
       - name: Sign frontend artifacts
