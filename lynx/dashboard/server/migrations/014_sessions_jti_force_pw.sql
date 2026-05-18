@@ -1,0 +1,3 @@
+ALTER TABLE sessions ADD COLUMN last_jti UUID;
+
+ALTER TABLE users ADD COLUMN force_password_change BOOLEAN NOT NULL DEFAULT FALSE;

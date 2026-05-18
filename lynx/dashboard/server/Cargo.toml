@@ -1,0 +1,58 @@
+[package]
+name = "lynx-dashboard-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "lynx-dashboard-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true }
+url = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# database
+sqlx = { workspace = true }
+
+# cache
+redis = { workspace = true }
+
+# auth
+argon2 = { workspace = true }
+josekit = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+
+# crypto primitives
+rand = { workspace = true }
+sha2 = { workspace = true }
+aes-gcm = { workspace = true }
+base64ct = { workspace = true }
+ed25519-dalek = { workspace = true }
+x25519-dalek = { workspace = true }
+rcgen = { workspace = true }
+x509-parser = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+
+# HTTP client (command relay to agents)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# types
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+axum-test = "20"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+futures-util = { workspace = true }

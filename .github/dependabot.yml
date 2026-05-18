@@ -1,6 +1,26 @@
 version: 2
 
 updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "ci"
+    open-pull-requests-limit: 10
+    target-branch: "develop"
+
+  - package-ecosystem: "cargo"
+    directory: "/lynx/translators/compose"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "translator/compose"
+    open-pull-requests-limit: 5
+    target-branch: "develop"
+
   - package-ecosystem: "bun"
     directory: "/lynx/dashboard/ui"
     schedule:
@@ -8,7 +28,7 @@ updates:
     labels:
       - "dependencies"
       - "dashboard"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     target-branch: "develop"
     groups:
       types:

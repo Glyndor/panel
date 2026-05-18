@@ -1,0 +1,55 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { BACKEND_URL, validateId } from "@/lib/api";
+
+async function token(): Promise<string> {
+	const jar = await cookies();
+	return jar.get("access_token")?.value ?? "";
+}
+
+export async function inviteMember(
+	orgId: string,
+	username: string,
+	role: string,
+): Promise<{ ok: boolean; error?: string }> {
+	try {
+		const oid = validateId(orgId);
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/members`, {
+			body: JSON.stringify({ role, username }),
+			headers: {
+				Authorization: `Bearer ${await token()}`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
+		});
+		if (!res.ok) {
+			const body = (await res.json()) as { error?: string; detail?: string };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
+		}
+		revalidatePath(`/[locale]/app/organizations/${orgId}`, "page");
+		return { ok: true };
+	} catch {
+		return { error: "network_error", ok: false };
+	}
+}
+
+export async function removeMember(orgId: string, userId: string): Promise<{ ok: boolean; error?: string }> {
+	try {
+		const oid = validateId(orgId);
+		const uid = validateId(userId);
+		const res = await fetch(`${BACKEND_URL}/organizations/${oid}/members/${uid}`, {
+			headers: { Authorization: `Bearer ${await token()}` },
+			method: "DELETE",
+		});
+		if (!res.ok) {
+			const body = (await res.json()) as { error?: string; detail?: string };
+			return { error: body.detail ?? body.error ?? "server_error", ok: false };
+		}
+		revalidatePath(`/[locale]/app/organizations/${orgId}`, "page");
+		return { ok: true };
+	} catch {
+		return { error: "network_error", ok: false };
+	}
+}

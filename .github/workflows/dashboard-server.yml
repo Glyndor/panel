@@ -1,0 +1,157 @@
+name: dashboard-server
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "lynx/dashboard/server/**"
+      - "lynx/Cargo.toml"
+      - "lynx/Cargo.lock"
+      - ".github/workflows/dashboard-server.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lynx/dashboard/server/**"
+      - "lynx/Cargo.toml"
+      - "lynx/Cargo.lock"
+      - ".github/workflows/dashboard-server.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: fmt
+        run: cargo fmt --package lynx-dashboard-server -- --check
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: audit
+        run: cargo audit --ignore RUSTSEC-2023-0071
+
+  check:
+    name: Check & Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lynx_ci
+          POSTGRES_PASSWORD: lynx_ci
+          POSTGRES_DB: lynx_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        run: sqlx migrate run --source dashboard/server/migrations
+
+      - name: check
+        run: cargo check --package lynx-dashboard-server
+
+      - name: clippy
+        run: cargo clippy --package lynx-dashboard-server -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lynx
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lynx_ci
+          POSTGRES_PASSWORD: lynx_ci
+          POSTGRES_DB: lynx_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: lynx
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        run: sqlx migrate run --source dashboard/server/migrations
+        env:
+          DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
+
+      - name: test
+        run: cargo test --package lynx-dashboard-server
+        env:
+          DATABASE_URL: postgres://lynx_ci:lynx_ci@localhost:5432/lynx_ci
+          REDIS_URL: redis://localhost:6379

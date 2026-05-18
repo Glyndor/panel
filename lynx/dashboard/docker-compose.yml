@@ -1,0 +1,152 @@
+services:
+  frontend:
+    container_name: lynx-dashboard-frontend
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+      target: runner
+    ports:
+      - "19443:3000"
+    environment:
+      - NODE_ENV=production
+      - BACKEND_URL=http://lynx-dashboard-backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-app
+
+  backend:
+    container_name: lynx-dashboard-backend
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL_FILE=/run/secrets/lynx-dashboard-database-url
+      - REDIS_URL_FILE=/run/secrets/lynx-dashboard-redis-url
+      - INTERNAL_API_TOKEN_FILE=/run/secrets/lynx-dashboard-api-token
+      - KEK_FILE=/run/secrets/lynx-dashboard-kek
+      - PEPPER_FILE=/run/secrets/lynx-dashboard-pepper
+      - JWT_SIGN_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-private
+      - JWT_SIGN_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-public
+      - JWT_ENC_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-private
+      - JWT_ENC_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-public
+      - CA_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-ca-private
+      - CA_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-ca-public
+      - SETUP_TOKEN_FILE=/run/secrets/lynx-dashboard-setup-token
+      - RUST_LOG=${RUST_LOG:-info}
+    secrets:
+      - lynx-dashboard-database-url
+      - lynx-dashboard-redis-url
+      - lynx-dashboard-api-token
+      - lynx-dashboard-kek
+      - lynx-dashboard-pepper
+      - lynx-dashboard-jwt-sign-private
+      - lynx-dashboard-jwt-sign-public
+      - lynx-dashboard-jwt-enc-private
+      - lynx-dashboard-jwt-enc-public
+      - lynx-dashboard-ca-private
+      - lynx-dashboard-ca-public
+      - lynx-dashboard-setup-token
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-db
+      - lynx-dashboard-cache
+      - lynx-dashboard-app
+
+  postgres:
+    container_name: lynx-dashboard-postgres
+    image: docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=lynx_dashboard
+      - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
+    secrets:
+      - lynx-dashboard-pg-root
+      - lynx-dashboard-pg-pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-db
+
+  redis:
+    container_name: lynx-dashboard-redis
+    image: docker.io/library/redis@sha256:02c2454cd3b6277389101b9d42d009f8518255930f8b06ae33624e324f8c6455
+    command:
+      - sh
+      - -c
+      - 'redis-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
+    secrets:
+      - lynx-dashboard-redis-pass
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'redis-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-cache
+
+volumes:
+  postgres_data:
+
+networks:
+  lynx-dashboard-db:
+    external: true
+  lynx-dashboard-cache:
+    external: true
+  lynx-dashboard-app:
+    external: true
+
+secrets:
+  lynx-dashboard-pg-root:
+    external: true
+  lynx-dashboard-pg-pass:
+    external: true
+  lynx-dashboard-redis-pass:
+    external: true
+  lynx-dashboard-database-url:
+    external: true
+  lynx-dashboard-redis-url:
+    external: true
+  lynx-dashboard-api-token:
+    external: true
+  lynx-dashboard-kek:
+    external: true
+  lynx-dashboard-pepper:
+    external: true
+  lynx-dashboard-jwt-sign-private:
+    external: true
+  lynx-dashboard-jwt-sign-public:
+    external: true
+  lynx-dashboard-jwt-enc-private:
+    external: true
+  lynx-dashboard-jwt-enc-public:
+    external: true
+  lynx-dashboard-ca-private:
+    external: true
+  lynx-dashboard-ca-public:
+    external: true
+  lynx-dashboard-setup-token:
+    external: true
