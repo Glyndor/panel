@@ -9,6 +9,7 @@ const FRONTEND_BINARY: &str = "/etc/lynx/frontend/lynx-dashboard-frontend";
 const FRONTEND_DIR: &str = "/etc/lynx/frontend";
 const FRONTEND_CONTAINER: &str = "lynx-dashboard-frontend";
 const PODMAN_SOCKET: &str = "/run/podman/podman.sock";
+pub const VERSION_FILE: &str = "/etc/lynx/bin/dashboard-version";
 const MAX_DOWNLOAD_BYTES: usize = 200 * 1024 * 1024;
 
 pub struct DashboardUpdateParams {
@@ -52,6 +53,9 @@ pub async fn perform_dashboard_update(p: DashboardUpdateParams) {
     .await;
 
     if result.is_ok() {
+        if let Err(e) = write_version_file(&p.version) {
+            tracing::warn!("could not write version file: {e}");
+        }
         tracing::info!(
             version = p.version,
             "dashboard update complete — exiting for Podman restart"
@@ -164,6 +168,12 @@ fn swap_backend_binary(binary: &[u8]) -> Result<()> {
     std::fs::rename(&tmp, &target).context("atomic rename backend binary")?;
 
     Ok(())
+}
+
+/// Write `version` to the on-disk version file so the scheduler can read it
+/// on the next startup and avoid re-triggering the same update.
+pub(crate) fn write_version_file(version: &str) -> Result<()> {
+    std::fs::write(VERSION_FILE, version).context("write version file")
 }
 
 fn extract_assets(data: &[u8], dest: &str) -> Result<()> {

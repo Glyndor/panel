@@ -253,6 +253,24 @@ jobs:
           cp -r .next/static .next/standalone/.next/static
           cp -r public .next/standalone/public
 
+      - name: Patch server.js for portable __dirname
+        working-directory: lynx/dashboard/ui
+        run: |
+          # bun --compile embeds the compile-time __dirname (CI path) into the binary.
+          # At runtime on the deployment server that path does not exist, causing chdir to fail.
+          # Fix: shadow __dirname with a version that falls back to the binary's own directory
+          # when the compile-time path is absent from disk.
+          node -e "
+          const fs = require('fs');
+          let content = fs.readFileSync('.next/standalone/server.js', 'utf8');
+          content = content.replace(
+            \"const path = require('path')\",
+            \"const path = require('path')\\nconst __dirname = require('fs').existsSync(__dirname) ? __dirname : path.dirname(process.execPath)\"
+          );
+          fs.writeFileSync('.next/standalone/server.js', content);
+          process.stdout.write('server.js patched: __dirname resolves to binary directory on deployment\\n');
+          "
+
       - name: Compile standalone binary
         working-directory: lynx/dashboard/ui
         run: |
