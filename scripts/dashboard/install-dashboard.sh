@@ -100,12 +100,12 @@ _ensure_uuid_gen() {
 _verify_sig() {
     local file="$1"
     local sig_file="$2"
-    python3 - "$file" "$sig_file" <<'PYEOF'
+    python3 - "$file" "$sig_file" "$RELEASE_VERIFY_KEY" <<'PYEOF'
 import base64, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 
-VERIFY_KEY_B64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+VERIFY_KEY_B64 = sys.argv[3]
 pub_bytes = base64.b64decode(VERIFY_KEY_B64)
 pub_key = Ed25519PublicKey.from_public_bytes(pub_bytes)
 
