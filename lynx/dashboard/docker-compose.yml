@@ -1,11 +1,31 @@
 services:
+  nginx:
+    container_name: lynx-dashboard-nginx
+    image: docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    ports:
+      - "19443:19443"
+    volumes:
+      - /etc/lynx/tls:/etc/lynx/tls:ro
+      - /etc/lynx/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/lynx/nginx/updating.html:/etc/lynx/nginx/updating.html:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep nginx > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-app
+
   frontend:
     container_name: lynx-dashboard-frontend
     image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     working_dir: /etc/lynx/frontend
-    command: ["/etc/lynx/frontend/lynx-dashboard-frontend"]
-    ports:
-      - "19443:3000"
+    command: ["/bin/sh", "-c", "apk add --no-cache libgcc libstdc++ && exec /etc/lynx/frontend/lynx-dashboard-frontend"]
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -90,7 +110,7 @@ services:
       - lynx-dashboard-pg-root
       - lynx-dashboard-pg-pass
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./server/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
