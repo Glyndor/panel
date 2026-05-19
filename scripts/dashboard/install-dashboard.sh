@@ -21,6 +21,8 @@ readonly GITHUB_REPO="Jaro-c/Lynx"
 readonly BIN_DIR="/etc/lynx/bin"
 readonly FRONTEND_DIR="/etc/lynx/frontend"
 readonly SECRETS_DIR="/etc/lynx/secrets"
+readonly TLS_DIR="/etc/lynx/tls"
+readonly NGINX_DIR="/etc/lynx/nginx"
 readonly DEPLOY_DIR="/opt/lynx/dashboard"
 
 # --- Helpers ------------------------------------------------------------------
@@ -93,6 +95,27 @@ _ensure_uuid_gen() {
         dnf)     dnf install -y util-linux ;;
         pacman)  pacman -S --noconfirm util-linux ;;
     esac
+}
+
+# --- TLS certificate ----------------------------------------------------------
+
+_gen_self_signed_cert() {
+    local ip="$1"
+    mkdir -p "$TLS_DIR"
+    chmod 700 "$TLS_DIR"
+
+    openssl req -x509 -nodes \
+        -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+        -days 90 \
+        -subj "/CN=${ip}" \
+        -addext "subjectAltName=IP:${ip},IP:127.0.0.1,DNS:localhost" \
+        -keyout "${TLS_DIR}/dashboard.key" \
+        -out    "${TLS_DIR}/dashboard.crt" \
+        2>/dev/null
+
+    chmod 600 "${TLS_DIR}/dashboard.key"
+    chmod 644 "${TLS_DIR}/dashboard.crt"
+    echo -e "${GREEN}Self-signed TLS certificate generated (90 days, SAN IP:${ip}).${RESET}"
 }
 
 # --- Signature verification ---------------------------------------------------
@@ -309,6 +332,16 @@ for r in releases:
     printf '%s' "$VERSION" > "${BIN_DIR}/dashboard-version"
     echo -e "${GREEN}Binaries installed.${RESET}"
 
+    # Generate TLS certificate and deploy nginx config
+    echo -e "${CYAN}Generating TLS certificate...${RESET}"
+    CERT_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [[ -z "$CERT_IP" ]] && CERT_IP=$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || echo "127.0.0.1")
+    _gen_self_signed_cert "$CERT_IP"
+    mkdir -p "$NGINX_DIR"
+    cp "${SCRIPT_DIR}/lynx/dashboard/nginx/default.conf" "${NGINX_DIR}/default.conf"
+    cp "${SCRIPT_DIR}/lynx/dashboard/nginx/updating.html" "${NGINX_DIR}/updating.html"
+    echo -e "${GREEN}nginx config deployed.${RESET}"
+
     # Generate and create all secrets
     echo -e "${CYAN}Generating secrets...${RESET}"
     _gen_secrets
@@ -338,10 +371,10 @@ for r in releases:
     _wait_healthy lynx-dashboard-redis    30
     _wait_healthy lynx-dashboard-backend  90
     _wait_healthy lynx-dashboard-frontend 60
+    _wait_healthy lynx-dashboard-nginx    30
 
-    # Detect public IP
-    VPS_IP=$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null \
-        || hostname -I | awk '{print $1}')
+    # Use the same IP that's in the TLS cert SAN
+    VPS_IP="$CERT_IP"
 
     # Done
     echo
