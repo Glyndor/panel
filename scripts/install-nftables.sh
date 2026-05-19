@@ -67,9 +67,14 @@ table inet filter {
         ct state established,related accept
         iif lo accept
         tcp dport $SSH_PORT accept
+        # Allow DNS from Podman bridge subnets (aardvark-dns)
+        ip  saddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } udp dport 53 accept
+        ip  saddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } tcp dport 53 accept
+        ip6 saddr fc00::/7 udp dport 53 accept
+        ip6 saddr fc00::/7 tcp dport 53 accept
     }
     chain forward {
-        type filter hook forward priority 0; policy drop;
+        type filter hook forward priority 0; policy accept;
     }
     chain output {
         type filter hook output priority 0; policy accept;

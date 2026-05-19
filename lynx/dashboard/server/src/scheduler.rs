@@ -85,7 +85,9 @@ async fn check_releases(state: &AppState) {
     }
 
     if let Some(ref ver) = latest_dashboard {
-        let current = env!("CARGO_PKG_VERSION");
+        let current = std::fs::read_to_string(crate::update::VERSION_FILE)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
         if ver.as_str() != current {
             tracing::info!(latest = %ver, current, "scheduler: dashboard update available");
             trigger_dashboard_update(state, ver).await;
