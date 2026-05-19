@@ -3,7 +3,7 @@ services:
     container_name: lynx-dashboard-frontend
     image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     working_dir: /etc/lynx/frontend
-    command: ["/etc/lynx/frontend/lynx-dashboard-frontend"]
+    command: ["/bin/sh", "-c", "apk add --no-cache libgcc libstdc++ && exec /etc/lynx/frontend/lynx-dashboard-frontend"]
     ports:
       - "19443:3000"
     environment:
@@ -90,7 +90,7 @@ services:
       - lynx-dashboard-pg-root
       - lynx-dashboard-pg-pass
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./server/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]

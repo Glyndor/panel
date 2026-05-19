@@ -10,7 +10,7 @@ GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
 
 \connect lynx_dashboard
 
-GRANT USAGE ON SCHEMA public TO lynx_dashboard_app;
+GRANT USAGE, CREATE ON SCHEMA public TO lynx_dashboard_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_dashboard_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
