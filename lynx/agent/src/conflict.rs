@@ -237,7 +237,10 @@ mod tests {
     #[test]
     fn docker_entry_has_process_set() {
         let docker = INCOMPATIBLE.iter().find(|e| e.name == "docker");
-        assert!(docker.is_some(), "docker entry missing from INCOMPATIBLE list");
+        assert!(
+            docker.is_some(),
+            "docker entry missing from INCOMPATIBLE list"
+        );
         assert_eq!(
             docker.unwrap().process,
             Some("dockerd"),
@@ -273,7 +276,11 @@ mod tests {
         let mut names: Vec<&str> = INCOMPATIBLE.iter().map(|e| e.name).collect();
         let original_len = names.len();
         names.dedup();
-        assert_eq!(names.len(), original_len, "duplicate names in INCOMPATIBLE list");
+        assert_eq!(
+            names.len(),
+            original_len,
+            "duplicate names in INCOMPATIBLE list"
+        );
     }
 
     // --- command_exists (pure boolean — tests with well-known commands) ---
@@ -286,7 +293,9 @@ mod tests {
 
     #[test]
     fn command_exists_returns_false_for_nonexistent_command() {
-        assert!(!command_exists("lynx_definitely_not_a_real_command_xyz_12345"));
+        assert!(!command_exists(
+            "lynx_definitely_not_a_real_command_xyz_12345"
+        ));
     }
 }
 

@@ -189,8 +189,14 @@ mod tests {
     #[test]
     fn parse_mem_usage_mib_slash_gib() {
         let (usage, limit) = parse_mem_usage("12.5MiB / 2GiB");
-        assert!((usage - 12.5).abs() < 0.01, "usage should be ~12.5 MB, got {usage}");
-        assert!((limit - 2048.0).abs() < 0.01, "limit should be ~2048 MB, got {limit}");
+        assert!(
+            (usage - 12.5).abs() < 0.01,
+            "usage should be ~12.5 MB, got {usage}"
+        );
+        assert!(
+            (limit - 2048.0).abs() < 0.01,
+            "limit should be ~2048 MB, got {limit}"
+        );
     }
 
     #[test]
@@ -203,14 +209,20 @@ mod tests {
     #[test]
     fn parse_mem_usage_kib_slash_mib() {
         let (usage, limit) = parse_mem_usage("512KiB / 512MiB");
-        assert!((usage - 0.5).abs() < 0.01, "512 KiB should be ~0.5 MB, got {usage}");
+        assert!(
+            (usage - 0.5).abs() < 0.01,
+            "512 KiB should be ~0.5 MB, got {usage}"
+        );
         assert!((limit - 512.0).abs() < 0.01);
     }
 
     #[test]
     fn parse_mem_usage_kb_slash_mb() {
         let (usage, limit) = parse_mem_usage("1024KB / 2048MB");
-        assert!((usage - 1.0).abs() < 0.01, "1024 KB should be 1 MB, got {usage}");
+        assert!(
+            (usage - 1.0).abs() < 0.01,
+            "1024 KB should be 1 MB, got {usage}"
+        );
         assert!((limit - 2048.0).abs() < 0.01);
     }
 

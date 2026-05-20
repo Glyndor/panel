@@ -179,8 +179,7 @@ mod tests {
             error: None,
             previous_hash: "abc123".to_string(),
             entry_hash: "def456".to_string(),
-            created_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
-                .unwrap_or_default(),
+            created_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap_or_default(),
         };
 
         // Verify serialization produces valid JSON and key fields are present.
