@@ -78,6 +78,11 @@ fn apply_current_ruleset(state: &AppState) -> std::result::Result<Value, AgentEr
     let rendered = nftables::apply(&ruleset)?;
     let checksum = nftables::current_checksum()?;
     state.set_nft_checksum(checksum);
+    state.set_nft_chain_checksums(
+        nftables::chain_checksum("lynx-base").ok(),
+        nftables::chain_checksum("lynx-global").ok(),
+        nftables::chain_checksum("lynx-local").ok(),
+    );
     state.set_nft_last_ruleset(rendered);
 
     Ok(json!({ "ok": true }))
@@ -101,6 +106,11 @@ pub fn handle_nftables_restore(
 
     let checksum = nftables::current_checksum()?;
     state.set_nft_checksum(checksum);
+    state.set_nft_chain_checksums(
+        nftables::chain_checksum("lynx-base").ok(),
+        nftables::chain_checksum("lynx-global").ok(),
+        nftables::chain_checksum("lynx-local").ok(),
+    );
 
     Ok(json!({ "ok": true, "action": "restored" }))
 }
