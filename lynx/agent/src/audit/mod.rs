@@ -35,6 +35,7 @@ impl AuditResult {
 /// Covers all explicitly written fields (excludes created_at which is DB-generated
 /// and can lose sub-millisecond precision on EXTRACT round-trips).
 /// Input: prev_hash || id || agent_id || org_id || user_id || command_type || result || error
+#[allow(clippy::too_many_arguments)]
 fn compute_entry_hash(
     prev_hash: &str,
     id: Uuid,
