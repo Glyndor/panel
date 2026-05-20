@@ -66,8 +66,8 @@ fn persist_ruleset(nft: &str) {
 }
 
 const EMERGENCY_RULESET: &str = r#"
+destroy table inet lynx-agent
 add table inet lynx-agent
-flush table inet lynx-agent
 table inet lynx-agent {
     chain lynx-base {
         type filter hook input priority 0; policy drop;
@@ -141,8 +141,8 @@ fn render_ruleset(r: &Ruleset) -> String {
 
     let mut out = format!(
         r#"
+destroy table inet {TABLE}
 add table inet {TABLE}
-flush table inet {TABLE}
 table inet {TABLE} {{
     # Immutable invariants — never editable from dashboard
     chain lynx-base {{
@@ -367,11 +367,11 @@ mod tests {
     }
 
     #[test]
-    fn render_has_flush_table_prefix() {
+    fn render_has_destroy_add_prefix() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("add table inet lynx-agent"), "flush prefix missing: add table");
-        assert!(out.contains("flush table inet lynx-agent"), "flush prefix missing: flush table");
+        assert!(out.contains("destroy table inet lynx-agent"), "idempotent prefix missing: destroy table");
+        assert!(out.contains("add table inet lynx-agent"), "idempotent prefix missing: add table");
     }
 
     #[test]
@@ -452,8 +452,8 @@ mod tests {
     }
 
     #[test]
-    fn emergency_ruleset_has_flush_prefix() {
-        assert!(EMERGENCY_RULESET.contains("flush table inet lynx-agent"));
+    fn emergency_ruleset_has_destroy_add_prefix() {
+        assert!(EMERGENCY_RULESET.contains("destroy table inet lynx-agent"));
         assert!(EMERGENCY_RULESET.contains("add table inet lynx-agent"));
     }
 }

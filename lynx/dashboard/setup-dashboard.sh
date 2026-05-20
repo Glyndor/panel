@@ -962,8 +962,8 @@ log_section "Configuring nftables"
 # overwrites this file on first startup — this is only the boot-window ruleset
 # that runs before lynx-agent.service has started.
 cat > /etc/nftables-lynx-agent.conf << 'EOF'
+destroy table inet lynx-agent
 add table inet lynx-agent
-flush table inet lynx-agent
 table inet lynx-agent {
     chain lynx-base {
         type filter hook input priority 0; policy drop;
