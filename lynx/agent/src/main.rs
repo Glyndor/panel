@@ -254,6 +254,39 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Container recovery: restart any deployments with desired=running that aren't up.
+    // Safety net for reboots — rootless Podman restart:always doesn't survive without this.
+    {
+        #[derive(sqlx::FromRow)]
+        struct DeploymentRow {
+            tenant_id: String,
+            project_id: String,
+            compose_path: String,
+        }
+        let rows: Vec<DeploymentRow> = sqlx::query_as(
+            "SELECT tenant_id, project_id, compose_path FROM container_deployments WHERE desired = 'running'"
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        for row in rows {
+            match podman::compose_up_no_recreate(&row.tenant_id, &row.compose_path) {
+                Ok(()) => tracing::info!(
+                    tenant_id = %row.tenant_id,
+                    project_id = %row.project_id,
+                    "containers recovered on startup"
+                ),
+                Err(e) => tracing::warn!(
+                    tenant_id = %row.tenant_id,
+                    project_id = %row.project_id,
+                    error = %e,
+                    "container startup recovery failed"
+                ),
+            }
+        }
+    }
+
     // Nonce cleanup: run at startup then every hour.
     {
         let db = state.db.clone();

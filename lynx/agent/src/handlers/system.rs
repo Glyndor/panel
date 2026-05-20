@@ -18,9 +18,9 @@ use tracing::{info, warn};
 use super::containers::require_str;
 use super::{
     containers::{
-        handle_container_deploy, handle_container_list, handle_container_remove,
-        handle_container_restart, handle_container_start, handle_container_stop,
-        handle_container_update, handle_tenant_ensure,
+        handle_container_deploy, handle_container_down, handle_container_list,
+        handle_container_remove, handle_container_restart, handle_container_start,
+        handle_container_stop, handle_container_update, handle_tenant_ensure,
     },
     nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
     nginx_cmd::{
@@ -173,7 +173,8 @@ async fn command_dispatch(
         "nftables.accept" => handle_nftables_accept(state, cmd),
         "container.list" => handle_container_list(cmd),
         "tenant.ensure" => handle_tenant_ensure(cmd),
-        "container.deploy" => handle_container_deploy(cmd),
+        "container.deploy" => handle_container_deploy(state, cmd).await,
+        "container.down" => handle_container_down(state, cmd).await,
         "container.start" => handle_container_start(cmd),
         "container.stop" => handle_container_stop(cmd),
         "container.remove" => handle_container_remove(cmd),
