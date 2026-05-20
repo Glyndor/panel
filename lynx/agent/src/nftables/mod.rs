@@ -128,15 +128,16 @@ fn render_ruleset(r: &Ruleset) -> String {
         ""
     };
 
-    // Forward rules for rootful Podman containers and WireGuard on dashboard VPS.
-    // Agents connect to the dashboard backend through the wg-lynx-dash interface;
-    // without these rules the FORWARD chain drops those packets.
-    // The Netavark 10.89.0.0/16 rule allows new connections to published ports after
-    // PREROUTING DNAT rewrites the destination from the host IP to the container IP.
-    // Without it, lynx-forward policy drop kills the DNAT'd packets before they reach
-    // the container even though Netavark's own table ip filter FORWARD allows them.
-    let dashboard_forward_rules = if r.dashboard_port.is_some() {
-        "\n        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)\n        ip daddr 10.89.0.0/16 ct state new accept\n\n        # Outbound traffic from dashboard containers (apk installs, GitHub, cert renewals, etc.)\n        iifname \"podman*\" accept\n\n        # Backend container traffic to/from WireGuard (dashboard <-> agents)\n        oifname \"wg-lynx-dash\" accept\n        iifname \"wg-lynx-dash\" accept\n"
+    // Netavark DNAT rewrites the destination from the host IP to the container IP
+    // (10.89.x.x) in PREROUTING. Without a forward rule, lynx-forward policy drop
+    // kills these packets before they reach the container. This applies to ALL agents:
+    // the agent's own PostgreSQL container is also published via DNAT.
+    let container_forward_rules = "\n        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)\n        ip daddr 10.89.0.0/16 ct state new accept\n\n        # Outbound traffic from Podman containers (package installs, GitHub, cert renewals, etc.)\n        iifname \"podman*\" accept\n";
+
+    // WireGuard forward rules — dashboard VPS only.
+    // Backend container needs to route through wg-lynx-dash to reach remote agents.
+    let dashboard_wg_forward_rules = if r.dashboard_port.is_some() {
+        "\n        # Backend container traffic to/from WireGuard (dashboard <-> agents)\n        oifname \"wg-lynx-dash\" accept\n        iifname \"wg-lynx-dash\" accept\n"
     } else {
         ""
     };
@@ -191,13 +192,15 @@ table inet {TABLE} {{
         type filter hook forward priority 0; policy drop;
 
         ct state established,related accept
-{dashboard_forward}
+{container_forward}
+{dashboard_wg_forward}
 "#,
         TABLE = TABLE,
         wg = r.wireguard_port,
         dashboard_port = dashboard_port_rule,
         dashboard_dns = dashboard_dns_rules,
-        dashboard_forward = dashboard_forward_rules,
+        container_forward = container_forward_rules,
+        dashboard_wg_forward = dashboard_wg_forward_rules,
         global = r.global_body,
         local = r.local_body,
     );
@@ -513,16 +516,28 @@ mod tests {
     }
 
     #[test]
-    fn render_dashboard_forward_rules_absent_when_none() {
+    fn render_dashboard_wg_forward_rules_absent_when_none() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
         assert!(
             !out.contains("wg-lynx-dash"),
             "WireGuard forward rules should not appear when dashboard_port is None"
         );
+    }
+
+    #[test]
+    fn render_container_forward_rules_always_present() {
+        // These rules are required on ALL agents (not just dashboard VPS) because
+        // the agent's own PostgreSQL container is published via Netavark DNAT.
+        let r = minimal_ruleset();
+        let out = render_ruleset(&r);
         assert!(
-            !out.contains("10.89.0.0/16"),
-            "Netavark forward rule should not appear when dashboard_port is None"
+            out.contains("ip daddr 10.89.0.0/16 ct state new accept"),
+            "Netavark forward rule must be present on all agents"
+        );
+        assert!(
+            out.contains("iifname \"podman*\" accept"),
+            "Podman outbound forward rule must be present on all agents"
         );
     }
 
