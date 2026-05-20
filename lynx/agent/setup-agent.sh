@@ -48,7 +48,7 @@ LYNX_WG_CONF="$LYNX_WG_DIR/lynx-wg.conf"   # source of truth (spec path)
 WG_DIR="/etc/wireguard"
 WG_CONF_LINK="$WG_DIR/wg-lynx-agent.conf"   # symlink for wg-quick compatibility
 WG_IFACE="wg-lynx-agent"
-AGENT_WG_IP="10.100.0.2"
+AGENT_WG_IP=""           # set from dashboard-assigned IP during onboarding prompt
 DASHBOARD_WG_IP="10.100.0.1"
 WG_SUBNET="10.100.0.0/24"
 WG_PORT=51820
@@ -395,18 +395,22 @@ unset _ntp_active
 log_section "Dashboard connection setup"
 
 echo ""
-echo -e "${YELLOW}You need the values shown at the end of the dashboard install.${RESET}"
+echo -e "${YELLOW}You need the values shown when you registered this VPS in the dashboard.${RESET}"
 echo ""
 
 read -rp "  Dashboard WireGuard endpoint (IP:PORT, e.g. 1.2.3.4:51820): " DASHBOARD_ENDPOINT
 read -rp "  Dashboard WireGuard public key: " DASHBOARD_PUBKEY
 read -rsp "  Preshared key (PSK): " PSK
 echo ""
+read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
+echo ""
 
-if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" ]]; then
-    log_error "All three values are required."
+if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" ]]; then
+    log_error "All four values are required."
     exit 1
 fi
+
+AGENT_WG_IP="$AGENT_WG_IP_INPUT"
 
 DASHBOARD_IP="${DASHBOARD_ENDPOINT%%:*}"
 DASHBOARD_WG_LISTEN="${DASHBOARD_ENDPOINT##*:}"
