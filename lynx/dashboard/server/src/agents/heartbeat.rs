@@ -10,6 +10,11 @@ use uuid::Uuid;
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
 pub async fn run_scheduler(state: AppState) {
+    // Wait one full interval before the first poll so agents can reconnect via WS
+    // after a backend restart — WS-connected agents skip the HTTP poll anyway, but
+    // the race between startup and reconnection would fire a spurious heartbeat_lost.
+    tokio::time::sleep(Duration::from_secs(HEARTBEAT_INTERVAL_SECS)).await;
+
     let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
