@@ -3,7 +3,8 @@ use std::net::IpAddr;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-const WG_IFACE: &str = "wg-lynx-dash";
+use crate::state::AppState;
+
 const SECRET_PREFIX: &str = "lynx-dashboard-wg-psk-";
 const SECRET_DIR: &str = "/run/secrets";
 
@@ -69,68 +70,104 @@ pub fn load_all_psks() -> std::collections::HashMap<Uuid, Zeroizing<String>> {
     map
 }
 
-/// Add an agent as a WireGuard peer using the provided PSK.
-pub fn add_peer(pubkey: &str, allowed_ip: IpAddr, psk: &str) -> Result<()> {
-    let allowed = format!("{allowed_ip}/32");
-
-    let status = std::process::Command::new("wg")
-        .args([
-            "set",
-            WG_IFACE,
-            "peer",
-            pubkey,
-            "preshared-key",
-            "/dev/stdin",
-            "allowed-ips",
-            &allowed,
-        ])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child.stdin.as_mut().unwrap().write_all(psk.as_bytes())?;
-            child.wait()
-        })
-        .context("wg set peer")?;
-
-    if !status.success() {
-        anyhow::bail!("wg set peer failed with status {status}");
-    }
-
-    Ok(())
+/// Fetch the local agent row (id + wg_ip + api_port) if one is registered.
+async fn local_agent_id(db: &sqlx::PgPool) -> Option<Uuid> {
+    sqlx::query_scalar!("SELECT id FROM agents WHERE is_local_agent = true LIMIT 1")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
 }
 
-/// Remove an agent's WireGuard peer.
-pub fn remove_peer(pubkey: &str) -> Result<()> {
-    let status = std::process::Command::new("wg")
-        .args(["set", WG_IFACE, "peer", pubkey, "remove"])
-        .status()
-        .context("wg set peer remove")?;
-
-    if !status.success() {
-        anyhow::bail!("wg peer remove failed with status {status}");
-    }
-
-    Ok(())
+/// Send a signed write command to the local agent via the WS hub.
+/// Returns the parsed JSON response body.
+async fn send_local_cmd_json(
+    state: &AppState,
+    agent_id: Uuid,
+    cmd: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let signed = crate::crypto::cmd::sign_command_system(&state.config, agent_id, "write", cmd)
+        .context("sign local agent command")?;
+    let signed_val = serde_json::to_value(&signed).context("serialize signed command")?;
+    crate::agents::ws_hub::push_command(state, agent_id, signed_val)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("local agent not connected via WS"))
 }
 
-/// Reconcile WireGuard kernel peers against the DB at startup.
-/// Any peer in the kernel that has no corresponding agent row in DB is removed.
-pub async fn reconcile_peers(db: &sqlx::PgPool) {
-    let kernel_peers = match list_kernel_peers() {
-        Ok(p) => p,
+/// Send a signed write command to the local agent (fire-and-forget, ignores response body).
+async fn send_local_cmd(state: &AppState, agent_id: Uuid, cmd: &serde_json::Value) -> Result<()> {
+    send_local_cmd_json(state, agent_id, cmd).await.map(|_| ())
+}
+
+/// Add an agent as a WireGuard peer. Delegates to the local agent via signed command.
+pub async fn add_peer(state: &AppState, pubkey: &str, allowed_ip: IpAddr, psk: &str) -> Result<()> {
+    let Some(local_id) = local_agent_id(&state.db).await else {
+        anyhow::bail!("no local agent registered — cannot add WireGuard peer");
+    };
+
+    send_local_cmd(
+        state,
+        local_id,
+        &serde_json::json!({
+            "type": "wg.management.add_peer",
+            "pubkey": pubkey,
+            "allowed_ip": allowed_ip.to_string(),
+            "psk": psk,
+        }),
+    )
+    .await
+}
+
+/// Remove an agent's WireGuard peer. Delegates to the local agent via signed command.
+pub async fn remove_peer(state: &AppState, pubkey: &str) -> Result<()> {
+    let Some(local_id) = local_agent_id(&state.db).await else {
+        anyhow::bail!("no local agent registered — cannot remove WireGuard peer");
+    };
+
+    send_local_cmd(
+        state,
+        local_id,
+        &serde_json::json!({
+            "type": "wg.management.remove_peer",
+            "pubkey": pubkey,
+        }),
+    )
+    .await
+}
+
+/// Reconcile WireGuard kernel peers against DB at startup via the local agent.
+/// Any peer in the kernel without a DB row is removed.
+pub async fn reconcile_peers(state: &AppState) {
+    let Some(local_id) = local_agent_id(&state.db).await else {
+        // No local agent yet — nothing to reconcile.
+        return;
+    };
+
+    let list_cmd = serde_json::json!({ "type": "wg.management.list_peers" });
+    let body = match send_local_cmd_json(state, local_id, &list_cmd).await {
+        Ok(v) => v,
         Err(e) => {
-            tracing::warn!("wg reconcile: failed to list kernel peers: {e}");
+            tracing::warn!("wg reconcile: list_peers failed: {e:#}");
             return;
         }
     };
+
+    let kernel_peers: Vec<String> = body
+        .get("peers")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     if kernel_peers.is_empty() {
         return;
     }
 
     let db_pubkeys: Vec<String> = match sqlx::query_scalar!("SELECT wg_pubkey FROM agents")
-        .fetch_all(db)
+        .fetch_all(&state.db)
         .await
     {
         Ok(rows) => rows,
@@ -143,7 +180,7 @@ pub async fn reconcile_peers(db: &sqlx::PgPool) {
     for pubkey in &kernel_peers {
         if !db_pubkeys.contains(pubkey) {
             tracing::warn!(?pubkey, "wg reconcile: removing orphan peer");
-            if let Err(e) = remove_peer(pubkey) {
+            if let Err(e) = remove_peer(state, pubkey).await {
                 tracing::warn!(?pubkey, "wg reconcile: remove_peer failed: {e}");
             }
         }
@@ -154,26 +191,6 @@ pub async fn reconcile_peers(db: &sqlx::PgPool) {
         db_known = db_pubkeys.len(),
         "wg reconcile: complete"
     );
-}
-
-fn list_kernel_peers() -> Result<Vec<String>> {
-    let out = std::process::Command::new("wg")
-        .args(["show", WG_IFACE, "peers"])
-        .output()
-        .context("wg show peers")?;
-
-    if !out.status.success() {
-        // Interface may not exist yet — treat as empty.
-        return Ok(vec![]);
-    }
-
-    let peers = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    Ok(peers)
 }
 
 /// Reserve the next free IP from the ip_pool table (SELECT FOR UPDATE, race-safe).

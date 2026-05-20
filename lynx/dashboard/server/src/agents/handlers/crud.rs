@@ -87,7 +87,7 @@ pub async fn register_agent(
         AppError::Internal(anyhow::anyhow!("invalid allocated WG IP {wg_ip:?}: {e}"))
     })?;
 
-    if let Err(e) = wg::add_peer(&req.wg_pubkey, wg_ip_addr, &psk) {
+    if let Err(e) = wg::add_peer(&state, &req.wg_pubkey, wg_ip_addr, &psk).await {
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
     }
 
@@ -154,7 +154,7 @@ pub async fn remove_agent(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if let Err(e) = wg::remove_peer(&agent.wg_pubkey) {
+    if let Err(e) = wg::remove_peer(&state, &agent.wg_pubkey).await {
         tracing::error!(agent_id = %id, error = %e, "failed to remove WG peer");
     }
 
