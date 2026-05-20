@@ -236,15 +236,27 @@ if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q
 fi
 
 if $_incompatible_found; then
-    # Flush any residual kernel rules left behind by Docker / iptables
-    if command -v iptables-legacy &>/dev/null; then
-        iptables-legacy -F              2>/dev/null || true
-        iptables-legacy -X              2>/dev/null || true
-        iptables-legacy -t nat    -F    2>/dev/null || true
-        iptables-legacy -t nat    -X    2>/dev/null || true
-        iptables-legacy -t mangle -F    2>/dev/null || true
-        iptables-legacy -t mangle -X    2>/dev/null || true
-    fi
+    # Flush residual kernel rules left behind by Docker / ufw / iptables.
+    # On Ubuntu 24.04+, 'iptables' is iptables-nft and flushes nftables ip/ip6
+    # filter tables (the ones ufw and Docker create). Also flush iptables-legacy
+    # if present (older distros or explicitly installed).
+    for _ipt in iptables ip6tables iptables-legacy ip6tables-legacy; do
+        if command -v "$_ipt" &>/dev/null; then
+            "$_ipt" -P INPUT  ACCEPT 2>/dev/null || true
+            "$_ipt" -P FORWARD ACCEPT 2>/dev/null || true
+            "$_ipt" -P OUTPUT ACCEPT 2>/dev/null || true
+            "$_ipt" -F              2>/dev/null || true
+            "$_ipt" -X              2>/dev/null || true
+            "$_ipt" -t nat    -F    2>/dev/null || true
+            "$_ipt" -t nat    -X    2>/dev/null || true
+            "$_ipt" -t mangle -F    2>/dev/null || true
+            "$_ipt" -t mangle -X    2>/dev/null || true
+        fi
+    done
+    # Also nuke any lingering nftables filter tables (ufw/Docker on systems where
+    # iptables-nft maps to nft tables named 'filter').
+    nft delete table ip  filter 2>/dev/null || true
+    nft delete table ip6 filter 2>/dev/null || true
     log_ok "Incompatible software removed — residual firewall rules cleared"
 else
     log_ok "No incompatible software found"
@@ -332,6 +344,19 @@ fi
 
 log_section "Checking system dependencies"
 
+# Wait up to 60s for any running apt/dpkg process to finish, then clear stale locks.
+_wait_apt_lock() {
+    local _deadline=$(( $(date +%s) + 60 ))
+    while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null; do
+        if [[ $(date +%s) -ge $_deadline ]]; then
+            log_warn "apt lock held for 60s — force-clearing stale lock files"
+            rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
+            break
+        fi
+        sleep 2
+    done
+}
+
 _apt_updated=false
 _apt_ensure() {
     local cmd="$1" pkg="$2"
@@ -340,6 +365,7 @@ _apt_ensure() {
         return
     fi
     log_info "Installing $pkg..."
+    _wait_apt_lock
     if ! $_apt_updated; then
         # Enable universe repo (needed for podman on Ubuntu)
         if command -v add-apt-repository &>/dev/null; then
