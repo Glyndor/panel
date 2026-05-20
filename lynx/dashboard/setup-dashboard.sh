@@ -399,6 +399,10 @@ _apt_ensure wg             wireguard-tools
 _apt_ensure curl           curl
 _apt_ensure python3        python3
 _apt_ensure pip3           python3-pip
+# netavark 1.x uses the iptables firewall driver for bridge networks.
+# On Ubuntu/Debian, the 'iptables' package installs the nft-compat shim —
+# not legacy iptables — so it passes Lynx's incompatibility check.
+_apt_ensure iptables       iptables
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 

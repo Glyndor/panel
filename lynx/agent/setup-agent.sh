@@ -323,13 +323,17 @@ _require_cmd() {
     log_ok "$1 found"
 }
 
-_apt_ensure podman  podman
-_apt_ensure openssl openssl
-_apt_ensure nft     nftables
-_apt_ensure wg      wireguard-tools
-_apt_ensure curl    curl
-_apt_ensure python3 python3
-_apt_ensure pip3    python3-pip
+_apt_ensure podman   podman
+_apt_ensure openssl  openssl
+_apt_ensure nft      nftables
+_apt_ensure wg       wireguard-tools
+_apt_ensure curl     curl
+_apt_ensure python3  python3
+_apt_ensure pip3     python3-pip
+# netavark 1.x uses the iptables firewall driver for bridge networks.
+# On Ubuntu/Debian, the 'iptables' package installs the nft-compat shim —
+# not legacy iptables — so it passes Lynx's incompatibility check.
+_apt_ensure iptables iptables
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 
@@ -825,7 +829,7 @@ mkdir -p "$LYNX_WG_DIR"
 cat > "$LYNX_WG_CONF" << EOF
 [Interface]
 PrivateKey = ${AGENT_PRIV}
-Address = ${AGENT_WG_IP}/24
+Address = ${AGENT_WG_IP}/32
 
 ${WG_PEER_BLOCK}
 EOF
