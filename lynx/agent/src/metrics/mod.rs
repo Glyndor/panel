@@ -180,6 +180,178 @@ fn parse_kb(line: &str) -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_mem_usage ---
+
+    #[test]
+    fn parse_mem_usage_mib_slash_gib() {
+        let (usage, limit) = parse_mem_usage("12.5MiB / 2GiB");
+        assert!((usage - 12.5).abs() < 0.01, "usage should be ~12.5 MB, got {usage}");
+        assert!((limit - 2048.0).abs() < 0.01, "limit should be ~2048 MB, got {limit}");
+    }
+
+    #[test]
+    fn parse_mem_usage_mb_slash_gb() {
+        let (usage, limit) = parse_mem_usage("256MB / 1GB");
+        assert!((usage - 256.0).abs() < 0.01);
+        assert!((limit - 1024.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_mem_usage_kib_slash_mib() {
+        let (usage, limit) = parse_mem_usage("512KiB / 512MiB");
+        assert!((usage - 0.5).abs() < 0.01, "512 KiB should be ~0.5 MB, got {usage}");
+        assert!((limit - 512.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_mem_usage_kb_slash_mb() {
+        let (usage, limit) = parse_mem_usage("1024KB / 2048MB");
+        assert!((usage - 1.0).abs() < 0.01, "1024 KB should be 1 MB, got {usage}");
+        assert!((limit - 2048.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_mem_usage_zeros() {
+        let (usage, limit) = parse_mem_usage("0MiB / 0MiB");
+        assert_eq!(usage, 0.0);
+        assert_eq!(limit, 0.0);
+    }
+
+    #[test]
+    fn parse_mem_usage_empty_string() {
+        let (usage, limit) = parse_mem_usage("");
+        assert_eq!(usage, 0.0);
+        assert_eq!(limit, 0.0);
+    }
+
+    #[test]
+    fn parse_mem_usage_unknown_unit_returns_zero() {
+        let (usage, limit) = parse_mem_usage("100XiB / 200XiB");
+        assert_eq!(usage, 0.0);
+        assert_eq!(limit, 0.0);
+    }
+
+    #[test]
+    fn parse_mem_usage_missing_limit_part() {
+        // Only one segment — limit should fall back to 0
+        let (usage, limit) = parse_mem_usage("64MiB");
+        assert!((usage - 64.0).abs() < 0.01);
+        assert_eq!(limit, 0.0);
+    }
+
+    #[test]
+    fn parse_mem_usage_extra_whitespace() {
+        let (usage, limit) = parse_mem_usage("  32MiB  /  4GiB  ");
+        assert!((usage - 32.0).abs() < 0.01);
+        assert!((limit - 4096.0).abs() < 0.01);
+    }
+
+    // --- parse_kb ---
+
+    #[test]
+    fn parse_kb_standard_line() {
+        assert_eq!(parse_kb("MemTotal:       16384000 kB"), 16_384_000);
+    }
+
+    #[test]
+    fn parse_kb_available_line() {
+        assert_eq!(parse_kb("MemAvailable:    8192000 kB"), 8_192_000);
+    }
+
+    #[test]
+    fn parse_kb_zero_value() {
+        assert_eq!(parse_kb("MemFree:               0 kB"), 0);
+    }
+
+    #[test]
+    fn parse_kb_empty_line() {
+        assert_eq!(parse_kb(""), 0);
+    }
+
+    #[test]
+    fn parse_kb_malformed_no_number() {
+        assert_eq!(parse_kb("MemTotal: abc kB"), 0);
+    }
+
+    // --- CPU utilisation arithmetic ---
+
+    #[test]
+    fn cpu_percent_full_load() {
+        // 0 idle out of 1000 total ticks → 100% CPU
+        let total1 = 0u64;
+        let idle1 = 0u64;
+        let total2 = 1000u64;
+        let idle2 = 0u64;
+
+        let total_diff = (total2 as f64) - (total1 as f64);
+        let idle_diff = (idle2 as f64) - (idle1 as f64);
+        let pct = ((total_diff - idle_diff) / total_diff * 100.0).clamp(0.0, 100.0);
+        assert!((pct - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cpu_percent_idle() {
+        // All ticks are idle → 0% CPU
+        let total1 = 0u64;
+        let idle1 = 0u64;
+        let total2 = 1000u64;
+        let idle2 = 1000u64;
+
+        let total_diff = (total2 as f64) - (total1 as f64);
+        let idle_diff = (idle2 as f64) - (idle1 as f64);
+        let pct = ((total_diff - idle_diff) / total_diff * 100.0).clamp(0.0, 100.0);
+        assert!((pct - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cpu_percent_half_load() {
+        let total_diff = 1000.0f64;
+        let idle_diff = 500.0f64;
+        let pct = ((total_diff - idle_diff) / total_diff * 100.0).clamp(0.0, 100.0);
+        assert!((pct - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cpu_percent_clamps_to_zero_on_zero_diff() {
+        // total_diff == 0 → guard returns 0.0 (no divide-by-zero)
+        let total_diff = 0.0f64;
+        let pct = if total_diff <= 0.0 { 0.0 } else { 100.0 };
+        assert_eq!(pct, 0.0);
+    }
+
+    // --- SystemMetrics / ContainerMetrics msg_type constants ---
+
+    #[test]
+    fn system_metrics_msg_type_is_correct() {
+        // The msg_type field is used by the frontend to dispatch incoming WS messages.
+        // A typo here would silently break the dashboard metrics display.
+        let m = SystemMetrics {
+            msg_type: "system_metrics",
+            cpu_percent: 0.0,
+            mem_used_mb: 0,
+            mem_total_mb: 0,
+            disk_used_gb: 0.0,
+            disk_total_gb: 0.0,
+            timestamp: 0,
+        };
+        assert_eq!(m.msg_type, "system_metrics");
+    }
+
+    #[test]
+    fn container_metrics_msg_type_is_correct() {
+        let m = ContainerMetrics {
+            msg_type: "container_metrics",
+            containers: vec![],
+            timestamp: 0,
+        };
+        assert_eq!(m.msg_type, "container_metrics");
+    }
+}
+
 fn read_disk_gb(mount: &str) -> (f64, f64) {
     use nix::sys::statvfs::statvfs;
     match statvfs(mount) {

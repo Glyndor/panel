@@ -269,7 +269,7 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_info "Starting frontend container..."
 if ! podman start lynx-dashboard-frontend 2>/dev/null; then
-    podman compose -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
+    podman-compose -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
         log_error "Failed to start frontend container"
         exit 1
     }

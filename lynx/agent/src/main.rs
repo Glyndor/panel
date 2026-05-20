@@ -225,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
 
             let ruleset = nftables::Ruleset {
                 wireguard_port: wg_port,
+                dashboard_port: state.config.dashboard_port,
                 org_networks: vec![],
                 global_body: state.nft_global_body(),
                 local_body: state.nft_local_body(),

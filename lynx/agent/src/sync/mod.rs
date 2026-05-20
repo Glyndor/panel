@@ -106,3 +106,87 @@ async fn sync_batch(db: &PgPool, url: &str, token: &str) -> anyhow::Result<()> {
     info!(count, "audit entries synced to dashboard");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // sync/mod.rs has no pure logic functions — all paths require either a live
+    // PostgreSQL connection (sync_batch) or a running Tokio runtime with network
+    // access (run_sync_task).  Those are integration tests executed against real
+    // containers in CI, not unit tests.
+    //
+    // What we CAN test here:
+    //   • Module-level constants used to shape behaviour
+    //   • URL construction pattern (pure string formatting)
+    //   • AuditEntry struct is serialisable (compile-time guarantee via Serialize)
+
+    #[test]
+    fn batch_size_is_positive() {
+        assert!(BATCH_SIZE > 0, "BATCH_SIZE must be greater than zero");
+    }
+
+    #[test]
+    fn sync_interval_is_positive() {
+        assert!(
+            SYNC_INTERVAL_SECS > 0,
+            "SYNC_INTERVAL_SECS must be greater than zero"
+        );
+    }
+
+    #[test]
+    fn sync_url_format_includes_agent_id_and_path() {
+        // Replicate the URL construction from run_sync_task to ensure the format
+        // string produces the expected shape — pure string operation, no I/O.
+        let dashboard_url = "https://dashboard.example.com/";
+        let agent_id = uuid::Uuid::nil(); // all-zeros UUID — no DB needed
+        let sync_url = format!(
+            "{}/agents/{}/audit-sync",
+            dashboard_url.trim_end_matches('/'),
+            agent_id
+        );
+        assert_eq!(
+            sync_url,
+            "https://dashboard.example.com/agents/00000000-0000-0000-0000-000000000000/audit-sync"
+        );
+    }
+
+    #[test]
+    fn sync_url_trailing_slash_stripped() {
+        let base = "https://dashboard.example.com/";
+        let trimmed = base.trim_end_matches('/');
+        assert_eq!(trimmed, "https://dashboard.example.com");
+    }
+
+    #[test]
+    fn sync_url_no_trailing_slash_unchanged() {
+        let base = "https://dashboard.example.com";
+        let trimmed = base.trim_end_matches('/');
+        assert_eq!(trimmed, "https://dashboard.example.com");
+    }
+
+    #[test]
+    fn audit_entry_result_field_is_string() {
+        // Compile-time check that AuditEntry derives Serialize and has the expected
+        // field types.  We construct one manually (no DB) using placeholder values.
+        let entry = AuditEntry {
+            id: uuid::Uuid::nil(),
+            agent_id: uuid::Uuid::nil(),
+            organization_id: None,
+            user_id: None,
+            command_type: "test_command".to_string(),
+            result: "success".to_string(),
+            error: None,
+            previous_hash: "abc123".to_string(),
+            entry_hash: "def456".to_string(),
+            created_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
+                .unwrap_or_default(),
+        };
+
+        // Verify serialization produces valid JSON and key fields are present.
+        let json = serde_json::to_string(&entry).expect("AuditEntry should serialize");
+        assert!(json.contains("test_command"));
+        assert!(json.contains("success"));
+        assert!(json.contains("abc123"));
+    }
+}

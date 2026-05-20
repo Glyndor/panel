@@ -21,6 +21,8 @@ pub struct Config {
     pub tls_key_der: Option<Zeroizing<Vec<u8>>>,
     /// X.509 CA certificate DER — used to verify dashboard client certs.
     pub tls_ca_cert_der: Option<Vec<u8>>,
+    /// Dashboard panel port to open in nftables (Some(19443) on dashboard VPS, None on remote agents).
+    pub dashboard_port: Option<u16>,
 }
 
 impl Config {
@@ -45,6 +47,10 @@ impl Config {
         let tls_key_der = load_der_file_zeroize_opt("TLS_KEY_DER_FILE");
         let tls_ca_cert_der = load_der_file_opt("TLS_CA_CERT_DER_FILE");
 
+        let dashboard_port = std::env::var("DASHBOARD_PORT")
+            .ok()
+            .and_then(|s| s.parse::<u16>().ok());
+
         Ok(Config {
             database_url,
             agent_id,
@@ -57,6 +63,7 @@ impl Config {
             tls_cert_der,
             tls_key_der,
             tls_ca_cert_der,
+            dashboard_port,
         })
     }
 }

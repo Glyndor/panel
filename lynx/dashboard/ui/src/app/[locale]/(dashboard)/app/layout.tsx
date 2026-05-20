@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { Sidebar } from "@/components/(dashboard)/app/Sidebar";
+import { Sidebar } from "@/components/(dashboard)/Sidebar";
 import { BACKEND_URL } from "@/lib/api";
 
 interface Branding {
