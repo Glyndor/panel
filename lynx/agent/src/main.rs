@@ -181,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
         lockdown: lockdown.clone(),
         nft_checksum: Arc::new(std::sync::Mutex::new(None)),
+        nft_chain_checksums: Arc::new(std::sync::Mutex::new([None, None, None])),
         nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
         nft_global_body: Arc::new(std::sync::Mutex::new(String::new())),
         nft_local_body: Arc::new(std::sync::Mutex::new(String::new())),
@@ -238,6 +239,11 @@ async fn main() -> anyhow::Result<()> {
                     if let Ok(checksum) = nftables::current_checksum() {
                         state.set_nft_checksum(checksum);
                     }
+                    state.set_nft_chain_checksums(
+                        nftables::chain_checksum("lynx-base").ok(),
+                        nftables::chain_checksum("lynx-global").ok(),
+                        nftables::chain_checksum("lynx-local").ok(),
+                    );
                     state.set_nft_last_ruleset(rendered);
                     tracing::info!("nftables ruleset re-applied from DB on startup");
                 }
