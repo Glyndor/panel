@@ -756,6 +756,21 @@ for i in $(seq 1 40); do
     sleep 3
 done
 
+# Resync PostgreSQL app user password to match the Podman secret.
+# The backend may run a 90-day scheduled rotation on first startup and partially
+# update the PostgreSQL password without updating the Podman secret (if the podman
+# binary is unavailable inside the container). This resync ensures both sides agree.
+log_info "Synchronizing PostgreSQL app user password..."
+_PG_PASS_SYNC=$(podman secret inspect lynx-dashboard-pg-pass --showsecret --format '{{.SecretData}}' 2>/dev/null)
+if [[ -n "$_PG_PASS_SYNC" ]]; then
+    printf "ALTER USER lynx_dashboard_app PASSWORD '%s';\n" "$_PG_PASS_SYNC" \
+        | podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard \
+        >/dev/null 2>&1 \
+        && log_ok "PostgreSQL app user password synchronized" \
+        || log_warn "Could not sync PostgreSQL password (non-critical — backend may reconnect)"
+fi
+unset _PG_PASS_SYNC
+
 # 4. Frontend
 log_info "Starting frontend..."
 podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend
@@ -837,8 +852,15 @@ log_ok "Certificate rotation timer enabled (every 80 days)"
 
 log_section "Configuring nginx TLS reverse proxy"
 
-# nginx config: TLS termination on 19443, proxy to frontend
-cat > "$NGINX_DIR/default.conf" << 'EOF'
+# nginx config: TLS termination on 19443, proxy to frontend.
+# The resolver directive points at Podman's embedded DNS (the lynx-dashboard-app
+# network gateway, always the .1 of whichever subnet Netavark assigns).  Using a
+# variable for proxy_pass forces nginx to re-resolve the "frontend" hostname on
+# every request so it picks up the new container IP after an auto-update restart.
+NGINX_RESOLVER=$(podman network inspect lynx-dashboard-app \
+    --format '{{range .Subnets}}{{.Gateway}}{{end}}' 2>/dev/null \
+    || echo "10.89.0.1")
+cat > "$NGINX_DIR/default.conf" << NGINXEOF
 server {
     listen 19443 ssl;
     listen [::]:19443 ssl;
@@ -848,16 +870,20 @@ server {
     ssl_protocols       TLSv1.3;
     ssl_prefer_server_ciphers off;
 
+    # Re-resolve the frontend hostname after each update-triggered restart.
+    resolver ${NGINX_RESOLVER} valid=5s ipv6=off;
+
     location / {
-        proxy_pass         http://frontend:3000;
+        set \$upstream http://frontend:3000;
+        proxy_pass         \$upstream;
         proxy_http_version 1.1;
-        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Upgrade \$http_upgrade;
         proxy_set_header   Connection 'upgrade';
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Real-IP $remote_addr;
-        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto https;
-        proxy_cache_bypass $http_upgrade;
+        proxy_cache_bypass \$http_upgrade;
         proxy_read_timeout 120s;
     }
 
@@ -866,7 +892,7 @@ server {
         root /etc/lynx/nginx;
     }
 }
-EOF
+NGINXEOF
 
 # Maintenance page served by nginx while frontend is being updated
 cat > "$NGINX_DIR/updating.html" << 'EOF'
