@@ -747,7 +747,7 @@ User=root
 Group=root
 EnvironmentFile=${AGENT_CONF}
 ExecStart=${BINARY_PATH}
-Restart=on-failure
+Restart=always
 RestartSec=5s
 TimeoutStopSec=30s
 
