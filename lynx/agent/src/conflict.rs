@@ -80,6 +80,15 @@ async fn check_and_remove(state: &AppState) {
 }
 
 fn is_present(sw: &IncompatibleSoftware) -> bool {
+    // iptables is special: the `iptables` package is present on Ubuntu/Debian as the
+    // nftables compatibility shim (iptables-nft), which is allowed. Only flag when the
+    // binary self-identifies as the legacy backend via "(legacy)" in --version output.
+    // This check must come first — the generic package check below would return true for
+    // any installed `iptables` package including the harmless nft compat layer.
+    if sw.name == "iptables" {
+        return is_legacy_iptables();
+    }
+
     // Check if the process is running.
     if let Some(proc_name) = sw.process {
         let running = Command::new("pgrep")
@@ -112,12 +121,6 @@ fn is_present(sw: &IncompatibleSoftware) -> bool {
         if installed_rpm {
             return true;
         }
-    }
-
-    // Special case: iptables — only flag if the direct (non-nft compat) iptables binary
-    // is present and pointing to a non-nftables backend.
-    if sw.name == "iptables" {
-        return is_legacy_iptables();
     }
 
     false

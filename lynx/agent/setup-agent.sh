@@ -743,28 +743,21 @@ Requires=network.target lynx-agent-postgres.service
 
 [Service]
 Type=simple
-User=${LYNX_AGENT_USER}
-Group=${LYNX_AGENT_USER}
+User=root
+Group=root
 EnvironmentFile=${AGENT_CONF}
 ExecStart=${BINARY_PATH}
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 
-# Capabilities required for nftables, Podman tenant management, VPS reboot
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SYS_BOOT
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SYS_BOOT
-
 # Systemd credentials (tmpfs — never touches disk)
 LoadCredential=database-url:/etc/lynx/credentials/database-url
 LoadCredential=internal-token:/etc/lynx/credentials/internal-token
 
-# Security hardening
-NoNewPrivileges=no
-ProtectSystem=strict
-ProtectHome=yes
+# Minimal hardening — agent is a privileged system daemon (package management,
+# nftables, system user creation, binary self-update all require root).
 PrivateTmp=yes
-ReadWritePaths=/run/containers /var/lib/containers /home /etc/lynx/bin
 
 [Install]
 WantedBy=multi-user.target
