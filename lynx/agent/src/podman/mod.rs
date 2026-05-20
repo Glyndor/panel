@@ -137,7 +137,8 @@ pub struct DeployOptions<'a> {
 }
 
 /// Write compose file to stable project dir, then run `podman compose up -d`.
-pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
+/// Returns the compose.yml path so the caller can persist it for startup recovery.
+pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<String> {
     let project_dir = project_dir(opts.tenant_id, opts.project_id);
     std::fs::create_dir_all(&project_dir)
         .with_context(|| format!("create project dir {project_dir}"))?;
@@ -162,11 +163,29 @@ pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+    Ok(compose_path)
+}
+
+/// Start containers for an existing compose project without recreating running ones.
+/// Used on agent startup to recover containers that should be running after a reboot.
+pub fn compose_up_no_recreate(tenant_id: &str, compose_path: &str) -> Result<()> {
+    if !std::path::Path::new(compose_path).exists() {
+        anyhow::bail!("compose file not found: {compose_path}");
+    }
+    let out = run_as_tenant(
+        tenant_id,
+        &["compose", "-f", compose_path, "up", "-d", "--no-recreate"],
+    )?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "podman compose up --no-recreate failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
     Ok(())
 }
 
 /// Tear down a project's compose stack.
-#[allow(dead_code)]
 pub fn compose_down(tenant_id: &str, project_id: &str) -> Result<()> {
     let compose_path = format!("{}/compose.yml", project_dir(tenant_id, project_id));
     if !std::path::Path::new(&compose_path).exists() {
