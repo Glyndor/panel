@@ -187,9 +187,10 @@ fn list_kernel_peers() -> Result<Vec<String>> {
     Ok(peers)
 }
 
-/// Allocate the next free IP from the ip_pool table (SELECT FOR UPDATE, race-safe).
-/// Returns the allocated IP string (e.g. "10.100.0.2") without the prefix length.
-pub async fn allocate_ip(db: &sqlx::PgPool, agent_id: uuid::Uuid) -> Result<String> {
+/// Reserve the next free IP from the ip_pool table (SELECT FOR UPDATE, race-safe).
+/// Returns the IP string (e.g. "10.100.0.2") with agent_id still NULL.
+/// Call `claim_ip` after the agent row is inserted to satisfy the FK constraint.
+pub async fn reserve_ip(db: &sqlx::PgPool) -> Result<String> {
     let mut tx = db.begin().await.context("begin ip_pool transaction")?;
 
     let row = sqlx::query!(
@@ -201,18 +202,22 @@ pub async fn allocate_ip(db: &sqlx::PgPool, agent_id: uuid::Uuid) -> Result<Stri
     .ok_or_else(|| anyhow::anyhow!("WireGuard IP pool exhausted"))?;
 
     let ip = row.ip.unwrap_or_default();
+    tx.commit().await.context("commit reserve_ip transaction")?;
+    Ok(ip)
+}
 
+/// Claim a reserved IP for an agent that already exists in the agents table.
+/// Must be called after the agent row is inserted (FK agents.id must exist).
+pub async fn claim_ip(db: &sqlx::PgPool, ip: &str, agent_id: uuid::Uuid) -> Result<()> {
     sqlx::query!(
-        "UPDATE ip_pool SET agent_id = $1, updated_at = NOW() WHERE ip::text = $2",
+        "UPDATE ip_pool SET agent_id = $1, updated_at = NOW() WHERE ip::text = $2 AND agent_id IS NULL",
         agent_id,
         ip,
     )
-    .execute(&mut *tx)
+    .execute(db)
     .await
     .context("claim ip in pool")?;
-
-    tx.commit().await.context("commit ip_pool transaction")?;
-    Ok(ip)
+    Ok(())
 }
 
 /// Release an agent's IP back to the pool.

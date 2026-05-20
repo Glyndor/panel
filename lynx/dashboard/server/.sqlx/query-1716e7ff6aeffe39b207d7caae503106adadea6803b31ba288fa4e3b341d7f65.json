@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username, email_hash, email_encrypted, password_hash, dek_encrypted)\n           VALUES ($1, 'testadmin', $2, $3, $4, $5)\n           ON CONFLICT (username) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1716e7ff6aeffe39b207d7caae503106adadea6803b31ba288fa4e3b341d7f65"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO system_config (key, value) VALUES ('setup_token_issued_at', NOW()::text) ON CONFLICT (key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "65eb210f54b23e07b05d51238b9147b71f70799915143aa02d395bcc55e052e4"
+}
