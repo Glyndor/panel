@@ -265,27 +265,93 @@ if $existing; then
     esac
 fi
 
-# --- Check dependencies -----------------------------------------------------
+# --- DNS preflight check ----------------------------------------------------
+
+log_section "Checking network connectivity"
+
+if ! getent hosts archive.ubuntu.com &>/dev/null && ! getent hosts packages.fedoraproject.org &>/dev/null; then
+    log_warn "DNS resolution failing — attempting to fix..."
+    rm -f /etc/resolv.conf
+    echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+    if ! getent hosts archive.ubuntu.com &>/dev/null 2>&1; then
+        log_error "DNS resolution is unavailable. Please fix your network configuration and retry."
+        exit 1
+    fi
+    log_ok "DNS resolution restored (set nameserver to 8.8.8.8)"
+else
+    log_ok "DNS resolution working"
+fi
+
+# --- Install dependencies ---------------------------------------------------
 
 log_section "Checking system dependencies"
 
-_require_cmd() {
-    if ! command -v "$1" &>/dev/null; then
-        log_error "Required: $1 ($2)"
+_apt_updated=false
+_apt_ensure() {
+    local cmd="$1" pkg="$2"
+    if command -v "$cmd" &>/dev/null; then
+        log_ok "$cmd found"
+        return
+    fi
+    log_info "Installing $pkg..."
+    if ! $_apt_updated; then
+        if command -v add-apt-repository &>/dev/null; then
+            add-apt-repository -y universe &>/dev/null || true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        _apt_updated=true
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" -qq
+    if command -v "$cmd" &>/dev/null; then
+        log_ok "$cmd installed"
+    else
+        log_error "Failed to install $pkg (command: $cmd)"
         exit 1
     fi
-    log_ok "$1"
 }
 
-_require_cmd podman    "apt install podman"
-_require_cmd openssl   "apt install openssl"
-_require_cmd nft       "apt install nftables"
-_require_cmd wg        "apt install wireguard-tools"
-_require_cmd wg-quick  "apt install wireguard-tools"
-_require_cmd curl      "apt install curl"
-_require_cmd python3   "apt install python3"
+_require_cmd() {
+    if ! command -v "$1" &>/dev/null; then
+        log_error "Required command not found: $1 — $2"
+        exit 1
+    fi
+    log_ok "$1 found"
+}
+
+_apt_ensure podman  podman
+_apt_ensure openssl openssl
+_apt_ensure nft     nftables
+_apt_ensure wg      wireguard-tools
+_apt_ensure curl    curl
+_apt_ensure python3 python3
+_apt_ensure pip3    python3-pip
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
+
+for _pkg in netavark aardvark-dns; do
+    if ! dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
+        log_info "Installing $_pkg..."
+        if ! $_apt_updated; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            _apt_updated=true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$_pkg" -qq
+        dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii' || { log_error "Failed to install $_pkg"; exit 1; }
+        log_ok "$_pkg installed"
+    else
+        log_ok "$_pkg found"
+    fi
+done
+
+if ! grep -q 'network_backend.*netavark' /etc/containers/containers.conf 2>/dev/null; then
+    mkdir -p /etc/containers
+    {
+        grep -v 'network_backend\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
+        printf '\n[network]\nnetwork_backend = "netavark"\n'
+    } > /tmp/lynx-containers.conf
+    mv /tmp/lynx-containers.conf /etc/containers/containers.conf
+    log_ok "Podman configured to use Netavark network backend"
+fi
 
 # --- NTP synchronization check ----------------------------------------------
 #
@@ -345,7 +411,7 @@ DASHBOARD_WG_LISTEN="${DASHBOARD_ENDPOINT##*:}"
 log_section "Creating directories"
 
 mkdir -p "$LYNX_DIR"
-chmod 700 "$LYNX_DIR"
+chmod 755 "$LYNX_DIR"
 log_ok "$LYNX_DIR"
 
 # --- Generate agent UUID ----------------------------------------------------
@@ -367,7 +433,8 @@ else
         TS_MS=$(date +%s%3N)
         TS_HEX=$(printf '%012x' "$TS_MS")
         RAND=$(openssl rand -hex 10)
-        AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-$(printf '%x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f)))${RAND:4:2})-${RAND:6:12}"
+        VARIANT=$(printf '%02x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f))))
+        AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-${VARIANT}${RAND:4:2}-${RAND:6:12}"
     fi
     printf '%s' "$AGENT_ID" > "$LYNX_DIR/agent-id"
     chmod 600 "$LYNX_DIR/agent-id"
@@ -419,7 +486,7 @@ log_section "Generating agent secrets"
 log_info "PostgreSQL root password..."
 (
     PG_ROOT=$(openssl rand -hex 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-agent-pg-root -
+    printf '%s' "$PG_ROOT" | podman secret create lynx-agent-pg-root - >/dev/null
     PG_ROOT="$(openssl rand -hex 32)"
 )
 
@@ -429,8 +496,8 @@ chmod 700 /etc/lynx/credentials
 (
     PG_PASS=$(openssl rand -hex 32)
     DB_URL="postgresql://lynx_agent_app:${PG_PASS}@localhost:5434/${PG_DB}"
-    printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass -
-    printf '%s' "$DB_URL" | podman secret create lynx-agent-database-url -
+    printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass - >/dev/null
+    printf '%s' "$DB_URL" | podman secret create lynx-agent-database-url - >/dev/null
     # Write credential file now — only moment we have the URL in memory
     printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
     chmod 600 /etc/lynx/credentials/database-url
@@ -440,7 +507,7 @@ chmod 700 /etc/lynx/credentials
 
 log_info "Internal bearer token..."
 INTERNAL_TOKEN=$(openssl rand -hex 32)
-printf '%s' "$INTERNAL_TOKEN" | podman secret create lynx-agent-internal-token -
+printf '%s' "$INTERNAL_TOKEN" | podman secret create lynx-agent-internal-token - >/dev/null
 
 log_ok "Agent secrets generated"
 
@@ -468,7 +535,7 @@ cat > "$PG_INIT_DIR/01-init.sql" << 'PGSQL'
 CREATE USER lynx_agent_app WITH PASSWORD :'app_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 GRANT CONNECT ON DATABASE lynx_agent TO lynx_agent_app;
 \connect lynx_agent
-GRANT USAGE ON SCHEMA public TO lynx_agent_app;
+GRANT USAGE, CREATE ON SCHEMA public TO lynx_agent_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_agent_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -491,7 +558,7 @@ podman run -d \
     -e POSTGRES_DB="$PG_DB" \
     -e POSTGRES_PASSWORD_FILE=/run/secrets/lynx-agent-pg-root \
     -p 127.0.0.1:5434:5432 \
-    -v lynx-agent-pg-data:/var/lib/postgresql/data \
+    -v lynx-agent-pg-data:/var/lib/postgresql \
     -v "$PG_INIT_DIR:/docker-entrypoint-initdb.d:ro" \
     --restart unless-stopped \
     "$PG_IMAGE"
@@ -504,7 +571,7 @@ for i in $(seq 1 40); do
     fi
     if [[ $i -eq 40 ]]; then
         log_error "PostgreSQL did not become healthy"
-        podman logs "$PG_CONTAINER" --tail 30
+        podman logs --tail 30 "$PG_CONTAINER"
         exit 1
     fi
     sleep 2
@@ -558,7 +625,7 @@ log_ok "Latest release: ${LATEST_AGENT_TAG}"
 
 RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}"
 mkdir -p "$BIN_DIR"
-chmod 700 "$BIN_DIR"
+chmod 755 "$BIN_DIR"
 
 _verify_release_sig() {
     local file="$1" sig_file="$2"
