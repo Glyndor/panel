@@ -34,6 +34,7 @@ services:
       - NEXT_TELEMETRY_DISABLED=1
     volumes:
       - /etc/lynx/frontend:/etc/lynx/frontend:ro
+      - frontend_next_cache:/etc/lynx/frontend/.next/cache
     depends_on:
       backend:
         condition: service_healthy
@@ -143,6 +144,7 @@ services:
 
 volumes:
   postgres_data:
+  frontend_next_cache:
 
 networks:
   lynx-dashboard-db:
