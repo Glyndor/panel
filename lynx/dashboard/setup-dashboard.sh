@@ -125,7 +125,9 @@ _cleanup_existing() {
     rm -f "$WG_DIR/wg-lynx-dash.conf"
 
     # Remove systemd units
+    systemctl disable --now lynx-dashboard-containers.service 2>/dev/null || true
     systemctl disable --now lynx-dashboard-rotate-certs.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/lynx-dashboard-containers.service
     rm -f /etc/systemd/system/lynx-dashboard-rotate-certs.{service,timer}
     systemctl daemon-reload
 
@@ -685,6 +687,17 @@ log_section "Starting services"
 
 COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
 
+# Copy init SQL to a persistent location so the bind mount survives reboots.
+# docker-compose.yml uses ${LYNX_DB_INIT_DIR:-./server/db/init} — this sets
+# the production path; local dev falls back to the relative repo path.
+LYNX_DB_INIT_DIR="/etc/lynx/db/init"
+mkdir -p "$LYNX_DB_INIT_DIR"
+chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
+cp "$COMPOSE_DIR/server/db/init/"*.sql "$LYNX_DB_INIT_DIR/"
+chmod 644 "$LYNX_DB_INIT_DIR/"*.sql
+export LYNX_DB_INIT_DIR
+log_ok "Init SQL copied to $LYNX_DB_INIT_DIR"
+
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
 podman-compose -f "$COMPOSE_FILE" up -d postgres
@@ -1031,6 +1044,43 @@ if [[ -f /etc/nftables.conf ]]; then
     fi
 fi
 systemctl enable nftables 2>/dev/null || true
+
+# --- Container auto-start on reboot -----------------------------------------
+
+log_section "Enabling container auto-start on reboot"
+
+# Podman's podman-restart.service only handles restart-policy=always.
+# Our containers use restart=unless-stopped (don't restart if manually stopped).
+# This oneshot service starts all five containers at boot, after nftables are loaded.
+cat > /etc/systemd/system/lynx-dashboard-containers.service << 'EOF'
+[Unit]
+Description=Lynx Dashboard — start containers on boot
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start \
+    lynx-dashboard-postgres \
+    lynx-dashboard-valkey \
+    lynx-dashboard-backend \
+    lynx-dashboard-frontend \
+    lynx-dashboard-nginx
+ExecStop=/usr/bin/podman stop \
+    lynx-dashboard-nginx \
+    lynx-dashboard-frontend \
+    lynx-dashboard-backend \
+    lynx-dashboard-valkey \
+    lynx-dashboard-postgres
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable lynx-dashboard-containers.service
+log_ok "Container auto-start service enabled (lynx-dashboard-containers.service)"
 
 # --- Done -------------------------------------------------------------------
 
