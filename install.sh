@@ -98,22 +98,10 @@ case "$OPTION" in
             exit 0
         fi
 
-        source "$SCRIPT_DIR/scripts/remove-docker.sh"
-        source "$SCRIPT_DIR/scripts/remove-firewall.sh"
-        source "$SCRIPT_DIR/scripts/install-podman.sh"
-        source "$SCRIPT_DIR/scripts/install-nftables.sh"
-
-        remove_docker
-        remove_firewall
-        install_podman
-        install_nftables
-
         if [[ "$OPTION" == "1" ]]; then
-            source "$SCRIPT_DIR/scripts/dashboard/install-dashboard.sh"
-            install_dashboard
+            exec "$SCRIPT_DIR/lynx/dashboard/setup-dashboard.sh"
         else
-            source "$SCRIPT_DIR/scripts/agent/install-agent.sh"
-            install_agent
+            exec "$SCRIPT_DIR/lynx/agent/setup-agent.sh"
         fi
         ;;
     *)

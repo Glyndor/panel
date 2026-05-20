@@ -7,7 +7,7 @@
 #     - Podman networks (3 isolated: db, cache, app)
 #     - Podman secrets (randomly generated, no trace)
 #     - PostgreSQL 18 container with isolated app user
-#     - Redis 8 container with password auth
+#     - Valkey 8 container with password auth
 #     - Backend (Rust) + Frontend (Next.js) containers
 #     - nftables rules (ports 22 + 19443)
 #     - Self-signed TLS certificate (90-day, auto-rotated via systemd timer)
@@ -69,7 +69,7 @@ _cleanup_existing() {
     log_section "Removing existing installation"
 
     # Stop and remove containers
-    for ctr in lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-redis; do
+    for ctr in lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-valkey; do
         if podman container exists "$ctr" 2>/dev/null; then
             log_info "Removing container: $ctr"
             podman rm -f "$ctr" 2>/dev/null || true
@@ -400,11 +400,11 @@ log_info "Generating PostgreSQL app password and database URL..."
     PG_PASS="$(openssl rand -hex 32)"  # overwrite
 )
 
-log_info "Generating Redis password and URL..."
+log_info "Generating Valkey password and URL..."
 (
     REDIS_PASS=$(openssl rand -hex 32)
     printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass -
-    printf 'redis://:%s@lynx-dashboard-redis:6379' "$REDIS_PASS" \
+    printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
         | podman secret create lynx-dashboard-redis-url -
     REDIS_PASS="$(openssl rand -hex 32)"  # overwrite
 )
@@ -597,6 +597,10 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_ok "Frontend installed: ${FRONTEND_DIR}/"
 
+# Write version file
+printf '%s' "${LATEST_TAG#dashboard@}" > "$BIN_DIR/lynx-dashboard-version"
+log_ok "Version: ${LATEST_TAG#dashboard@}"
+
 # --- Start services ---------------------------------------------------------
 
 log_section "Starting services"
@@ -621,18 +625,18 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# 2. Redis
-log_info "Starting Redis..."
-podman compose -f "$COMPOSE_FILE" up -d redis
+# 2. Valkey
+log_info "Starting Valkey..."
+podman compose -f "$COMPOSE_FILE" up -d valkey
 
-log_info "Waiting for Redis to be healthy..."
+log_info "Waiting for Valkey to be healthy..."
 for i in $(seq 1 30); do
-    if podman inspect lynx-dashboard-redis --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
-        log_ok "Redis is healthy"
+    if podman inspect lynx-dashboard-valkey --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "Valkey is healthy"
         break
     fi
     if [[ $i -eq 30 ]]; then
-        log_error "Redis did not become healthy in time"
+        log_error "Valkey did not become healthy in time"
         exit 1
     fi
     sleep 2
