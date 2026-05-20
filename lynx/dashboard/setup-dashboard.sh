@@ -46,7 +46,7 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 # --- Constants --------------------------------------------------------------
 
 LYNX_DIR="/etc/lynx"
-CERTS_DIR="/etc/lynx/certs"
+CERTS_DIR="/etc/lynx/tls"
 WG_DIR="/etc/wireguard"
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-compose.yml"
 LISTEN_PORT=19443
@@ -68,23 +68,44 @@ fi
 _cleanup_existing() {
     log_section "Removing existing installation"
 
-    # Stop and remove containers
-    for ctr in lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-valkey; do
+    # Gracefully stop containers before removal so volumes are not locked
+    log_info "Stopping containers..."
+    for ctr in lynx-dashboard-nginx lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-valkey; do
+        podman stop --time 5 "$ctr" 2>/dev/null || true
+    done
+    # Catch any stray lynx-dashboard-* containers from partial prior installs
+    podman ps -q --filter name=lynx-dashboard 2>/dev/null | xargs -r podman stop --time 5 2>/dev/null || true
+
+    # Remove named containers then any remaining lynx-dashboard-* matches
+    for ctr in lynx-dashboard-nginx lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-valkey; do
         if podman container exists "$ctr" 2>/dev/null; then
             log_info "Removing container: $ctr"
             podman rm -f "$ctr" 2>/dev/null || true
         fi
     done
+    podman ps -aq --filter name=lynx-dashboard 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
 
-    # Remove volumes
+    # Fail explicitly if any container could not be removed — leftover containers
+    # hold volumes open and leave secrets mounted, causing password mismatches on reinstall
+    if podman ps -aq --filter name=lynx-dashboard 2>/dev/null | grep -q .; then
+        log_error "Failed to remove all lynx-dashboard-* containers — manual cleanup required:"
+        podman ps -a --format '{{.Names}}\t{{.Status}}' --filter name=lynx-dashboard 2>/dev/null
+        exit 1
+    fi
+
+    # Remove volumes (podman-compose names them <project>_<volume>)
+    podman volume rm dashboard_postgres_data 2>/dev/null || true
     podman volume rm lynx-dashboard_postgres_data 2>/dev/null || true
+    # Catch any remaining dashboard postgres volumes by pattern
+    podman volume ls --format '{{.Name}}' 2>/dev/null | grep -E 'dashboard.*postgres|postgres.*dashboard' \
+        | xargs -r podman volume rm 2>/dev/null || true
 
     # Remove networks
     for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
         podman network rm "$net" 2>/dev/null || true
     done
 
-    # Remove secrets
+    # Remove known secrets then sweep any remaining lynx-* secrets
     for secret in lynx-dashboard-pg-root lynx-dashboard-pg-pass lynx-dashboard-redis-pass \
                   lynx-dashboard-database-url lynx-dashboard-redis-url \
                   lynx-dashboard-api-token lynx-dashboard-kek lynx-dashboard-pepper \
@@ -95,17 +116,22 @@ _cleanup_existing() {
                   lynx-dashboard-local-agent-psk; do
         podman secret rm "$secret" 2>/dev/null || true
     done
+    podman secret ls --format '{{.Name}}' 2>/dev/null | grep '^lynx-' | xargs -r podman secret rm 2>/dev/null || true
 
     # Remove WireGuard interface
-    if ip link show wg-lynx-dashboard &>/dev/null; then
-        ip link delete wg-lynx-dashboard 2>/dev/null || true
+    if ip link show wg-lynx-dash &>/dev/null; then
+        ip link delete wg-lynx-dash 2>/dev/null || true
     fi
-    rm -f "$WG_DIR/wg-lynx-dashboard.conf"
+    rm -f "$WG_DIR/wg-lynx-dash.conf"
 
     # Remove systemd units
     systemctl disable --now lynx-dashboard-rotate-certs.timer 2>/dev/null || true
     rm -f /etc/systemd/system/lynx-dashboard-rotate-certs.{service,timer}
     systemctl daemon-reload
+
+    # Flush nftables table so container DNS queries are not blocked during reinstall
+    nft delete table inet lynx-dashboard 2>/dev/null || true
+    rm -f /etc/nftables-lynx-dashboard.conf
 
     rm -rf "$LYNX_DIR"
     log_ok "Cleanup complete"
@@ -276,6 +302,25 @@ if $existing; then
     esac
 fi
 
+# --- DNS preflight check ----------------------------------------------------
+
+log_section "Checking network connectivity"
+
+if ! getent hosts archive.ubuntu.com &>/dev/null && ! getent hosts packages.fedoraproject.org &>/dev/null; then
+    log_warn "DNS resolution failing — attempting to fix..."
+    # Replace symlink (systemd-resolved stub) with a static file using a known-good resolver
+    rm -f /etc/resolv.conf
+    echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+    # Final check
+    if ! getent hosts archive.ubuntu.com &>/dev/null 2>&1; then
+        log_error "DNS resolution is unavailable. Please fix your network configuration and retry."
+        exit 1
+    fi
+    log_ok "DNS resolution restored (set nameserver to 8.8.8.8)"
+else
+    log_ok "DNS resolution working"
+fi
+
 # --- Install dependencies ---------------------------------------------------
 
 log_section "Checking system dependencies"
@@ -296,7 +341,7 @@ _apt_ensure() {
         DEBIAN_FRONTEND=noninteractive apt-get update -qq
         _apt_updated=true
     fi
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" -qq
     if command -v "$cmd" &>/dev/null; then
         log_ok "$cmd installed"
     else
@@ -313,15 +358,50 @@ _require_cmd() {
     log_ok "$1 found"
 }
 
-_apt_ensure podman  podman
-_apt_ensure openssl openssl
-_apt_ensure nft     nftables
-_apt_ensure wg      wireguard-tools
-_apt_ensure curl    curl
-_apt_ensure python3 python3
-_apt_ensure pip3    python3-pip
+_apt_ensure podman         podman
+_apt_ensure podman-compose podman-compose
+_apt_ensure openssl        openssl
+_apt_ensure nft            nftables
+_apt_ensure wg             wireguard-tools
+_apt_ensure curl           curl
+_apt_ensure python3        python3
+_apt_ensure pip3           python3-pip
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
+
+# Netavark + aardvark-dns: required for container-to-container DNS resolution.
+# Podman defaults to the older CNI backend which lacks DNS on Ubuntu 24.04.
+# These packages live under /usr/lib/podman/ — not in PATH, so _apt_ensure can't check by command.
+_netavark_ok=true
+for _pkg in netavark aardvark-dns; do
+    if ! dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
+        log_info "Installing $_pkg..."
+        if ! $_apt_updated; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            _apt_updated=true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$_pkg" -qq
+        if dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
+            log_ok "$_pkg installed"
+        else
+            log_error "Failed to install $_pkg"
+            exit 1
+        fi
+    else
+        log_ok "$_pkg found"
+    fi
+done
+
+# Configure Podman to use Netavark (enables container DNS via aardvark-dns)
+if ! grep -q 'network_backend.*netavark' /etc/containers/containers.conf 2>/dev/null; then
+    mkdir -p /etc/containers
+    {
+        grep -v 'network_backend\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
+        printf '\n[network]\nnetwork_backend = "netavark"\n'
+    } > /tmp/lynx-containers.conf
+    mv /tmp/lynx-containers.conf /etc/containers/containers.conf
+    log_ok "Podman configured to use Netavark network backend"
+fi
 
 # --- NTP synchronization check ----------------------------------------------
 #
@@ -359,8 +439,10 @@ unset _ntp_active
 
 log_section "Creating directories"
 
-mkdir -p "$LYNX_DIR" "$CERTS_DIR" "$WG_DIR"
+NGINX_DIR="$LYNX_DIR/nginx"
+mkdir -p "$LYNX_DIR" "$CERTS_DIR" "$WG_DIR" "$NGINX_DIR"
 chmod 700 "$LYNX_DIR" "$CERTS_DIR" "$WG_DIR"
+chmod 755 "$NGINX_DIR"
 log_ok "Directories created"
 
 # --- Podman networks --------------------------------------------------------
@@ -387,44 +469,41 @@ log_section "Generating secrets"
 log_info "Generating PostgreSQL root password..."
 (
     PG_ROOT=$(openssl rand -hex 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root -
+    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root - >/dev/null
     PG_ROOT="$(openssl rand -hex 32)"  # overwrite
 )
 
 log_info "Generating PostgreSQL app password and database URL..."
 (
     PG_PASS=$(openssl rand -hex 32)
-    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass -
+    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass - >/dev/null
     printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
-        | podman secret create lynx-dashboard-database-url -
+        | podman secret create lynx-dashboard-database-url - >/dev/null
     PG_PASS="$(openssl rand -hex 32)"  # overwrite
 )
 
 log_info "Generating Valkey password and URL..."
 (
     REDIS_PASS=$(openssl rand -hex 32)
-    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass -
+    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass - >/dev/null
     printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
-        | podman secret create lynx-dashboard-redis-url -
+        | podman secret create lynx-dashboard-redis-url - >/dev/null
     REDIS_PASS="$(openssl rand -hex 32)"  # overwrite
 )
 
 log_info "Generating API token..."
-openssl rand -hex 32 | podman secret create lynx-dashboard-api-token -
-
+openssl rand -hex 32 | podman secret create lynx-dashboard-api-token - >/dev/null
 log_info "Generating KEK (Key Encryption Key)..."
-openssl rand -base64 32 | tr -d '\n' | podman secret create lynx-dashboard-kek -
-
+openssl rand -base64 32 | tr -d '\n' | podman secret create lynx-dashboard-kek - >/dev/null
 log_info "Generating pepper..."
-openssl rand -hex 32 | podman secret create lynx-dashboard-pepper -
-
+openssl rand -hex 32 | podman secret create lynx-dashboard-pepper - >/dev/null
 log_info "Generating JWT signing keypair (Ed25519)..."
 (
     PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
     PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
     PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private -
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public -
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
 )
 
 log_info "Generating JWT encryption keypair (X25519)..."
@@ -432,8 +511,8 @@ log_info "Generating JWT encryption keypair (X25519)..."
     PRIV_PEM=$(openssl genpkey -algorithm x25519 2>/dev/null)
     PRIV_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
     PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private -
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public -
+    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public - >/dev/null
 )
 
 log_info "Generating CA keypair (Ed25519)..."
@@ -441,14 +520,13 @@ log_info "Generating CA keypair (Ed25519)..."
     PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
     PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
     PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private -
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public -
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
 )
 
 log_info "Generating setup token (one-time bootstrap)..."
 SETUP_TOKEN=$(openssl rand -hex 32)
-printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token -
-
+printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token - >/dev/null
 log_ok "All secrets generated — values purged from memory"
 
 # --- Download binaries from GitHub Releases ---------------------------------
@@ -609,7 +687,7 @@ COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
-podman compose -f "$COMPOSE_FILE" up -d postgres
+podman-compose -f "$COMPOSE_FILE" up -d postgres
 
 log_info "Waiting for PostgreSQL to be healthy..."
 for i in $(seq 1 30); do
@@ -627,7 +705,7 @@ done
 
 # 2. Valkey
 log_info "Starting Valkey..."
-podman compose -f "$COMPOSE_FILE" up -d valkey
+podman-compose -f "$COMPOSE_FILE" up -d valkey
 
 log_info "Waiting for Valkey to be healthy..."
 for i in $(seq 1 30); do
@@ -644,7 +722,7 @@ done
 
 # 3. Backend
 log_info "Starting backend..."
-podman compose -f "$COMPOSE_FILE" up -d backend
+podman-compose -f "$COMPOSE_FILE" up -d backend
 
 log_info "Waiting for backend to be healthy..."
 for i in $(seq 1 40); do
@@ -654,7 +732,7 @@ for i in $(seq 1 40); do
     fi
     if [[ $i -eq 40 ]]; then
         log_error "Backend did not become healthy in time"
-        podman logs lynx-dashboard-backend --tail 50
+        podman logs --tail 50 lynx-dashboard-backend
         exit 1
     fi
     sleep 3
@@ -662,8 +740,21 @@ done
 
 # 4. Frontend
 log_info "Starting frontend..."
-podman compose -f "$COMPOSE_FILE" up -d frontend
-log_ok "Frontend started"
+podman-compose -f "$COMPOSE_FILE" up -d frontend
+
+log_info "Waiting for frontend to be healthy..."
+for i in $(seq 1 40); do
+    if podman inspect lynx-dashboard-frontend --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "Frontend is healthy"
+        break
+    fi
+    if [[ $i -eq 40 ]]; then
+        log_error "Frontend did not become healthy in time"
+        podman logs --tail 30 lynx-dashboard-frontend
+        exit 1
+    fi
+    sleep 3
+done
 
 # --- TLS certificate --------------------------------------------------------
 
@@ -697,12 +788,12 @@ After=network.target
 [Service]
 Type=oneshot
 ExecStart=/bin/bash -c 'openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-    -keyout /etc/lynx/certs/dashboard.key -out /etc/lynx/certs/dashboard.crt \
+    -keyout /etc/lynx/tls/dashboard.key -out /etc/lynx/tls/dashboard.crt \
     -days 90 -nodes -sha256 \
     -subj "/CN=$(hostname -f)/O=Lynx/OU=Dashboard" \
     -addext "subjectAltName=DNS:$(hostname -f),IP:$(hostname -I | awk '"'"'{print $1}'"'"')" \
-    && chmod 600 /etc/lynx/certs/dashboard.key \
-    && podman kill -s HUP lynx-dashboard-frontend'
+    && chmod 600 /etc/lynx/tls/dashboard.key \
+    && podman kill -s HUP lynx-dashboard-nginx'
 EOF
 
 cat > /etc/systemd/system/lynx-dashboard-rotate-certs.timer << 'EOF'
@@ -724,11 +815,95 @@ systemctl daemon-reload
 systemctl enable --now lynx-dashboard-rotate-certs.timer
 log_ok "Certificate rotation timer enabled (every 80 days)"
 
+# --- nginx TLS reverse proxy ------------------------------------------------
+
+log_section "Configuring nginx TLS reverse proxy"
+
+# nginx config: TLS termination on 19443, proxy to frontend
+cat > "$NGINX_DIR/default.conf" << 'EOF'
+server {
+    listen 19443 ssl;
+    listen [::]:19443 ssl;
+
+    ssl_certificate     /etc/lynx/tls/dashboard.crt;
+    ssl_certificate_key /etc/lynx/tls/dashboard.key;
+    ssl_protocols       TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    location / {
+        proxy_pass         http://frontend:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 120s;
+    }
+
+    error_page 502 503 /updating.html;
+    location = /updating.html {
+        root /etc/lynx/nginx;
+    }
+}
+EOF
+
+# Maintenance page served by nginx while frontend is being updated
+cat > "$NGINX_DIR/updating.html" << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Lynx — Updating</title>
+<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
+.box{text-align:center;padding:2rem}h1{font-size:1.5rem;margin-bottom:.5rem}p{color:#94a3b8}</style>
+</head>
+<body><div class="box"><h1>Lynx is updating</h1><p>The dashboard will be back shortly.</p></div></body>
+</html>
+EOF
+
+log_ok "nginx configuration written"
+
+# 5. nginx
+# Remove any stale nginx container created earlier by podman-compose (it may have been
+# created before nginx.conf/certs existed, or have stale --requires pointing to
+# since-recreated container IDs). Start it fresh directly to bypass the dependency graph.
+log_info "Starting nginx..."
+podman rm -f lynx-dashboard-nginx 2>/dev/null || true
+podman run -d \
+    --name lynx-dashboard-nginx \
+    --network lynx-dashboard-app \
+    -p "19443:19443" \
+    -v /etc/lynx/tls:/etc/lynx/tls:ro \
+    -v /etc/lynx/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro \
+    -v /etc/lynx/nginx/updating.html:/etc/lynx/nginx/updating.html:ro \
+    --restart unless-stopped \
+    --health-cmd "pgrep nginx > /dev/null" \
+    --health-interval 10s \
+    --health-timeout 5s \
+    --health-retries 5 \
+    --health-start-period 10s \
+    docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+
+log_info "Waiting for nginx to be healthy..."
+for i in $(seq 1 20); do
+    if podman inspect lynx-dashboard-nginx --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "nginx is healthy"
+        break
+    fi
+    if [[ $i -eq 20 ]]; then
+        log_error "nginx did not become healthy in time"
+        podman logs --tail 20 lynx-dashboard-nginx
+        exit 1
+    fi
+    sleep 3
+done
+
 # --- WireGuard — local agent tunnel -----------------------------------------
 
 log_section "Setting up WireGuard tunnel (dashboard ↔ local agent)"
 
-WG_CONF="$WG_DIR/wg-lynx-dashboard.conf"
+WG_CONF="$WG_DIR/wg-lynx-dash.conf"
 
 # Generate dashboard keypair + PSK
 DASHBOARD_PRIV=$(wg genkey)
@@ -736,8 +911,8 @@ DASHBOARD_PUB=$(printf '%s' "$DASHBOARD_PRIV" | wg pubkey)
 # PSK is kept in scope until final output so admin can copy it for the agent install script.
 # It is also stored as a Podman secret for the dashboard backend (peer management).
 AGENT_PSK=$(wg genpsk)
-printf '%s' "$AGENT_PSK" | podman secret create lynx-dashboard-local-agent-psk -
-
+podman secret rm lynx-dashboard-local-agent-psk 2>/dev/null || true
+printf '%s' "$AGENT_PSK" | podman secret create lynx-dashboard-local-agent-psk - >/dev/null
 # The local agent keypair is generated by the agent install script.
 # Peer block is written by the agent install script after bootstrap.
 cat > "$WG_CONF" << EOF
@@ -794,6 +969,10 @@ table inet lynx-dashboard {
         tcp flags & (fin | psh | urg) == fin | psh | urg drop
         tcp flags ack ct state new drop
 
+        # DNS for container networks (aardvark-dns on Netavark bridge interfaces)
+        iifname "podman*" udp dport 53 accept
+        iifname "podman*" tcp dport 53 accept
+
         # SSH — rate limited
         tcp dport 22 ct state new limit rate 10/minute burst 5 packets accept
 
@@ -811,9 +990,12 @@ table inet lynx-dashboard {
 
         ct state established,related accept
 
+        # Allow container-to-container traffic on Netavark bridge networks
+        iifname "podman*" oifname "podman*" accept
+
         # Allow backend container traffic to/from WireGuard (dashboard ↔ agents)
-        oifname "wg-lynx-dashboard" accept
-        iifname "wg-lynx-dashboard" accept
+        oifname "wg-lynx-dash" accept
+        iifname "wg-lynx-dash" accept
     }
 
     chain output {

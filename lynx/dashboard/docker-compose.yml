@@ -39,10 +39,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 30s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     restart: unless-stopped
     networks:
       - lynx-dashboard-app
@@ -85,7 +85,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      valkey:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
@@ -121,19 +121,19 @@ services:
     networks:
       - lynx-dashboard-db
 
-  redis:
-    container_name: lynx-dashboard-redis
-    image: docker.io/library/redis@sha256:02c2454cd3b6277389101b9d42d009f8518255930f8b06ae33624e324f8c6455
+  valkey:
+    container_name: lynx-dashboard-valkey
+    image: docker.io/valkey/valkey@sha256:b027235326507cfdade9b6684056ec1d0b0c0757412e628245129b5d7b788618
     command:
       - sh
       - -c
-      - 'redis-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
+      - 'valkey-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
     secrets:
       - lynx-dashboard-redis-pass
     healthcheck:
       test:
         - CMD-SHELL
-        - 'redis-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
+        - 'valkey-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
       interval: 5s
       timeout: 3s
       retries: 10
