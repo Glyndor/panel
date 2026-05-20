@@ -115,6 +115,7 @@ _cleanup_existing() {
                   lynx-dashboard-jwt-sign-private lynx-dashboard-jwt-sign-public \
                   lynx-dashboard-jwt-enc-private lynx-dashboard-jwt-enc-public \
                   lynx-dashboard-ca-private lynx-dashboard-ca-public \
+                  lynx-dashboard-x509-ca-cert lynx-dashboard-x509-ca-key \
                   lynx-dashboard-setup-token \
                   lynx-dashboard-local-agent-psk; do
         podman secret rm "$secret" 2>/dev/null || true
@@ -557,6 +558,29 @@ log_info "Generating CA keypair (Ed25519)..."
     PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
     printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
     printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
+)
+
+log_info "Generating X.509 CA certificate for mTLS (Ed25519, 100-year validity)..."
+(
+    # Generate Ed25519 CA key as PKCS8 DER, base64-encoded (format the backend expects).
+    CA_PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
+    CA_KEY_DER_B64=$(printf '%s' "$CA_PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | base64 -w0)
+
+    # Self-signed CA cert: 36524 days ≈ 100 years; basicConstraints CA:true.
+    CA_CERT_PEM=$(printf '%s' "$CA_PRIV_PEM" | openssl req -new -x509 \
+        -key /dev/stdin \
+        -subj "/CN=Lynx Internal CA/O=Lynx" \
+        -days 36524 \
+        -addext "basicConstraints=critical,CA:true" 2>/dev/null)
+    CA_CERT_DER_B64=$(printf '%s' "$CA_CERT_PEM" | openssl x509 -inform PEM -outform DER 2>/dev/null | base64 -w0)
+
+    printf '%s' "$CA_CERT_DER_B64" | podman secret create lynx-dashboard-x509-ca-cert - >/dev/null
+    printf '%s' "$CA_KEY_DER_B64"  | podman secret create lynx-dashboard-x509-ca-key  - >/dev/null
+
+    # Overwrite secrets in memory before subshell exits.
+    CA_PRIV_PEM="$(openssl rand -hex 32)"
+    CA_KEY_DER_B64="$(openssl rand -hex 32)"
+    CA_CERT_DER_B64="$(openssl rand -hex 32)"
 )
 
 log_info "Generating setup token (one-time bootstrap)..."
@@ -1012,6 +1036,13 @@ DASHBOARD_PRIV="$(openssl rand -hex 32)"  # overwrite in memory
 log_ok "WireGuard config written: $WG_CONF"
 log_ok "Dashboard WireGuard pubkey: ${DASHBOARD_PUB}"
 printf '%s' "$DASHBOARD_PUB" > "$LYNX_DIR/dashboard-wg-pubkey"
+
+# Bring up the dashboard WireGuard interface now so it exists when the backend
+# starts. Peers are added dynamically by the backend via `wg set` as agents
+# register. The interface must be up before any agent can connect.
+wg-quick up wg-lynx-dash
+systemctl enable "wg-quick@wg-lynx-dash"
+log_ok "WireGuard interface up: wg-lynx-dash (10.100.0.1/16)"
 
 # --- nftables ---------------------------------------------------------------
 
