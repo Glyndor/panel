@@ -886,8 +886,8 @@ fi
 # The agent binary will flush and replace this on startup via render_ruleset().
 # The flush prefix ensures no orphaned chains from previous installs survive.
 cat > /etc/nftables-lynx-agent.conf << EOF
+destroy table inet lynx-agent
 add table inet lynx-agent
-flush table inet lynx-agent
 table inet lynx-agent {
     chain lynx-base {
         type filter hook input priority 0; policy drop;
