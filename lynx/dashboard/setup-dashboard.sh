@@ -757,9 +757,14 @@ for i in $(seq 1 40); do
 done
 
 # Resync PostgreSQL app user password to match the Podman secret.
-# The backend may run a 90-day scheduled rotation on first startup and partially
-# update the PostgreSQL password without updating the Podman secret (if the podman
-# binary is unavailable inside the container). This resync ensures both sides agree.
+# The backend may run a 90-day scheduled rotation on first startup (no prior
+# rotation record in a fresh DB) and partially update the PostgreSQL password
+# without updating the Podman secret (the `podman` binary is not available
+# inside the Alpine container). The rotation runs ~30s after startup; we wait
+# 15s after "healthy" to ensure the rotation has finished before we re-anchor
+# PostgreSQL to the value in the Podman secret.
+log_info "Waiting for any startup key rotation to settle..."
+sleep 15
 log_info "Synchronizing PostgreSQL app user password..."
 _PG_PASS_SYNC=$(podman secret inspect lynx-dashboard-pg-pass --showsecret --format '{{.SecretData}}' 2>/dev/null)
 if [[ -n "$_PG_PASS_SYNC" ]]; then
