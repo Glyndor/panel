@@ -134,7 +134,7 @@ fn render_ruleset(r: &Ruleset) -> String {
     // Without it, lynx-forward policy drop kills the DNAT'd packets before they reach
     // the container even though Netavark's own table ip filter FORWARD allows them.
     let dashboard_forward_rules = if r.dashboard_port.is_some() {
-        "\n        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)\n        ip daddr 10.89.0.0/16 ct state new accept\n\n        # Container-to-container traffic on Netavark bridge networks\n        iifname \"podman*\" oifname \"podman*\" accept\n\n        # Backend container traffic to/from WireGuard (dashboard <-> agents)\n        oifname \"wg-lynx-dash\" accept\n        iifname \"wg-lynx-dash\" accept\n"
+        "\n        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)\n        ip daddr 10.89.0.0/16 ct state new accept\n\n        # Outbound traffic from dashboard containers (apk installs, GitHub, cert renewals, etc.)\n        iifname \"podman*\" accept\n\n        # Backend container traffic to/from WireGuard (dashboard <-> agents)\n        oifname \"wg-lynx-dash\" accept\n        iifname \"wg-lynx-dash\" accept\n"
     } else {
         ""
     };
@@ -427,7 +427,7 @@ mod tests {
         r.dashboard_port = Some(19443);
         let out = render_ruleset(&r);
         assert!(out.contains("ip daddr 10.89.0.0/16 ct state new accept"), "Netavark published port forward rule missing when dashboard_port set");
-        assert!(out.contains("iifname \"podman*\" oifname \"podman*\" accept"), "Podman forward rule missing when dashboard_port set");
+        assert!(out.contains("iifname \"podman*\" accept"), "container outbound forward rule missing when dashboard_port set");
         assert!(out.contains("oifname \"wg-lynx-dash\" accept"), "WireGuard outbound forward rule missing when dashboard_port set");
         assert!(out.contains("iifname \"wg-lynx-dash\" accept"), "WireGuard inbound forward rule missing when dashboard_port set");
     }
@@ -437,7 +437,6 @@ mod tests {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
         assert!(!out.contains("wg-lynx-dash"), "WireGuard forward rules should not appear when dashboard_port is None");
-        assert!(!out.contains("oifname \"podman*\""), "Podman forward rule should not appear when dashboard_port is None");
         assert!(!out.contains("10.89.0.0/16"), "Netavark forward rule should not appear when dashboard_port is None");
     }
 

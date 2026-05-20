@@ -1015,8 +1015,8 @@ table inet lynx-agent {
         # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)
         ip daddr 10.89.0.0/16 ct state new accept
 
-        # Container-to-container traffic on Netavark bridge networks
-        iifname "podman*" oifname "podman*" accept
+        # Outbound traffic from dashboard containers (apk installs, GitHub, cert renewals, etc.)
+        iifname "podman*" accept
 
         # Backend container traffic to/from WireGuard (dashboard <-> agents)
         oifname "wg-lynx-dash" accept
