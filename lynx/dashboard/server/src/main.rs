@@ -110,7 +110,11 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     info!("listening on 0.0.0.0:8080");
     update::spawn_startup_health_guard();
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
