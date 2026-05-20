@@ -96,8 +96,12 @@ pub fn chain_checksum(chain: &str) -> Result<String> {
 }
 
 fn chain_checksum_raw(args: &[&str]) -> Result<String> {
+    // -t (terse) suppresses dynamic set/meter element output so the checksum
+    // reflects only rule structure — prevents false divergence from ssh_throttle
+    // meter filling up with per-IP rate-limit entries during normal operation.
     let out = Command::new("nft")
         .arg("-j")
+        .arg("-t")
         .args(args)
         .output()
         .context("nft list")?;
