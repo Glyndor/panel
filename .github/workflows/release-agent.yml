@@ -164,6 +164,13 @@ jobs:
         if: ${{ matrix.use_cross }}
         run: cargo install cross --locked
 
+      - name: Set version from tag
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          VERSION="${TAG#agent@}"
+          sed -i "0,/^version = \"[^\"]*\"/{s/^version = \"[^\"]*\"/version = \"${VERSION}\"/}" agent/Cargo.toml
+          echo "Set agent version to ${VERSION}"
+
       - name: Build agent (musl static)
         env:
           SQLX_OFFLINE: "true"

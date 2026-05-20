@@ -205,6 +205,13 @@ jobs:
         if: ${{ matrix.use_cross }}
         run: cargo install cross --locked
 
+      - name: Set version from tag
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          VERSION="${TAG#dashboard@}"
+          sed -i "0,/^version = \"[^\"]*\"/{s/^version = \"[^\"]*\"/version = \"${VERSION}\"/}" dashboard/server/Cargo.toml
+          echo "Set dashboard-server version to ${VERSION}"
+
       - name: Build backend (musl static)
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
