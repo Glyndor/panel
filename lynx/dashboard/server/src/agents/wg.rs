@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::{io::Write, net::IpAddr};
+use std::net::IpAddr;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -16,9 +16,9 @@ fn psk_secret_path(agent_id: Uuid) -> String {
 }
 
 /// Generate a WireGuard PSK (32 random bytes, base64-encoded) and store it
-/// as a Podman secret `lynx-dashboard-wg-psk-{agent_id}`.
+/// as a Podman secret `lynx-dashboard-wg-psk-{agent_id}` via the Podman socket API.
 /// Returns the PSK value (caller must zeroize when done).
-pub fn create_psk(agent_id: Uuid) -> Result<Zeroizing<String>> {
+pub async fn create_psk(agent_id: Uuid) -> Result<Zeroizing<String>> {
     use base64ct::Encoding as _;
     use rand::Rng;
     let mut raw = [0u8; 32];
@@ -27,29 +27,17 @@ pub fn create_psk(agent_id: Uuid) -> Result<Zeroizing<String>> {
     raw.fill(0);
 
     let secret_name = psk_secret_name(agent_id);
-    let status = std::process::Command::new("podman")
-        .args(["secret", "create", "--replace", &secret_name, "-"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            child.stdin.as_mut().unwrap().write_all(psk.as_bytes())?;
-            child.wait()
-        })
-        .context("podman secret create")?;
-
-    if !status.success() {
-        anyhow::bail!("podman secret create failed for {secret_name}");
-    }
+    crate::podman::secret_replace(&secret_name, psk.as_bytes())
+        .await
+        .context("create PSK secret")?;
 
     Ok(psk)
 }
 
-/// Delete the Podman secret for the given agent's PSK.
-pub fn delete_psk(agent_id: Uuid) {
+/// Delete the Podman secret for the given agent's PSK via the Podman socket API.
+pub async fn delete_psk(agent_id: Uuid) {
     let name = psk_secret_name(agent_id);
-    let _ = std::process::Command::new("podman")
-        .args(["secret", "rm", &name])
-        .status();
+    crate::podman::secret_delete(&name).await;
 }
 
 /// Load PSK from mounted secret file. Returns None if the file doesn't exist yet
@@ -99,6 +87,7 @@ pub fn add_peer(pubkey: &str, allowed_ip: IpAddr, psk: &str) -> Result<()> {
         .stdin(std::process::Stdio::piped())
         .spawn()
         .and_then(|mut child| {
+            use std::io::Write;
             child.stdin.as_mut().unwrap().write_all(psk.as_bytes())?;
             child.wait()
         })
@@ -194,7 +183,7 @@ pub async fn reserve_ip(db: &sqlx::PgPool) -> Result<String> {
     let mut tx = db.begin().await.context("begin ip_pool transaction")?;
 
     let row = sqlx::query!(
-        "SELECT ip::text AS ip FROM ip_pool WHERE agent_id IS NULL ORDER BY ip LIMIT 1 FOR UPDATE SKIP LOCKED"
+        "SELECT host(ip) AS ip FROM ip_pool WHERE agent_id IS NULL ORDER BY ip LIMIT 1 FOR UPDATE SKIP LOCKED"
     )
     .fetch_optional(&mut *tx)
     .await
@@ -210,7 +199,7 @@ pub async fn reserve_ip(db: &sqlx::PgPool) -> Result<String> {
 /// Must be called after the agent row is inserted (FK agents.id must exist).
 pub async fn claim_ip(db: &sqlx::PgPool, ip: &str, agent_id: uuid::Uuid) -> Result<()> {
     sqlx::query!(
-        "UPDATE ip_pool SET agent_id = $1, updated_at = NOW() WHERE ip::text = $2 AND agent_id IS NULL",
+        "UPDATE ip_pool SET agent_id = $1, updated_at = NOW() WHERE host(ip) = $2 AND agent_id IS NULL",
         agent_id,
         ip,
     )

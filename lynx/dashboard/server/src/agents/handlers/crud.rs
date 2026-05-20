@@ -75,7 +75,7 @@ pub async fn register_agent(
         tracing::error!(agent_id = %req.agent_id, ip = %wg_ip, error = %e, "failed to claim WG IP");
     }
 
-    let psk = match wg::create_psk(req.agent_id) {
+    let psk = match wg::create_psk(req.agent_id).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(agent_id = %req.agent_id, error = %e, "failed to create WG PSK");
@@ -160,7 +160,7 @@ pub async fn remove_agent(
 
     // Delete PSK from memory and Podman secrets.
     state.wg_psks.write().await.remove(&id);
-    wg::delete_psk(id);
+    wg::delete_psk(id).await;
 
     // Release IP back to pool before deleting the agent row (FK constraint).
     if let Err(e) = wg::release_ip(&state.db, id).await {

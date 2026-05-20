@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ip_pool SET agent_id = $1, updated_at = NOW() WHERE host(ip) = $2 AND agent_id IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "08f6a8ec1a4ea4c7b6aff4ace55dfab6e61bea49c68ba53421aea830f200501a"
+}
