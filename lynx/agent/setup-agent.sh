@@ -57,6 +57,9 @@ PG_NETWORK="lynx-agent-db"
 PG_CONTAINER="lynx-agent-postgres"
 PG_IMAGE="docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359"
 PG_DB="lynx_agent"
+# Fixed subnet and IP — prevents IP drift on container stop/start cycles.
+PG_SUBNET="172.20.100.0/24"
+PG_STATIC_IP="172.20.100.2"
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
 
@@ -520,8 +523,8 @@ log_ok "Agent secrets generated"
 log_section "Creating Podman network: $PG_NETWORK"
 
 if ! podman network exists "$PG_NETWORK" 2>/dev/null; then
-    podman network create "$PG_NETWORK"
-    log_ok "Network created: $PG_NETWORK"
+    podman network create "$PG_NETWORK" --subnet "$PG_SUBNET"
+    log_ok "Network created: $PG_NETWORK ($PG_SUBNET)"
 else
     log_warn "Network $PG_NETWORK already exists — skipping"
 fi
@@ -556,6 +559,7 @@ log_section "Starting PostgreSQL for agent"
 podman run -d \
     --name "$PG_CONTAINER" \
     --network "$PG_NETWORK" \
+    --ip "$PG_STATIC_IP" \
     --secret lynx-agent-pg-root,target=lynx-agent-pg-root \
     --secret lynx-agent-pg-pass,target=lynx-agent-pg-pass \
     -e POSTGRES_USER=postgres \
@@ -580,18 +584,10 @@ for i in $(seq 1 40); do
     sleep 2
 done
 
-# Get the container's direct IP in the agent-db network.
-# The agent binary connects directly — no published port, no DNAT hairpin issue.
-PG_IP=$(podman inspect "$PG_CONTAINER" \
-    --format '{{(index .NetworkSettings.Networks "lynx-agent-db").IPAddress}}')
-if [[ -z "$PG_IP" ]]; then
-    log_error "Could not determine PostgreSQL container IP"
-    exit 1
-fi
-
-# Write DATABASE_URL with direct container IP, then zeroize PG_PASS
+# Write DATABASE_URL with fixed container IP, then zeroize PG_PASS.
+# Static IP prevents URL drift on container stop/start cycles.
 (
-    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@${PG_IP}:5432/${PG_DB}"
+    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@${PG_STATIC_IP}:5432/${PG_DB}"
     printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
     chmod 600 /etc/lynx/credentials/database-url
     DB_URL="$(openssl rand -hex 32)"
