@@ -138,7 +138,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
 
     for agent in &agents {
         // Generate new PSK and persist to Podman secret (replaces old one).
-        let new_psk = match wg::create_psk(agent.id) {
+        let new_psk = match wg::create_psk(agent.id).await {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(agent_id = %agent.id, "PSK generation failed: {e} — skipping");
@@ -291,34 +291,12 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
     .await
     .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
-    let status = std::process::Command::new("podman")
-        .args([
-            "secret",
-            "create",
-            "--replace",
-            "lynx-dashboard-pg-pass",
-            "-",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(new_pass.as_bytes());
-            }
-            child.wait()
-        });
-
-    match status {
-        Ok(s) if s.success() => {
-            tracing::info!("PostgreSQL app password rotated and Podman secret updated");
-        }
-        Ok(s) => {
-            tracing::warn!(code = ?s.code(), "podman secret create --replace failed for pg-pass");
-        }
-        Err(e) => {
-            tracing::warn!("podman secret replace pg-pass spawn error: {e}");
-        }
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-pg-pass", new_pass.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for pg-pass failed: {e}");
+    } else {
+        tracing::info!("PostgreSQL app password rotated and Podman secret updated");
     }
 
     Ok(())
@@ -346,34 +324,12 @@ pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
         .await
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
-    let status = std::process::Command::new("podman")
-        .args([
-            "secret",
-            "create",
-            "--replace",
-            "lynx-dashboard-redis-pass",
-            "-",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(new_pass.as_bytes());
-            }
-            child.wait()
-        });
-
-    match status {
-        Ok(s) if s.success() => {
-            tracing::info!("Redis password rotated and Podman secret updated");
-        }
-        Ok(s) => {
-            tracing::warn!(code = ?s.code(), "podman secret create --replace failed for redis-pass");
-        }
-        Err(e) => {
-            tracing::warn!("podman secret replace redis-pass spawn error: {e}");
-        }
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-redis-pass", new_pass.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for redis-pass failed: {e}");
+    } else {
+        tracing::info!("Redis password rotated and Podman secret updated");
     }
 
     Ok(())

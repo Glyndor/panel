@@ -10,6 +10,7 @@ pub mod error;
 pub mod migration;
 pub mod nftables;
 pub mod organizations;
+pub mod podman;
 pub mod scheduler;
 pub mod state;
 pub mod update;
