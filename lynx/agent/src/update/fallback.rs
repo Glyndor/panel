@@ -18,6 +18,14 @@ pub async fn run_fallback_updater(state: AppState) {
     loop {
         ticker.tick().await;
 
+        // No dashboard URL = agent not yet onboarded. Skip fallback updates entirely:
+        // without a dashboard the agent is in setup mode and the WS connection will
+        // never establish last_contact, which would otherwise immediately satisfy the
+        // absence threshold on every restart and cause an infinite update loop.
+        if state.config.dashboard_url.is_none() {
+            continue;
+        }
+
         let last_contact = state.last_dashboard_contact.load(Ordering::SeqCst);
         let now = epoch_secs();
 
