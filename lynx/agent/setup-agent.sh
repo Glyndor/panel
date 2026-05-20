@@ -507,20 +507,13 @@ log_info "PostgreSQL root password..."
     PG_ROOT="$(openssl rand -hex 32)"
 )
 
-log_info "PostgreSQL app password + database URL..."
+log_info "PostgreSQL app password..."
 mkdir -p /etc/lynx/credentials
 chmod 700 /etc/lynx/credentials
-(
-    PG_PASS=$(openssl rand -hex 32)
-    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@localhost:5434/${PG_DB}"
-    printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass - >/dev/null
-    printf '%s' "$DB_URL" | podman secret create lynx-agent-database-url - >/dev/null
-    # Write credential file now — only moment we have the URL in memory
-    printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
-    chmod 600 /etc/lynx/credentials/database-url
-    PG_PASS="$(openssl rand -hex 32)"
-    DB_URL="$(openssl rand -hex 32)"
-)
+# PG_PASS stays in outer shell until DATABASE_URL can be written (needs container IP).
+# Zeroized after writing the credential file.
+PG_PASS=$(openssl rand -hex 32)
+printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass - >/dev/null
 
 log_info "Internal bearer token..."
 INTERNAL_TOKEN=$(openssl rand -hex 32)
@@ -574,7 +567,6 @@ podman run -d \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_DB="$PG_DB" \
     -e POSTGRES_PASSWORD_FILE=/run/secrets/lynx-agent-pg-root \
-    -p 127.0.0.1:5434:5432 \
     -v lynx-agent-pg-data:/var/lib/postgresql \
     -v "$PG_INIT_DIR:/docker-entrypoint-initdb.d:ro" \
     --restart unless-stopped \
@@ -593,6 +585,24 @@ for i in $(seq 1 40); do
     fi
     sleep 2
 done
+
+# Get the container's direct IP in the agent-db network.
+# The agent binary connects directly — no published port, no DNAT hairpin issue.
+PG_IP=$(podman inspect "$PG_CONTAINER" \
+    --format '{{(index .NetworkSettings.Networks "lynx-agent-db").IPAddress}}')
+if [[ -z "$PG_IP" ]]; then
+    log_error "Could not determine PostgreSQL container IP"
+    exit 1
+fi
+
+# Write DATABASE_URL with direct container IP, then zeroize PG_PASS
+(
+    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@${PG_IP}:5432/${PG_DB}"
+    printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
+    chmod 600 /etc/lynx/credentials/database-url
+    DB_URL="$(openssl rand -hex 32)"
+)
+PG_PASS="$(openssl rand -hex 32)"
 
 # --- Download agent binary from GitHub Releases ----------------------------
 
