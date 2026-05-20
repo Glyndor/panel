@@ -30,6 +30,7 @@ describe("loginSchema", () => {
 
 describe("registerSchema", () => {
 	const valid = {
+		confirm_password: "ValidP@ss12!",
 		email: "alice@example.com",
 		password: "ValidP@ss12!",
 		username: "alice42",
@@ -104,11 +105,11 @@ describe("registerSchema", () => {
 	});
 
 	it("accepts password exactly 12 chars with all requirements", () => {
-		expect(registerSchema.safeParse({ ...valid, password: "ValidP@ss12!" }).success).toBe(true);
+		expect(registerSchema.safeParse({ ...valid, password: "ValidP@ss12!", confirm_password: "ValidP@ss12!" }).success).toBe(true);
 	});
 
 	it("accepts password exactly 30 chars", () => {
 		const p = "ValidP@ss12!" + "a".repeat(18); // 12 + 18 = 30
-		expect(registerSchema.safeParse({ ...valid, password: p }).success).toBe(true);
+		expect(registerSchema.safeParse({ ...valid, password: p, confirm_password: p }).success).toBe(true);
 	});
 });
