@@ -78,6 +78,8 @@ _cleanup_existing() {
     log_section "Removing existing agent installation"
 
     systemctl disable --now lynx-agent.service 2>/dev/null || true
+    systemctl disable --now lynx-agent-postgres.service 2>/dev/null || true
+    rm -f /etc/systemd/system/lynx-agent-postgres.service
 
     # Remove WireGuard
     if ip link show "$WG_IFACE" &>/dev/null; then
@@ -95,7 +97,7 @@ _cleanup_existing() {
         podman secret rm "$s" 2>/dev/null || true
     done
 
-    # Remove systemd unit
+    # Remove systemd units
     rm -f /etc/systemd/system/lynx-agent.service
     systemctl daemon-reload
 
@@ -701,12 +703,30 @@ unset INTERNAL_TOKEN
 
 log_section "Installing systemd service"
 
+# Service that starts the PostgreSQL container at boot.
+# Podman's podman-restart.service only handles restart-policy=always;
+# our container uses unless-stopped, so we manage boot startup explicitly.
+cat > /etc/systemd/system/lynx-agent-postgres.service << 'EOF'
+[Unit]
+Description=Lynx Agent — PostgreSQL container
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start lynx-agent-postgres
+ExecStop=/usr/bin/podman stop -t 30 lynx-agent-postgres
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > /etc/systemd/system/lynx-agent.service << EOF
 [Unit]
 Description=Lynx Agent — infrastructure orchestration service
 Documentation=https://github.com/Jaro-c/Lynx
-After=network.target ${PG_CONTAINER}-container.service
-Requires=network.target
+After=network.target lynx-agent-postgres.service
+Requires=network.target lynx-agent-postgres.service
 
 [Service]
 Type=simple
@@ -738,8 +758,9 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+systemctl enable lynx-agent-postgres.service
 systemctl enable lynx-agent.service
-log_ok "Service installed: lynx-agent.service"
+log_ok "Services installed: lynx-agent-postgres.service, lynx-agent.service"
 
 # --- WireGuard agent side ---------------------------------------------------
 
