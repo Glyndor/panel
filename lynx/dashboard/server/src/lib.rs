@@ -10,6 +10,7 @@ pub mod error;
 pub mod migration;
 pub mod nftables;
 pub mod organizations;
+pub mod peer_addr;
 pub mod podman;
 pub mod scheduler;
 pub mod state;
@@ -55,6 +56,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/migration", migration::router::receive_router())
         .nest("/nftables", nftables_router)
         .with_state(state)
+        .layer(middleware::from_fn(peer_addr::inject_peer_addr))
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("x-frame-options"),
             HeaderValue::from_static("DENY"),

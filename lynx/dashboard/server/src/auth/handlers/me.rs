@@ -28,6 +28,7 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
     let client_ip = headers
         .get("x-real-ip")
         .or_else(|| headers.get("x-forwarded-for"))
+        .or_else(|| headers.get("x-peer-addr"))
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
         .unwrap_or_default();
