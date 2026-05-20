@@ -23,12 +23,16 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
     }
 
     let user = sqlx::query!(
-        "SELECT username, single_session FROM users WHERE id = $1",
+        "SELECT username, single_session, force_password_change FROM users WHERE id = $1",
         claims.sub
     )
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::Unauthorized)?;
+
+    if user.force_password_change {
+        return Err(AppError::ForcePasswordChange);
+    }
 
     let is_admin: bool = sqlx::query_scalar!(
         r#"SELECT EXISTS(
