@@ -46,7 +46,7 @@ async fn send_cmd(
     let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", command)
         .map_err(AppError::Internal)?;
 
-    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+    let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
     let client = build_agent_client(&state.config);
 
     client

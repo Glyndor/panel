@@ -427,6 +427,51 @@ pub async fn is_connected(state: &AppState, agent_id: Uuid) -> bool {
     map.contains_key(&agent_id)
 }
 
+/// On graceful shutdown (SIGTERM): mark all connected agents offline and fire
+/// heartbeat_lost for any that don't have a recent grace-period event.
+/// Called before process exit so the DB reflects reality across restarts.
+pub async fn shutdown_notify_all(state: &AppState) {
+    let agent_ids: Vec<Uuid> = {
+        let map = state.agent_ws_conns.read().await;
+        map.keys().copied().collect()
+    };
+
+    for agent_id in agent_ids {
+        let _ = sqlx::query!("UPDATE agents SET status='offline' WHERE id=$1", agent_id)
+            .execute(&state.db)
+            .await;
+
+        let is_expected = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM agent_events
+                WHERE agent_id = $1
+                  AND event IN ('rebooting', 'updating')
+                  AND created_at > NOW() - INTERVAL '5 minutes'
+            ) AS "exists!"
+            "#,
+            agent_id
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+
+        if !is_expected {
+            let event_id = Uuid::now_v7();
+            let _ = sqlx::query!(
+                "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",
+                event_id,
+                agent_id
+            )
+            .execute(&state.db)
+            .await;
+            broadcast_event(state, agent_id, "heartbeat_lost", None);
+            crate::alerts::fire(state, "heartbeat_lost", None, agent_id).await;
+            tracing::warn!(agent_id = %agent_id, "heartbeat lost — backend shutting down");
+        }
+    }
+}
+
 /// Push current global rules to an agent that has pending unsynced entries.
 /// Called on WS connect — catches up agents that were offline during a global push.
 /// Sends both input chain (lynx-global) and output chain (lynx-global-output).

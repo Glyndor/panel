@@ -185,7 +185,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
             .map_err(AppError::Internal)?;
 
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
         let _ = client
             .post(&url)
@@ -240,7 +240,7 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
                 cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
                     .map_err(AppError::Internal)?;
 
-            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
             let result = client
                 .post(&url)
                 .header(
@@ -420,7 +420,7 @@ pub async fn rotate_expiring_certs(state: &AppState, threshold_days: i64) -> Res
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
             .map_err(AppError::Internal)?;
 
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
         let result = client
             .post(&url)
             .header(

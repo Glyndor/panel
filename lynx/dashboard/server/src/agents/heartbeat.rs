@@ -63,7 +63,7 @@ async fn poll_agents(state: &AppState) {
             continue;
         }
 
-        let url = format!("http://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
         // Heartbeat ACK is a signed command so the agent can verify the dashboard's
         // Ed25519 signature — bearer token alone cannot reset the lockdown timer.
         let heartbeat_cmd = serde_json::json!({ "type": "agent.heartbeat_ack" });
@@ -240,7 +240,7 @@ async fn dispatch_update(
     let client =
         super::client::build_agent_client_with_timeout(&state.config, Duration::from_secs(10));
 
-    let url = format!("http://{wg_ip}:{api_port}/cmd");
+    let url = format!("https://{wg_ip}:{api_port}/cmd");
     let result = client
         .post(&url)
         .header(

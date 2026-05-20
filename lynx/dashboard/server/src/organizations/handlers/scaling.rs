@@ -197,7 +197,7 @@ pub async fn horizontal_scale(
         "wg_port": wg_port,
     });
     let signed_a = sign_command(&state.config, agent_a_id, user.user_id, "write", &setup_a)?;
-    let url_a = format!("http://{}:{}/cmd", agent_a.wg_ip, agent_a.api_port);
+    let url_a = format!("https://{}:{}/cmd", agent_a.wg_ip, agent_a.api_port);
     http.post(&url_a)
         .header("Authorization", format!("Bearer {tok}"))
         .json(&signed_a)
@@ -217,7 +217,7 @@ pub async fn horizontal_scale(
         "wg_port": wg_port,
     });
     let signed_b = sign_command(&state.config, agent_b_id, user.user_id, "write", &setup_b)?;
-    let url_b = format!("http://{}:{}/cmd", agent_b.wg_ip, agent_b.api_port);
+    let url_b = format!("https://{}:{}/cmd", agent_b.wg_ip, agent_b.api_port);
     http.post(&url_b)
         .header("Authorization", format!("Bearer {tok}"))
         .json(&signed_b)
@@ -315,7 +315,7 @@ pub async fn teardown_horizontal_scale(
                 let signed =
                     sign_command(&state.config, agent_id, user.user_id, "write", &teardown)?;
                 let _ = http
-                    .post(format!("http://{}:{}/cmd", a.wg_ip, a.api_port))
+                    .post(format!("https://{}:{}/cmd", a.wg_ip, a.api_port))
                     .header("Authorization", format!("Bearer {tok}"))
                     .json(&signed)
                     .timeout(std::time::Duration::from_secs(15))

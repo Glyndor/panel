@@ -179,7 +179,7 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
                 }
             };
 
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
         let result = client
             .post(&url)
             .header(
