@@ -263,14 +263,14 @@ async fn store_audit_entries(
 
     // Verify hash chain integrity before persisting: each entry's previous_hash must
     // match the entry_hash of the entry immediately before it in the chain.
-    // Convention: first entry ever has previous_hash = "" (empty string).
+    // Convention: first entry ever has previous_hash = "genesis".
     let mut expected_prev: String = sqlx::query_scalar!(
         "SELECT entry_hash FROM audit_log WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1",
         agent_id
     )
     .fetch_optional(&state.db)
     .await?
-    .unwrap_or_default();
+    .unwrap_or_else(|| "genesis".to_string());
 
     // Sort entries by created_at to process in chronological order.
     let mut ordered = entries.clone();

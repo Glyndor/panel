@@ -41,13 +41,14 @@ pub async fn receive_audit_sync(
     }
 
     // Validate hash chain before persisting — same integrity check as WS path.
+    // Convention: first entry ever has previous_hash = "genesis".
     let mut expected_prev: String = sqlx::query_scalar!(
         "SELECT entry_hash FROM audit_log WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1",
         id
     )
     .fetch_optional(&state.db)
     .await?
-    .unwrap_or_default();
+    .unwrap_or_else(|| "genesis".to_string());
 
     let mut ordered = entries.clone();
     ordered.sort_by_key(|e| e.created_at);
