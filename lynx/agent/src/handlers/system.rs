@@ -27,7 +27,11 @@ use super::{
         handle_certbot_obtain, handle_close_setup_port, handle_nginx_deploy,
         handle_nginx_install_cert, handle_nginx_update_config,
     },
-    wireguard::{handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk},
+    wireguard::{
+        handle_wg_data_plane_setup, handle_wg_data_plane_teardown,
+        handle_wg_management_add_peer, handle_wg_management_list_peers,
+        handle_wg_management_remove_peer, handle_wg_rotate_psk,
+    },
 };
 
 pub async fn health() -> StatusCode {
@@ -182,6 +186,9 @@ async fn command_dispatch(
         "container.update" => handle_container_update(cmd),
         "update.self" => handle_update_self(cmd).await,
         "wg.rotate_psk" => handle_wg_rotate_psk(cmd),
+        "wg.management.add_peer" => handle_wg_management_add_peer(cmd),
+        "wg.management.remove_peer" => handle_wg_management_remove_peer(cmd),
+        "wg.management.list_peers" => handle_wg_management_list_peers(cmd),
         "wg.data_plane.setup" => handle_wg_data_plane_setup(cmd),
         "wg.data_plane.teardown" => handle_wg_data_plane_teardown(cmd),
         "dashboard.migrate" => handle_dashboard_migrate(state, cmd).await,

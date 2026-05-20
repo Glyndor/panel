@@ -99,11 +99,14 @@ async fn main() -> anyhow::Result<()> {
     // Record setup_token_issued_at on first boot without an admin (24h TTL window).
     record_setup_token_issuance(&state.db).await;
 
-    // Reconcile WireGuard peers against DB at startup.
-    agents::wg::reconcile_peers(&state.db).await;
-
     tokio::spawn(agents::heartbeat::run_scheduler(state.clone()));
     tokio::spawn(scheduler::run(state.clone()));
+    // Reconcile WireGuard peers after server starts — local agent WS reconnects quickly.
+    let reconcile_state = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        agents::wg::reconcile_peers(&reconcile_state).await;
+    });
 
     let app = build_router(state);
 
