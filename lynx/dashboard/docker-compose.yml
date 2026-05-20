@@ -33,7 +33,7 @@ services:
       - BACKEND_URL=http://lynx-dashboard-backend:8080
       - NEXT_TELEMETRY_DISABLED=1
     volumes:
-      - /etc/lynx/frontend:/etc/lynx/frontend:ro
+      - /etc/lynx/frontend:/etc/lynx/frontend
     depends_on:
       backend:
         condition: service_healthy
