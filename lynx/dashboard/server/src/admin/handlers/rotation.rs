@@ -291,12 +291,29 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
     .await
     .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
+    // Build the new database URL by replacing the password in the current URL.
+    let new_db_url = {
+        let mut u = url::Url::parse(&state.config.database_url)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("invalid DATABASE_URL: {e}")))?;
+        let _ = u.set_password(Some(&*new_pass));
+        Zeroizing::new(u.to_string())
+    };
+
+    let mut pg_ok = false;
     if let Err(e) =
         crate::podman::secret_replace("lynx-dashboard-pg-pass", new_pass.as_bytes()).await
     {
         tracing::warn!("podman secret update for pg-pass failed: {e}");
     } else {
-        tracing::info!("PostgreSQL app password rotated and Podman secret updated");
+        pg_ok = true;
+    }
+
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-database-url", new_db_url.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for database-url failed: {e}");
+    } else if pg_ok {
+        tracing::info!("PostgreSQL app password rotated and Podman secrets updated");
     }
 
     Ok(())
@@ -324,12 +341,29 @@ pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
         .await
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
+    // Build the new Redis URL by replacing the password in the current URL.
+    let new_redis_url = {
+        let mut u = url::Url::parse(&state.config.redis_url)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("invalid REDIS_URL: {e}")))?;
+        let _ = u.set_password(Some(&*new_pass));
+        Zeroizing::new(u.to_string())
+    };
+
+    let mut redis_ok = false;
     if let Err(e) =
         crate::podman::secret_replace("lynx-dashboard-redis-pass", new_pass.as_bytes()).await
     {
         tracing::warn!("podman secret update for redis-pass failed: {e}");
     } else {
-        tracing::info!("Redis password rotated and Podman secret updated");
+        redis_ok = true;
+    }
+
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-redis-url", new_redis_url.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for redis-url failed: {e}");
+    } else if redis_ok {
+        tracing::info!("Redis password rotated and Podman secrets updated");
     }
 
     Ok(())
