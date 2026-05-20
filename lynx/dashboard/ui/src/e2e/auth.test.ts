@@ -9,7 +9,7 @@ test.describe("Login page", () => {
 		await page.goto("/en/login");
 
 		await expect(page.getByLabel("Username")).toBeVisible();
-		await expect(page.getByLabel("Password")).toBeVisible();
+		await expect(page.locator("#password")).toBeVisible();
 		await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
 	});
 
@@ -40,7 +40,7 @@ test.describe("Login page", () => {
 		});
 
 		await page.getByLabel("Username").fill("testuser");
-		await page.getByLabel("Password").fill("password123");
+		await page.locator("#password").fill("password123");
 		await page.getByRole("button", { name: "Sign in" }).click();
 
 		// During the network delay, button shows submitting state
@@ -50,7 +50,7 @@ test.describe("Login page", () => {
 	test("password field masks input", async ({ page }) => {
 		await page.goto("/en/login");
 
-		const passwordInput = page.getByLabel("Password");
+		const passwordInput = page.locator("#password");
 		await expect(passwordInput).toHaveAttribute("type", "password");
 	});
 });
@@ -65,7 +65,7 @@ test.describe("Register page", () => {
 
 		await expect(page.getByLabel("Username")).toBeVisible();
 		await expect(page.getByLabel("Email")).toBeVisible();
-		await expect(page.getByLabel("Password")).toBeVisible();
+		await expect(page.locator("#password")).toBeVisible();
 		await expect(page.getByRole("button", { name: "Create account" })).toBeVisible();
 	});
 
@@ -80,7 +80,7 @@ test.describe("Register page", () => {
 	test("password field masks input", async ({ page }) => {
 		await page.goto("/en/register");
 
-		const passwordInput = page.getByLabel("Password");
+		const passwordInput = page.locator("#password");
 		await expect(passwordInput).toHaveAttribute("type", "password");
 	});
 
@@ -89,7 +89,7 @@ test.describe("Register page", () => {
 
 		// Submit without filling username
 		await page.getByLabel("Email").fill("user@example.com");
-		await page.getByLabel("Password").fill("ValidP@ss12!");
+		await page.locator("#password").fill("ValidP@ss12!");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		// Zod validation fires before any network call
@@ -101,7 +101,7 @@ test.describe("Register page", () => {
 
 		await page.getByLabel("Username").fill("validuser");
 		await page.getByLabel("Email").fill("user@example.com");
-		await page.getByLabel("Password").fill("Short1!");
+		await page.locator("#password").fill("Short1!");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		await expect(page.locator("text=at least 12 characters")).toBeVisible();
@@ -112,7 +112,7 @@ test.describe("Register page", () => {
 
 		await page.getByLabel("Username").fill("validuser");
 		await page.getByLabel("Email").fill("user@example.com");
-		await page.getByLabel("Password").fill("nouppercase12!");
+		await page.locator("#password").fill("nouppercase12!");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		await expect(page.locator("text=uppercase")).toBeVisible();
@@ -123,7 +123,7 @@ test.describe("Register page", () => {
 
 		await page.getByLabel("Username").fill("validuser");
 		await page.getByLabel("Email").fill("user@example.com");
-		await page.getByLabel("Password").fill("NoNumbersHere!");
+		await page.locator("#password").fill("NoNumbersHere!");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		await expect(page.locator("text=number")).toBeVisible();
@@ -134,7 +134,7 @@ test.describe("Register page", () => {
 
 		await page.getByLabel("Username").fill("validuser");
 		await page.getByLabel("Email").fill("user@example.com");
-		await page.getByLabel("Password").fill("NoSpecialChar12");
+		await page.locator("#password").fill("NoSpecialChar12");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		await expect(page.locator("text=special")).toBeVisible();
@@ -145,7 +145,7 @@ test.describe("Register page", () => {
 
 		await page.getByLabel("Username").fill("validuser");
 		await page.getByLabel("Email").fill("notanemail");
-		await page.getByLabel("Password").fill("ValidP@ss12!");
+		await page.locator("#password").fill("ValidP@ss12!");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		await expect(page.locator("text=valid email")).toBeVisible();
@@ -156,7 +156,7 @@ test.describe("Register page", () => {
 
 		await page.getByLabel("Username").fill("admin");
 		await page.getByLabel("Email").fill("user@example.com");
-		await page.getByLabel("Password").fill("ValidP@ss12!");
+		await page.locator("#password").fill("ValidP@ss12!");
 		await page.getByRole("button", { name: "Create account" }).click();
 
 		await expect(page.locator("text=reserved")).toBeVisible();
