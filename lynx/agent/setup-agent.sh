@@ -61,7 +61,7 @@ PG_DB="lynx_agent"
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)"
 BIN_DIR="/etc/lynx/bin"
 BINARY_PATH="$BIN_DIR/lynx-agent"
 
@@ -224,8 +224,11 @@ unset _REASON_DOCKER _REASON_CTR _REASON_FW
 log_section "Checking for existing installation"
 
 existing=false
-if [[ -d "$LYNX_DIR" ]] || id "$LYNX_AGENT_USER" &>/dev/null || \
-   systemctl list-unit-files lynx-agent.service &>/dev/null 2>&1 | grep -q lynx-agent; then
+# Check for agent-specific markers only — /etc/lynx is shared with the dashboard
+# on VPSes that host both. /etc/lynx alone does not mean the agent is installed.
+if id "$LYNX_AGENT_USER" &>/dev/null || \
+   systemctl list-unit-files lynx-agent.service 2>/dev/null | grep -q lynx-agent || \
+   [[ -f "$AGENT_CONF" ]] || podman container exists "$PG_CONTAINER" 2>/dev/null; then
     existing=true
 fi
 
@@ -242,7 +245,7 @@ if $existing; then
     case "$choice" in
         2)
             log_info "Redirecting to update..."
-            exec "$(dirname "${BASH_SOURCE[0]}")/update-agent.sh"
+            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-agent.sh"
             ;;
         3)
             echo ""
