@@ -50,7 +50,6 @@ WG_CONF_LINK="$WG_DIR/wg-lynx-agent.conf"   # symlink for wg-quick compatibility
 WG_IFACE="wg-lynx-agent"
 AGENT_WG_IP=""           # set from dashboard-assigned IP during onboarding prompt
 DASHBOARD_WG_IP="10.100.0.1"
-WG_SUBNET="10.100.0.0/24"
 WG_PORT=51820
 AGENT_PORT=9090
 LYNX_AGENT_USER="lynx-agent"
@@ -61,7 +60,6 @@ PG_DB="lynx_agent"
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)"
 BIN_DIR="/etc/lynx/bin"
 BINARY_PATH="$BIN_DIR/lynx-agent"
 
@@ -420,9 +418,6 @@ fi
 
 AGENT_WG_IP="$AGENT_WG_IP_INPUT"
 
-DASHBOARD_IP="${DASHBOARD_ENDPOINT%%:*}"
-DASHBOARD_WG_LISTEN="${DASHBOARD_ENDPOINT##*:}"
-
 # --- Create directories -----------------------------------------------------
 
 log_section "Creating directories"
@@ -484,8 +479,6 @@ loginctl enable-linger "$LYNX_AGENT_USER" 2>/dev/null || true
 # The agent user itself needs a base allocation for its own Podman.
 
 log_section "Configuring subuid/subgid ranges"
-
-AGENT_UID=$(id -u "$LYNX_AGENT_USER")
 
 # Agent user: 1,000,000 – 1,065,535 (65536 IDs)
 if ! grep -q "^${LYNX_AGENT_USER}:" /etc/subuid 2>/dev/null; then
@@ -610,6 +603,7 @@ PG_PASS="$(openssl rand -hex 32)"
 log_section "Downloading lynx-agent binary"
 
 GITHUB_REPO="Jaro-c/Lynx"
+RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
 
 _ARCH=$(uname -m)
 case "$_ARCH" in
@@ -657,16 +651,15 @@ chmod 755 "$BIN_DIR"
 
 _verify_release_sig() {
     local file="$1" sig_file="$2"
-    python3 - "$file" "$sig_file" <<'PYEOF'
+    python3 - "$RELEASE_VERIFY_KEY_B64" "$file" "$sig_file" <<'PYEOF'
 import sys, base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
-pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(sys.argv[1] + "=="))
 
-with open(sys.argv[1], "rb") as f:
-    data = f.read()
 with open(sys.argv[2], "rb") as f:
+    data = f.read()
+with open(sys.argv[3], "rb") as f:
     sig = f.read()
 try:
     pub_key.verify(sig, data)
@@ -810,18 +803,15 @@ LOCAL_IFACE_IP=$(ip route get "$DASHBOARD_HOST" 2>/dev/null | grep -oP 'src \K\S
 PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || \
             curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
 
-NAT_DETECTED=false
 KEEPALIVE_LINE=""
 
 if [[ -n "$LOCAL_IFACE_IP" && -n "$PUBLIC_IP" && "$LOCAL_IFACE_IP" != "$PUBLIC_IP" ]]; then
-    NAT_DETECTED=true
     KEEPALIVE_LINE="PersistentKeepalive = 25"
     log_info "NAT detected (interface IP: ${LOCAL_IFACE_IP}, public IP: ${PUBLIC_IP})"
     log_info "Enabling PersistentKeepalive = 25 to maintain NAT table entry"
     log_warn "If your provider's NAT timeout is < 25s or blocks persistent UDP, the tunnel may be unstable"
 elif [[ -z "$PUBLIC_IP" ]]; then
     # Cannot determine — enable keepalive as safe default
-    NAT_DETECTED=true
     KEEPALIVE_LINE="PersistentKeepalive = 25"
     log_warn "Could not determine public IP — enabling PersistentKeepalive = 25 as safe default"
 else
