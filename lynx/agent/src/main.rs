@@ -276,6 +276,29 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // PostgreSQL health watchdog — lockdown if DB unreachable
+    {
+        let state_db = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                if sqlx::query!("SELECT 1 AS ok")
+                    .fetch_one(&state_db.db)
+                    .await
+                    .is_err()
+                    && !state_db.is_locked_down()
+                {
+                    tracing::error!("PostgreSQL unreachable — entering lockdown");
+                    state_db
+                        .lockdown
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        });
+    }
+
     // WebSocket client — persistent connection to dashboard
     tokio::spawn(ws_client::run_ws_client(state.clone()));
 
