@@ -3,7 +3,7 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useTransition } from "react";
-import { updateThemeAction } from "@/actions/(dashboard)/app/settings/preferences";
+import { updateThemeAction } from "@/actions/(dashboard)/app/member/preferences";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,

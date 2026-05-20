@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, LayoutDashboard, LogOut, Monitor, Settings, ShieldCheck } from "lucide-react";
+import { Building2, FolderOpen, LogOut, Monitor, Settings, ShieldCheck, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -20,19 +20,24 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 
 	const items = [
 		{
-			href: `/${locale}/app`,
-			icon: LayoutDashboard,
-			label: t("overview"),
-		},
-		{
-			href: `/${locale}/app/agents`,
+			href: `/${locale}/app/v`,
 			icon: Monitor,
-			label: t("agents"),
+			label: t("vps"),
 		},
 		{
-			href: `/${locale}/app/organizations`,
+			href: `/${locale}/app/o`,
 			icon: Building2,
 			label: t("organizations"),
+		},
+		{
+			href: `/${locale}/app/p`,
+			icon: FolderOpen,
+			label: t("projects"),
+		},
+		{
+			href: `/${locale}/app/member`,
+			icon: User,
+			label: t("member"),
 		},
 		{
 			href: `/${locale}/app/settings`,
@@ -65,7 +70,7 @@ export function Sidebar({ locale, companyName, logoUrl, isAdmin }: Props) {
 
 			<nav className="flex flex-col gap-0.5 p-2 flex-1">
 				{items.map(({ href, label, icon: Icon }) => {
-					const active = href === `/${locale}/app` ? pathname === href : pathname.startsWith(href);
+					const active = pathname.startsWith(href);
 					return (
 						<Link
 							className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${

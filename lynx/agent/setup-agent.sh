@@ -679,12 +679,22 @@ log_ok "Version: ${LATEST_AGENT_TAG#agent@}"
 
 log_section "Writing agent configuration"
 
+# Detect if this is the dashboard VPS — setup-dashboard.sh leaves nginx config
+IS_DASHBOARD_VPS=false
+DASHBOARD_PORT_CONF=""
+if [[ -f /etc/lynx/nginx/default.conf ]]; then
+    IS_DASHBOARD_VPS=true
+    DASHBOARD_PORT_CONF="DASHBOARD_PORT=19443"
+    log_info "Dashboard VPS detected — local agent mode, will open port 19443"
+fi
+
 cat > "$AGENT_CONF" << EOF
 AGENT_ID=${AGENT_ID}
 DATABASE_URL_FILE=/run/credentials/lynx-agent.service/database-url
 INTERNAL_TOKEN_FILE=/run/credentials/lynx-agent.service/internal-token
 LISTEN_ADDR=127.0.0.1:${AGENT_PORT}
 RUST_LOG=info
+${DASHBOARD_PORT_CONF}
 EOF
 
 chmod 600 "$AGENT_CONF"
@@ -848,13 +858,39 @@ fi
 
 log_section "Configuring nftables (agent)"
 
+# Build optional dashboard-VPS-only rules
+DASHBOARD_PORT_NFT=""
+DASHBOARD_DNS_NFT=""
+DASHBOARD_FORWARD_NFT=""
+if [[ "$IS_DASHBOARD_VPS" == "true" ]]; then
+    DASHBOARD_PORT_NFT="        # Dashboard panel port
+        tcp dport 19443 ct state new accept
+"
+    DASHBOARD_DNS_NFT="        # DNS for container networks (aardvark-dns on Netavark bridge interfaces)
+        iifname \"podman*\" udp dport 53 accept
+        iifname \"podman*\" tcp dport 53 accept
+"
+    DASHBOARD_FORWARD_NFT="
+        # Container-to-container traffic on Netavark bridge networks
+        iifname \"podman*\" oifname \"podman*\" accept
+
+        # Backend container traffic to/from WireGuard (dashboard <-> agents)
+        oifname \"wg-lynx-dash\" accept
+        iifname \"wg-lynx-dash\" accept"
+fi
+
+# Bootstrap ruleset — uses same chain names as the Rust agent (lynx-base, lynx-forward, lynx-output).
+# The agent binary will flush and replace this on startup via render_ruleset().
+# The flush prefix ensures no orphaned chains from previous installs survive.
 cat > /etc/nftables-lynx-agent.conf << EOF
+add table inet lynx-agent
+flush table inet lynx-agent
 table inet lynx-agent {
-    chain input {
+    chain lynx-base {
         type filter hook input priority 0; policy drop;
 
         # Loopback
-        iifname "lo" accept
+        iif lo accept
 
         # Established / related
         ct state established,related accept
@@ -863,26 +899,31 @@ table inet lynx-agent {
         ip  protocol icmp  accept
         ip6 nexthdr  icmpv6 accept
 
-        # SSH — emergency access only
-        tcp dport 22 accept
+        # SSH — per-source-IP rate limit
+        tcp dport 22 ct state new meter ssh_throttle { ip saddr limit rate 10/minute burst 20 packets } accept
 
         # WireGuard inbound (dashboard connects here)
         udp dport ${WG_PORT} accept
 
+${DASHBOARD_PORT_NFT}
+${DASHBOARD_DNS_NFT}
         # Agent API — only from WireGuard interface
         iifname "${WG_IFACE}" tcp dport ${AGENT_PORT} accept
 
         drop
     }
 
-    chain forward {
+    chain lynx-global {}
+    chain lynx-local {}
+
+    chain lynx-forward {
         type filter hook forward priority 0; policy drop;
 
-        # Allow forwarding within lynx org networks
-        iifname "lynx-org-*" oifname "lynx-org-*" accept
+        ct state established,related accept
+${DASHBOARD_FORWARD_NFT}
     }
 
-    chain output {
+    chain lynx-output {
         type filter hook output priority 0; policy accept;
     }
 }

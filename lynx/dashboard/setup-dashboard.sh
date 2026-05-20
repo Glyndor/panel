@@ -952,32 +952,26 @@ printf '%s' "$DASHBOARD_PUB" > "$LYNX_DIR/dashboard-wg-pubkey"
 
 log_section "Configuring nftables"
 
-cat > /etc/nftables-lynx-dashboard.conf << 'EOF'
-table inet lynx-dashboard {
-    chain input {
-        type filter hook input priority filter; policy drop;
+# Bootstrap ruleset uses the same table/chain names as the Rust agent binary so
+# nftables.service loads correct rules on every reboot.  The agent binary
+# overwrites this file on first startup — this is only the boot-window ruleset
+# that runs before lynx-agent.service has started.
+cat > /etc/nftables-lynx-agent.conf << 'EOF'
+add table inet lynx-agent
+flush table inet lynx-agent
+table inet lynx-agent {
+    chain lynx-base {
+        type filter hook input priority 0; policy drop;
 
-        # Loopback
-        iifname "lo" accept
-
-        # Drop invalid state immediately
+        iif lo accept
         ct state invalid drop
-
-        # Established / related
         ct state established,related accept
 
-        # Required ICMP types (path MTU, traceroute, diagnostics)
-        ip  protocol icmp  icmp type  { destination-unreachable, time-exceeded, parameter-problem } accept
-        ip6 nexthdr  icmpv6 icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
+        # ICMP — path MTU, diagnostics, reachability
+        ip  protocol icmp  accept
+        ip6 nexthdr  icmpv6 accept
 
-        # ICMPv6 NDP — required for IPv6 neighbor discovery
-        ip6 nexthdr ipv6-icmp icmpv6 type { nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
-
-        # ICMP echo — rate limited
-        ip  protocol icmp  icmp type  echo-request ct state new limit rate 3/second burst 10 packets accept
-        ip6 nexthdr  icmpv6 icmpv6 type echo-request ct state new limit rate 3/second burst 10 packets accept
-
-        # TCP flag anomalies — drop port scans and malformed packets
+        # TCP flag anomalies
         tcp flags == 0x0 drop
         tcp flags & (fin | psh | urg) == fin | psh | urg drop
         tcp flags ack ct state new drop
@@ -986,7 +980,7 @@ table inet lynx-dashboard {
         iifname "podman*" udp dport 53 accept
         iifname "podman*" tcp dport 53 accept
 
-        # SSH — per-source-IP rate limit (global limit would lock out all admins if one IP is noisy)
+        # SSH — per-source-IP rate limit
         tcp dport 22 ct state new meter ssh_throttle { ip saddr limit rate 10/minute burst 20 packets } accept
 
         # Dashboard panel
@@ -995,52 +989,47 @@ table inet lynx-dashboard {
         # WireGuard (agent tunnels)
         udp dport 51820 accept
 
+        # Dashboard backend accessible from WireGuard management plane only
+        ip saddr 10.100.0.1 accept
+
+        jump lynx-global
+        jump lynx-local
+
         drop
     }
 
-    chain forward {
-        type filter hook forward priority filter; policy drop;
+    # These chains are populated by the Rust agent after startup
+    chain lynx-global {}
+    chain lynx-local {}
+
+    chain lynx-forward {
+        type filter hook forward priority 0; policy drop;
 
         ct state established,related accept
 
-        # Allow container-to-container traffic on Netavark bridge networks
+        # Container-to-container traffic on Netavark bridge networks
         iifname "podman*" oifname "podman*" accept
 
-        # Allow backend container traffic to/from WireGuard (dashboard ↔ agents)
+        # Backend container traffic to/from WireGuard (dashboard <-> agents)
         oifname "wg-lynx-dash" accept
         iifname "wg-lynx-dash" accept
     }
 
-    chain output {
-        type filter hook output priority filter; policy accept;
-
-        # Ports this server should never initiate outbound connections to
-        tcp dport { 25, 465, 587 } drop  # SMTP — no email relay
-        tcp dport 23 drop                 # Telnet
-        tcp dport { 20, 21 } drop         # FTP
-        udp dport { 137, 138 } drop       # NetBIOS
-        tcp dport { 139, 445 } drop       # SMB
-        tcp dport 6667 drop               # IRC (common botnet C2)
-        tcp dport 111 drop                # RPC
-        udp dport 111 drop
-        udp dport 69 drop                 # TFTP
-        tcp dport 6000-6063 drop          # X11
-        tcp dport 1080 drop               # SOCKS proxy
-        udp dport 5353 drop               # mDNS
-        tcp dport 6881-6889 drop          # BitTorrent
-        udp dport 6881-6889 drop
+    chain lynx-output {
+        type filter hook output priority 0; policy accept;
     }
 }
 EOF
 
-# Apply ruleset
-nft -f /etc/nftables-lynx-dashboard.conf
+# Apply bootstrap ruleset
+nft -f /etc/nftables-lynx-agent.conf
 log_ok "nftables rules applied (ports: 22 rate-limited, 19443, 51820 UDP)"
 
-# Persist across reboots
+# Persist across reboots — migrate away from old lynx-dashboard include
 if [[ -f /etc/nftables.conf ]]; then
-    if ! grep -q "lynx-dashboard" /etc/nftables.conf; then
-        echo 'include "/etc/nftables-lynx-dashboard.conf"' >> /etc/nftables.conf
+    sed -i '/nftables-lynx-dashboard/d' /etc/nftables.conf
+    if ! grep -q "nftables-lynx-agent" /etc/nftables.conf; then
+        echo 'include "/etc/nftables-lynx-agent.conf"' >> /etc/nftables.conf
     fi
 fi
 systemctl enable nftables 2>/dev/null || true
@@ -1055,8 +1044,8 @@ log_section "Enabling container auto-start on reboot"
 cat > /etc/systemd/system/lynx-dashboard-containers.service << 'EOF'
 [Unit]
 Description=Lynx Dashboard — start containers on boot
-After=network-online.target nftables.service
-Wants=network-online.target
+After=network-online.target nftables.service lynx-agent.service
+Wants=network-online.target lynx-agent.service
 
 [Service]
 Type=oneshot
