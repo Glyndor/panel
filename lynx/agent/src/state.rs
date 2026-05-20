@@ -4,6 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -36,6 +37,10 @@ pub struct AppState {
     /// Epoch-second of last successful dashboard contact (WS connect or message received).
     /// 0 = never connected. Used by the fallback updater to detect dashboard absence.
     pub last_dashboard_contact: Arc<AtomicU64>,
+    /// Instant of last received heartbeat ACK from dashboard.
+    /// Reset by both the HTTP /heartbeat handler and the WS heartbeat_ack path.
+    /// The lockdown watchdog fires when this exceeds HEARTBEAT_TIMEOUT_SECS.
+    pub last_heartbeat: Arc<Mutex<Instant>>,
 }
 
 impl AppState {
