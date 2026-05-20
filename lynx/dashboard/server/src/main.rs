@@ -108,15 +108,28 @@ async fn main() -> anyhow::Result<()> {
         agents::wg::reconcile_peers(&reconcile_state).await;
     });
 
-    let app = build_router(state);
+    let app = build_router(state.clone());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     info!("listening on 0.0.0.0:8080");
     update::spawn_startup_health_guard();
+
+    // Graceful shutdown: on SIGTERM, notify agents before exiting.
+    let shutdown_state = state.clone();
+    let shutdown = async move {
+        let _ = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler")
+            .recv()
+            .await;
+        tracing::info!("SIGTERM received — notifying connected agents before shutdown");
+        agents::ws_hub::shutdown_notify_all(&shutdown_state).await;
+    };
+
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown)
     .await?;
     Ok(())
 }

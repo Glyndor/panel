@@ -22,7 +22,7 @@ pub async fn relay_heartbeat(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let url = format!("http://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
+    let url = format!("https://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
 
     let token = &*state.config.internal_token;
     let client = reqwest::Client::new();
@@ -109,7 +109,7 @@ pub async fn send_command(
     }
 
     // Fallback: HTTP POST to agent's /cmd endpoint.
-    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+    let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
     let token = &*state.config.internal_token;
     let client = reqwest::Client::new();
@@ -175,7 +175,7 @@ pub async fn reboot_agent(
     }
 
     // Fallback HTTP.
-    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+    let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
     let tok = &*state.config.internal_token;
     let resp = reqwest::Client::new()
         .post(&url)

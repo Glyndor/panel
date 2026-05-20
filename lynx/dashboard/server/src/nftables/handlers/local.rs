@@ -169,7 +169,7 @@ pub async fn push_local_rules(
         if let Some(body) = ws_hub::push_command(&state, agent.id, v).await {
             body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
         } else {
-            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
             let tok = &*state.config.internal_token;
             reqwest::Client::new()
                 .post(&url)
@@ -188,7 +188,7 @@ pub async fn push_local_rules(
         if let Some(body) = ws_hub::push_command(&state, agent.id, v).await {
             body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
         } else {
-            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
             let tok = &*state.config.internal_token;
             reqwest::Client::new()
                 .post(&url)
