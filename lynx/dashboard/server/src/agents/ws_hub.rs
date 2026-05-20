@@ -148,6 +148,38 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
     .await;
     broadcast_event(&state, agent_id, "disconnected", None);
 
+    // Fire heartbeat_lost alert for unexpected disconnects.
+    // Expected disconnects (reboot, update) insert a grace-period event first —
+    // skip the alert if one exists within the last 5 minutes.
+    let is_expected = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM agent_events
+            WHERE agent_id = $1
+              AND event IN ('rebooting', 'updating')
+              AND created_at > NOW() - INTERVAL '5 minutes'
+        ) AS "exists!"
+        "#,
+        agent_id
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+
+    if !is_expected {
+        let event_id = Uuid::now_v7();
+        let _ = sqlx::query!(
+            "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",
+            event_id,
+            agent_id
+        )
+        .execute(&state.db)
+        .await;
+        broadcast_event(&state, agent_id, "heartbeat_lost", None);
+        crate::alerts::fire(&state, "heartbeat_lost", None, agent_id).await;
+        tracing::warn!(agent_id = %agent_id, "heartbeat lost — agent WS disconnected unexpectedly");
+    }
+
     tracing::info!(agent_id = %agent_id, "agent WS disconnected");
 }
 
