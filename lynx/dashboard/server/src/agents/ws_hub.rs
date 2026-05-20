@@ -197,10 +197,25 @@ async fn handle_agent_message(
             .await?;
 
             // Send heartbeat ACK so agent resets its lockdown timer.
-            let ack = serde_json::json!({"type": "agent.heartbeat_ack"});
-            if let Ok(signed) = crate::crypto::cmd::sign_command_system(&state.config, agent_id, "read", &ack) {
-                if let Ok(signed_val) = serde_json::to_value(&signed) {
-                    let _ = push_command(state, agent_id, signed_val).await;
+            // Fire-and-forget via direct mpsc send — must NOT use push_command here
+            // because push_command waits for a command_response, which would deadlock:
+            // handle_agent_message IS the receive loop, so the response can never be
+            // processed while we're blocked waiting for it.
+            let conn = state.agent_ws_conns.read().await.get(&agent_id).cloned();
+            if let Some(conn) = conn {
+                let ack = serde_json::json!({"type": "agent.heartbeat_ack"});
+                if let Ok(signed) = crate::crypto::cmd::sign_command_system(&state.config, agent_id, "read", &ack) {
+                    if let Ok(signed_val) = serde_json::to_value(&signed) {
+                        let req_id = Uuid::now_v7();
+                        let envelope = serde_json::json!({
+                            "type": "command",
+                            "id": req_id,
+                            "payload": signed_val,
+                        });
+                        if let Ok(text) = serde_json::to_string(&envelope) {
+                            let _ = conn.sender.send(Message::Text(text.into()));
+                        }
+                    }
                 }
             }
         }
