@@ -453,9 +453,10 @@ else
         VARIANT=$(printf '%02x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f))))
         AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-${VARIANT}${RAND:4:2}-${RAND:6:12}"
     fi
-    printf '%s' "$AGENT_ID" > "$LYNX_DIR/agent-id"
-    chmod 600 "$LYNX_DIR/agent-id"
 fi
+# Always persist so successive reinstalls preserve the ID
+printf '%s' "$AGENT_ID" > "$LYNX_DIR/agent-id"
+chmod 600 "$LYNX_DIR/agent-id"
 log_ok "Agent ID: $AGENT_ID"
 
 # --- Create system user -----------------------------------------------------
