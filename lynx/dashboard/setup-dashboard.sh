@@ -53,8 +53,6 @@ LISTEN_PORT=19443
 AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
 DASHBOARD_WG_IP="10.100.0.1"
-WG_SUBNET="10.100.0.0/16"
-CONTAINER_RUNTIME="podman"
 
 # --- Root check -------------------------------------------------------------
 
@@ -619,16 +617,15 @@ chmod 700 "$BIN_DIR" "$FRONTEND_DIR"
 # Verify Ed25519 signature. Args: <file> <sig-file>
 _verify_release_sig() {
     local file="$1" sig_file="$2"
-    python3 - "$file" "$sig_file" <<'PYEOF'
+    python3 - "$RELEASE_VERIFY_KEY_B64" "$file" "$sig_file" <<'PYEOF'
 import sys, base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
-pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(sys.argv[1] + "=="))
 
-with open(sys.argv[1], "rb") as f:
-    data = f.read()
 with open(sys.argv[2], "rb") as f:
+    data = f.read()
+with open(sys.argv[3], "rb") as f:
     sig = f.read()
 try:
     pub_key.verify(sig, data)
@@ -798,11 +795,13 @@ sleep 15
 log_info "Synchronizing PostgreSQL app user password..."
 _PG_PASS_SYNC=$(podman secret inspect lynx-dashboard-pg-pass --showsecret --format '{{.SecretData}}' 2>/dev/null)
 if [[ -n "$_PG_PASS_SYNC" ]]; then
-    printf "ALTER USER lynx_dashboard_app PASSWORD '%s';\n" "$_PG_PASS_SYNC" \
+    if printf "ALTER USER lynx_dashboard_app PASSWORD '%s';\n" "$_PG_PASS_SYNC" \
         | podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard \
-        >/dev/null 2>&1 \
-        && log_ok "PostgreSQL app user password synchronized" \
-        || log_warn "Could not sync PostgreSQL password (non-critical — backend may reconnect)"
+        >/dev/null 2>&1; then
+        log_ok "PostgreSQL app user password synchronized"
+    else
+        log_warn "Could not sync PostgreSQL password (non-critical — backend may reconnect)"
+    fi
 fi
 unset _PG_PASS_SYNC
 
