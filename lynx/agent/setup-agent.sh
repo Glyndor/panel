@@ -869,7 +869,7 @@ log_section "Configuring nftables (agent)"
 # Build optional dashboard-VPS-only rules
 DASHBOARD_PORT_NFT=""
 DASHBOARD_DNS_NFT=""
-DASHBOARD_FORWARD_NFT=""
+DASHBOARD_FORWARD_WG_NFT=""
 if [[ "$IS_DASHBOARD_VPS" == "true" ]]; then
     DASHBOARD_PORT_NFT="        # Dashboard panel port
         tcp dport 19443 ct state new accept
@@ -878,13 +878,7 @@ if [[ "$IS_DASHBOARD_VPS" == "true" ]]; then
         iifname \"podman*\" udp dport 53 accept
         iifname \"podman*\" tcp dport 53 accept
 "
-    DASHBOARD_FORWARD_NFT="
-        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)
-        ip daddr 10.89.0.0/16 ct state new accept
-
-        # Outbound traffic from dashboard containers (apk installs, GitHub, cert renewals, etc.)
-        iifname \"podman*\" accept
-
+    DASHBOARD_FORWARD_WG_NFT="
         # Backend container traffic to/from WireGuard (dashboard <-> agents)
         oifname \"wg-lynx-dash\" accept
         iifname \"wg-lynx-dash\" accept"
@@ -931,7 +925,14 @@ ${DASHBOARD_DNS_NFT}
         type filter hook forward priority 0; policy drop;
 
         ct state established,related accept
-${DASHBOARD_FORWARD_NFT}
+
+        # Netavark DNAT rewrites destination to 10.89.x.x for published container ports.
+        # Without this rule the DNAT'd packets are dropped here (policy drop).
+        ip daddr 10.89.0.0/16 ct state new accept
+
+        # Outbound traffic from Podman containers (package installs, GitHub, cert renewals, etc.)
+        iifname "podman*" accept
+${DASHBOARD_FORWARD_WG_NFT}
     }
 
     chain lynx-output {
