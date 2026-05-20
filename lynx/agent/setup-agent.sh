@@ -57,9 +57,7 @@ PG_NETWORK="lynx-agent-db"
 PG_CONTAINER="lynx-agent-postgres"
 PG_IMAGE="docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359"
 PG_DB="lynx_agent"
-# Fixed subnet and IP — prevents IP drift on container stop/start cycles.
 PG_SUBNET="172.20.100.0/24"
-PG_STATIC_IP="172.20.100.2"
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
 
@@ -563,7 +561,7 @@ log_section "Starting PostgreSQL for agent"
 podman run -d \
     --name "$PG_CONTAINER" \
     --network "$PG_NETWORK" \
-    --ip "$PG_STATIC_IP" \
+    --publish 127.0.0.1:5434:5432 \
     --secret lynx-agent-pg-root,target=lynx-agent-pg-root \
     --secret lynx-agent-pg-pass,target=lynx-agent-pg-pass \
     -e POSTGRES_USER=postgres \
@@ -588,10 +586,10 @@ for i in $(seq 1 40); do
     sleep 2
 done
 
-# Write DATABASE_URL with fixed container IP, then zeroize PG_PASS.
-# Static IP prevents URL drift on container stop/start cycles.
+# Write DATABASE_URL using the host-mapped port — stable across container restarts
+# regardless of which IP the container is assigned inside the Podman network.
 (
-    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@${PG_STATIC_IP}:5432/${PG_DB}"
+    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@127.0.0.1:5434/${PG_DB}"
     printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
     chmod 600 /etc/lynx/credentials/database-url
     DB_URL="$(openssl rand -hex 32)"
