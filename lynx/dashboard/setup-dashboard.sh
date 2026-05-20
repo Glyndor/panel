@@ -1007,6 +1007,9 @@ table inet lynx-agent {
 
         ct state established,related accept
 
+        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)
+        ip daddr 10.89.0.0/16 ct state new accept
+
         # Container-to-container traffic on Netavark bridge networks
         iifname "podman*" oifname "podman*" accept
 
