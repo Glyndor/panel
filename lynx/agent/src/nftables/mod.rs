@@ -113,7 +113,9 @@ fn chain_checksum_raw(args: &[&str]) -> Result<String> {
 
 fn render_ruleset(r: &Ruleset) -> String {
     let dashboard_port_rule = match r.dashboard_port {
-        Some(port) => format!("\n        # Dashboard panel port\n        tcp dport {port} ct state new accept\n"),
+        Some(port) => format!(
+            "\n        # Dashboard panel port\n        tcp dport {port} ct state new accept\n"
+        ),
         None => String::new(),
     };
 
@@ -251,7 +253,10 @@ mod tests {
     fn render_contains_table_name() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("table inet lynx-agent"), "table declaration missing");
+        assert!(
+            out.contains("table inet lynx-agent"),
+            "table declaration missing"
+        );
     }
 
     #[test]
@@ -280,7 +285,10 @@ mod tests {
     fn render_contains_lynx_global_chain() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("chain lynx-global"), "lynx-global chain missing");
+        assert!(
+            out.contains("chain lynx-global"),
+            "lynx-global chain missing"
+        );
     }
 
     #[test]
@@ -294,14 +302,20 @@ mod tests {
     fn render_contains_lynx_forward_chain() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("chain lynx-forward"), "lynx-forward chain missing");
+        assert!(
+            out.contains("chain lynx-forward"),
+            "lynx-forward chain missing"
+        );
     }
 
     #[test]
     fn render_contains_lynx_output_chain() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("chain lynx-output"), "lynx-output chain missing");
+        assert!(
+            out.contains("chain lynx-output"),
+            "lynx-output chain missing"
+        );
     }
 
     #[test]
@@ -316,7 +330,10 @@ mod tests {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
         // The dashboard backend is always at 10.100.0.1
-        assert!(out.contains("10.100.0.1"), "dashboard management IP missing");
+        assert!(
+            out.contains("10.100.0.1"),
+            "dashboard management IP missing"
+        );
     }
 
     #[test]
@@ -324,7 +341,10 @@ mod tests {
         let mut r = minimal_ruleset();
         r.global_body = "        tcp dport 443 accept".to_string();
         let out = render_ruleset(&r);
-        assert!(out.contains("tcp dport 443 accept"), "global_body not included");
+        assert!(
+            out.contains("tcp dport 443 accept"),
+            "global_body not included"
+        );
     }
 
     #[test]
@@ -332,7 +352,10 @@ mod tests {
         let mut r = minimal_ruleset();
         r.local_body = "        tcp dport 8080 accept".to_string();
         let out = render_ruleset(&r);
-        assert!(out.contains("tcp dport 8080 accept"), "local_body not included");
+        assert!(
+            out.contains("tcp dport 8080 accept"),
+            "local_body not included"
+        );
     }
 
     #[test]
@@ -343,16 +366,28 @@ mod tests {
             subnet: "172.20.0.0/24".to_string(),
         }];
         let out = render_ruleset(&r);
-        assert!(out.contains("172.20.0.0/24"), "org subnet missing from isolation rules");
-        assert!(out.contains("org-abc"), "org id missing from isolation comment");
+        assert!(
+            out.contains("172.20.0.0/24"),
+            "org subnet missing from isolation rules"
+        );
+        assert!(
+            out.contains("org-abc"),
+            "org id missing from isolation comment"
+        );
     }
 
     #[test]
     fn render_multiple_orgs_all_present() {
         let mut r = minimal_ruleset();
         r.org_networks = vec![
-            OrgNetwork { org_id: "org-1".to_string(), subnet: "172.20.1.0/24".to_string() },
-            OrgNetwork { org_id: "org-2".to_string(), subnet: "172.20.2.0/24".to_string() },
+            OrgNetwork {
+                org_id: "org-1".to_string(),
+                subnet: "172.20.1.0/24".to_string(),
+            },
+            OrgNetwork {
+                org_id: "org-2".to_string(),
+                subnet: "172.20.2.0/24".to_string(),
+            },
         ];
         let out = render_ruleset(&r);
         assert!(out.contains("172.20.1.0/24"));
@@ -370,24 +405,42 @@ mod tests {
     fn render_has_destroy_add_prefix() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("destroy table inet lynx-agent"), "idempotent prefix missing: destroy table");
-        assert!(out.contains("add table inet lynx-agent"), "idempotent prefix missing: add table");
+        assert!(
+            out.contains("destroy table inet lynx-agent"),
+            "idempotent prefix missing: destroy table"
+        );
+        assert!(
+            out.contains("add table inet lynx-agent"),
+            "idempotent prefix missing: add table"
+        );
     }
 
     #[test]
     fn render_lynx_base_contains_ssh() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("tcp dport 22"), "SSH accept missing from lynx-base");
-        assert!(out.contains("ssh_throttle"), "SSH rate-limit meter missing from lynx-base");
+        assert!(
+            out.contains("tcp dport 22"),
+            "SSH accept missing from lynx-base"
+        );
+        assert!(
+            out.contains("ssh_throttle"),
+            "SSH rate-limit meter missing from lynx-base"
+        );
     }
 
     #[test]
     fn render_lynx_base_contains_icmp() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(out.contains("ip protocol icmp accept"), "ICMP v4 accept missing from lynx-base");
-        assert!(out.contains("ip6 nexthdr icmpv6 accept"), "ICMP v6 accept missing from lynx-base");
+        assert!(
+            out.contains("ip protocol icmp accept"),
+            "ICMP v4 accept missing from lynx-base"
+        );
+        assert!(
+            out.contains("ip6 nexthdr icmpv6 accept"),
+            "ICMP v6 accept missing from lynx-base"
+        );
     }
 
     #[test]
@@ -395,14 +448,20 @@ mod tests {
         let mut r = minimal_ruleset();
         r.dashboard_port = Some(19443);
         let out = render_ruleset(&r);
-        assert!(out.contains("tcp dport 19443"), "dashboard port not included when Some");
+        assert!(
+            out.contains("tcp dport 19443"),
+            "dashboard port not included when Some"
+        );
     }
 
     #[test]
     fn render_dashboard_port_absent_when_none() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(!out.contains("19443"), "dashboard port should not appear when None");
+        assert!(
+            !out.contains("19443"),
+            "dashboard port should not appear when None"
+        );
     }
 
     #[test]
@@ -410,15 +469,24 @@ mod tests {
         let mut r = minimal_ruleset();
         r.dashboard_port = Some(19443);
         let out = render_ruleset(&r);
-        assert!(out.contains("iifname \"podman*\" udp dport 53 accept"), "container DNS UDP missing when dashboard_port set");
-        assert!(out.contains("iifname \"podman*\" tcp dport 53 accept"), "container DNS TCP missing when dashboard_port set");
+        assert!(
+            out.contains("iifname \"podman*\" udp dport 53 accept"),
+            "container DNS UDP missing when dashboard_port set"
+        );
+        assert!(
+            out.contains("iifname \"podman*\" tcp dport 53 accept"),
+            "container DNS TCP missing when dashboard_port set"
+        );
     }
 
     #[test]
     fn render_dashboard_dns_absent_when_none() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(!out.contains("udp dport 53"), "container DNS should not appear when dashboard_port is None");
+        assert!(
+            !out.contains("udp dport 53"),
+            "container DNS should not appear when dashboard_port is None"
+        );
     }
 
     #[test]
@@ -426,18 +494,36 @@ mod tests {
         let mut r = minimal_ruleset();
         r.dashboard_port = Some(19443);
         let out = render_ruleset(&r);
-        assert!(out.contains("ip daddr 10.89.0.0/16 ct state new accept"), "Netavark published port forward rule missing when dashboard_port set");
-        assert!(out.contains("iifname \"podman*\" accept"), "container outbound forward rule missing when dashboard_port set");
-        assert!(out.contains("oifname \"wg-lynx-dash\" accept"), "WireGuard outbound forward rule missing when dashboard_port set");
-        assert!(out.contains("iifname \"wg-lynx-dash\" accept"), "WireGuard inbound forward rule missing when dashboard_port set");
+        assert!(
+            out.contains("ip daddr 10.89.0.0/16 ct state new accept"),
+            "Netavark published port forward rule missing when dashboard_port set"
+        );
+        assert!(
+            out.contains("iifname \"podman*\" accept"),
+            "container outbound forward rule missing when dashboard_port set"
+        );
+        assert!(
+            out.contains("oifname \"wg-lynx-dash\" accept"),
+            "WireGuard outbound forward rule missing when dashboard_port set"
+        );
+        assert!(
+            out.contains("iifname \"wg-lynx-dash\" accept"),
+            "WireGuard inbound forward rule missing when dashboard_port set"
+        );
     }
 
     #[test]
     fn render_dashboard_forward_rules_absent_when_none() {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
-        assert!(!out.contains("wg-lynx-dash"), "WireGuard forward rules should not appear when dashboard_port is None");
-        assert!(!out.contains("10.89.0.0/16"), "Netavark forward rule should not appear when dashboard_port is None");
+        assert!(
+            !out.contains("wg-lynx-dash"),
+            "WireGuard forward rules should not appear when dashboard_port is None"
+        );
+        assert!(
+            !out.contains("10.89.0.0/16"),
+            "Netavark forward rule should not appear when dashboard_port is None"
+        );
     }
 
     // --- Emergency ruleset constant ---
