@@ -193,6 +193,13 @@ async fn command_dispatch(
         "certbot.obtain" => handle_certbot_obtain(state, cmd).await,
         "nftables.close_setup_port" => Ok(handle_close_setup_port(state, cmd)?),
         "db.rotate_password" => handle_db_rotate_password(state, cmd).await,
+        // Heartbeat ACK resets the lockdown timer and exits lockdown.
+        // Handled here so WS path can also process it via run_verified_command.
+        "agent.heartbeat_ack" => {
+            *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
+            state.lockdown.store(false, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!({ "ok": true }))
+        }
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))

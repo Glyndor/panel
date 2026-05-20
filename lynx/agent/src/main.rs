@@ -178,7 +178,6 @@ async fn main() -> anyhow::Result<()> {
         .context("run migrations")?;
 
     let lockdown = Arc::new(AtomicBool::new(false));
-    let last_heartbeat = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
 
     let state = AppState {
         db,
@@ -196,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
         cmd_rejected_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         cmd_rejected_window: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         last_dashboard_contact: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        last_heartbeat: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
     };
 
     // Reload nftables state from DB and re-apply on startup (rules don't persist across reboots).
@@ -355,13 +355,13 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(nginx::run_nginx_watchdog(state.clone()));
 
     // Heartbeat watchdog task
+    let heartbeat_state = state.clone();
     let lockdown_clone = lockdown.clone();
-    let heartbeat_clone = last_heartbeat.clone();
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(30));
         loop {
             ticker.tick().await;
-            let elapsed = heartbeat_clone.lock().unwrap().elapsed().as_secs();
+            let elapsed = heartbeat_state.last_heartbeat.lock().unwrap().elapsed().as_secs();
             if elapsed > HEARTBEAT_TIMEOUT_SECS && !lockdown_clone.load(Ordering::SeqCst) {
                 tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
                 lockdown_clone.store(true, Ordering::SeqCst);
@@ -377,8 +377,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/cmd", post(handlers::execute_command))
         .route("/metrics/ws", get(handlers::metrics_ws))
         .route("/heartbeat", post(heartbeat_handler))
-        // Inject last_heartbeat as a layer extension so the handler can access it.
-        .layer(axum::Extension(last_heartbeat.clone()))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
@@ -399,7 +397,6 @@ async fn main() -> anyhow::Result<()> {
 
 async fn heartbeat_handler(
     State(state): State<AppState>,
-    hb: axum::Extension<Arc<std::sync::Mutex<std::time::Instant>>>,
     Json(signed): Json<auth::SignedCommand>,
 ) -> Response {
     // Heartbeat ACK requires a valid Ed25519 signature — bearer token alone is
@@ -430,7 +427,7 @@ async fn heartbeat_handler(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    *hb.lock().unwrap() = std::time::Instant::now();
+    *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
     let is_lockdown = state.lockdown.load(Ordering::SeqCst);
     state.lockdown.store(false, Ordering::SeqCst);
 

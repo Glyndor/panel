@@ -195,6 +195,14 @@ async fn handle_agent_message(
             )
             .execute(&state.db)
             .await?;
+
+            // Send heartbeat ACK so agent resets its lockdown timer.
+            let ack = serde_json::json!({"type": "agent.heartbeat_ack"});
+            if let Ok(signed) = crate::crypto::cmd::sign_command_system(&state.config, agent_id, "read", &ack) {
+                if let Ok(signed_val) = serde_json::to_value(&signed) {
+                    let _ = push_command(state, agent_id, signed_val).await;
+                }
+            }
         }
         "command_response" => {
             if let Some(id_str) = msg.id.as_deref() {
