@@ -87,8 +87,12 @@ _cleanup_existing() {
     fi
     rm -f "$WG_CONF_LINK" "$LYNX_WG_CONF"
 
-    # Remove PostgreSQL container + data
-    podman rm -f "$PG_CONTAINER" 2>/dev/null || true
+    # Remove PostgreSQL container + data.
+    # Use stop+rm (not rm -f) so netavark tears down iptables port-forwarding rules
+    # before the network is removed. Force removal skips this cleanup and leaves
+    # stale DNAT rules that silently capture traffic for the next install.
+    podman stop --time 10 "$PG_CONTAINER" 2>/dev/null || true
+    podman rm "$PG_CONTAINER" 2>/dev/null || true
     podman volume rm lynx-agent-pg-data 2>/dev/null || true
     podman network rm "$PG_NETWORK" 2>/dev/null || true
 
