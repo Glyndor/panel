@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT username, single_session FROM users WHERE id = $1",
+  "query": "SELECT username, single_session, force_password_change FROM users WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -12,6 +12,11 @@
         "ordinal": 1,
         "name": "single_session",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "force_password_change",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -21,8 +26,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "e37a101eba72ca88463656ac48cfcc0528b1b78e3f6bf8839ddb42ed05af1fe7"
+  "hash": "7ec12cbec21b0d1a0384ecaab5f2d680b122582c924cdc73f68ae053c7ce159c"
 }
