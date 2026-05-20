@@ -986,8 +986,8 @@ table inet lynx-dashboard {
         iifname "podman*" udp dport 53 accept
         iifname "podman*" tcp dport 53 accept
 
-        # SSH — rate limited
-        tcp dport 22 ct state new limit rate 10/minute burst 5 packets accept
+        # SSH — per-source-IP rate limit (global limit would lock out all admins if one IP is noisy)
+        tcp dport 22 ct state new meter ssh_throttle { ip saddr limit rate 10/minute burst 20 packets } accept
 
         # Dashboard panel
         tcp dport 19443 ct state new accept
