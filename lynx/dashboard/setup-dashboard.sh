@@ -93,11 +93,16 @@ _cleanup_existing() {
         exit 1
     fi
 
-    # Remove volumes (podman-compose names them <project>_<volume>)
-    podman volume rm dashboard_postgres_data 2>/dev/null || true
+    # Remove volumes — project name is forced to lynx-dashboard (-p flag) so
+    # postgres_data → lynx-dashboard_postgres_data, frontend_next_cache →
+    # lynx-dashboard_frontend_next_cache. The extra patterns catch volumes from
+    # runs before the -p flag was added (e.g. lynx-install_postgres_data).
     podman volume rm lynx-dashboard_postgres_data 2>/dev/null || true
-    # Catch any remaining dashboard postgres volumes by pattern
-    podman volume ls --format '{{.Name}}' 2>/dev/null | grep -E 'dashboard.*postgres|postgres.*dashboard' \
+    podman volume rm lynx-dashboard_frontend_next_cache 2>/dev/null || true
+    podman volume rm dashboard_postgres_data 2>/dev/null || true
+    # Broad pattern sweep for installs run from any directory name
+    podman volume ls --format '{{.Name}}' 2>/dev/null \
+        | grep -E 'postgres_data|frontend_next_cache' \
         | xargs -r podman volume rm 2>/dev/null || true
 
     # Remove networks
@@ -700,7 +705,7 @@ log_ok "Init SQL copied to $LYNX_DB_INIT_DIR"
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
-podman-compose -f "$COMPOSE_FILE" up -d postgres
+podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
 
 log_info "Waiting for PostgreSQL to be healthy..."
 for i in $(seq 1 30); do
@@ -718,7 +723,7 @@ done
 
 # 2. Valkey
 log_info "Starting Valkey..."
-podman-compose -f "$COMPOSE_FILE" up -d valkey
+podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d valkey
 
 log_info "Waiting for Valkey to be healthy..."
 for i in $(seq 1 30); do
@@ -735,7 +740,7 @@ done
 
 # 3. Backend
 log_info "Starting backend..."
-podman-compose -f "$COMPOSE_FILE" up -d backend
+podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d backend
 
 log_info "Waiting for backend to be healthy..."
 for i in $(seq 1 40); do
@@ -753,7 +758,7 @@ done
 
 # 4. Frontend
 log_info "Starting frontend..."
-podman-compose -f "$COMPOSE_FILE" up -d frontend
+podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend
 
 log_info "Waiting for frontend to be healthy..."
 for i in $(seq 1 40); do
