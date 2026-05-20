@@ -62,7 +62,8 @@ PG_DB="lynx_agent"
 AGENT_ID=""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY_PATH="/usr/local/bin/lynx-agent"
+BIN_DIR="/etc/lynx/bin"
+BINARY_PATH="$BIN_DIR/lynx-agent"
 
 # --- Root check -------------------------------------------------------------
 
@@ -230,19 +231,30 @@ if $existing; then
     log_warn "Existing agent installation detected."
     echo ""
     echo -e "  ${BOLD}1)${RESET} Abort (default)"
-    echo -e "  ${BOLD}2)${RESET} Reinstall clean → destroys all agent data"
+    echo -e "  ${BOLD}2)${RESET} Update → updates binary, preserves all data"
+    echo -e "  ${BOLD}3)${RESET} Reinstall clean → destroys all agent data"
     echo ""
-    read -rp "Choice [1/2]: " choice
+    read -rp "Choice [1/2/3]: " choice
     choice="${choice:-1}"
 
     case "$choice" in
         2)
+            log_info "Redirecting to update..."
+            exec "$(dirname "${BASH_SOURCE[0]}")/update-agent.sh"
+            ;;
+        3)
             echo ""
             log_warn "This will permanently destroy all agent data on this machine."
             read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
             if [[ "$confirm" != "reinstall lynx-agent" ]]; then
                 log_error "Confirmation phrase mismatch. Aborting."
                 exit 1
+            fi
+            # Preserve agent ID across reinstalls — dashboard still has the old one registered
+            _SAVED_AGENT_ID=""
+            if [[ -f "$LYNX_DIR/agent-id" ]]; then
+                _SAVED_AGENT_ID=$(cat "$LYNX_DIR/agent-id")
+                log_info "Preserving Agent ID for reinstall: $_SAVED_AGENT_ID"
             fi
             _cleanup_existing
             ;;
@@ -270,6 +282,8 @@ _require_cmd openssl   "apt install openssl"
 _require_cmd nft       "apt install nftables"
 _require_cmd wg        "apt install wireguard-tools"
 _require_cmd wg-quick  "apt install wireguard-tools"
+_require_cmd curl      "apt install curl"
+_require_cmd python3   "apt install python3"
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 
@@ -338,17 +352,25 @@ log_ok "$LYNX_DIR"
 
 log_section "Generating agent identity"
 
-# UUIDv7: time-ordered. Generate with Python or fall back to uuidgen.
-if python3 -c "import uuid; print(uuid.uuid7())" &>/dev/null 2>&1; then
-    AGENT_ID=$(python3 -c "import uuid; print(uuid.uuid7())")
-elif command -v uuidgen &>/dev/null && uuidgen --version 2>&1 | grep -q "2\.4[0-9]"; then
-    AGENT_ID=$(uuidgen --time)
+if [[ -n "${_SAVED_AGENT_ID:-}" ]]; then
+    AGENT_ID="$_SAVED_AGENT_ID"
+    log_ok "Reusing existing Agent ID: $AGENT_ID"
+    unset _SAVED_AGENT_ID
 else
-    # Construct a v7-like UUID using current time + random bytes
-    TS_MS=$(date +%s%3N)
-    TS_HEX=$(printf '%012x' "$TS_MS")
-    RAND=$(openssl rand -hex 10)
-    AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-$(printf '%x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f)))${RAND:4:2})-${RAND:6:12}"
+    # UUIDv7: time-ordered. Generate with Python or fall back to uuidgen.
+    if python3 -c "import uuid; print(uuid.uuid7())" &>/dev/null 2>&1; then
+        AGENT_ID=$(python3 -c "import uuid; print(uuid.uuid7())")
+    elif command -v uuidgen &>/dev/null && uuidgen --version 2>&1 | grep -q "2\.4[0-9]"; then
+        AGENT_ID=$(uuidgen --time)
+    else
+        # Construct a v7-like UUID using current time + random bytes
+        TS_MS=$(date +%s%3N)
+        TS_HEX=$(printf '%012x' "$TS_MS")
+        RAND=$(openssl rand -hex 10)
+        AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-$(printf '%x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f)))${RAND:4:2})-${RAND:6:12}"
+    fi
+    printf '%s' "$AGENT_ID" > "$LYNX_DIR/agent-id"
+    chmod 600 "$LYNX_DIR/agent-id"
 fi
 log_ok "Agent ID: $AGENT_ID"
 
@@ -488,21 +510,101 @@ for i in $(seq 1 40); do
     sleep 2
 done
 
-# --- Install agent binary ---------------------------------------------------
+# --- Download agent binary from GitHub Releases ----------------------------
 
-log_section "Installing lynx-agent binary"
+log_section "Downloading lynx-agent binary"
 
-if [[ -f "$SCRIPT_DIR/target/release/lynx-agent" ]]; then
-    install -m 755 "$SCRIPT_DIR/target/release/lynx-agent" "$BINARY_PATH"
-    log_ok "Installed from local build: $BINARY_PATH"
-elif [[ -f "$SCRIPT_DIR/target/debug/lynx-agent" ]]; then
-    install -m 755 "$SCRIPT_DIR/target/debug/lynx-agent" "$BINARY_PATH"
-    log_warn "Installed debug build — not for production"
-else
-    log_error "lynx-agent binary not found. Build with: cargo build --release"
-    log_error "Expected at: $SCRIPT_DIR/target/release/lynx-agent"
+GITHUB_REPO="Jaro-c/Lynx"
+
+_ARCH=$(uname -m)
+case "$_ARCH" in
+    x86_64)  ARCH="x86_64" ;;
+    aarch64) ARCH="arm64" ;;
+    *)
+        log_error "Unsupported architecture: $_ARCH"
+        exit 1
+        ;;
+esac
+log_info "Architecture: $ARCH"
+
+# Ensure Python cryptography library for signature verification
+if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
+    log_info "Installing Python cryptography library..."
+    if command -v pip3 &>/dev/null; then
+        pip3 install --quiet cryptography
+    else
+        python3 -m pip install --quiet cryptography
+    fi
+fi
+
+log_info "Fetching latest agent release..."
+LATEST_AGENT_TAG=$(curl -fsSL \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+    | python3 -c "
+import sys, json
+releases = json.load(sys.stdin)
+for r in releases:
+    tag = r.get('tag_name', '')
+    if tag.startswith('agent@') and not r.get('prerelease'):
+        print(tag)
+        break
+" 2>/dev/null)
+
+if [[ -z "$LATEST_AGENT_TAG" ]]; then
+    log_error "No agent release found in ${GITHUB_REPO}"
     exit 1
 fi
+log_ok "Latest release: ${LATEST_AGENT_TAG}"
+
+RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}"
+mkdir -p "$BIN_DIR"
+chmod 700 "$BIN_DIR"
+
+_verify_release_sig() {
+    local file="$1" sig_file="$2"
+    python3 - "$file" "$sig_file" <<'PYEOF'
+import sys, base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
+
+with open(sys.argv[1], "rb") as f:
+    data = f.read()
+with open(sys.argv[2], "rb") as f:
+    sig = f.read()
+try:
+    pub_key.verify(sig, data)
+except Exception as e:
+    print(f"signature invalid: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+AGENT_TMP="${BIN_DIR}/lynx-agent.new"
+
+log_info "Downloading agent binary..."
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}" \
+    -o "$AGENT_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}.sig" \
+    -o "${AGENT_TMP}.sig"
+
+log_info "Verifying agent signature..."
+if ! _verify_release_sig "$AGENT_TMP" "${AGENT_TMP}.sig"; then
+    log_error "Agent signature verification FAILED — aborting"
+    rm -f "$AGENT_TMP" "${AGENT_TMP}.sig"
+    exit 1
+fi
+rm -f "${AGENT_TMP}.sig"
+chmod 755 "$AGENT_TMP"
+mv "$AGENT_TMP" "$BINARY_PATH"
+log_ok "Agent binary installed: ${BINARY_PATH}"
+
+# Write version file
+printf '%s' "${LATEST_AGENT_TAG#agent@}" > "$BIN_DIR/lynx-agent-version"
+log_ok "Version: ${LATEST_AGENT_TAG#agent@}"
 
 # --- Write agent env file ---------------------------------------------------
 
@@ -549,9 +651,9 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 
-# Capabilities required for nftables, Podman tenant management
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID
+# Capabilities required for nftables, Podman tenant management, VPS reboot
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SYS_BOOT
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SYS_BOOT
 
 # Systemd credentials (tmpfs — never touches disk)
 LoadCredential=database-url:/etc/lynx/credentials/database-url
@@ -562,7 +664,7 @@ NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/run/containers /var/lib/containers /home
+ReadWritePaths=/run/containers /var/lib/containers /home /etc/lynx/bin
 
 [Install]
 WantedBy=multi-user.target
