@@ -284,7 +284,7 @@ async fn main() -> anyhow::Result<()> {
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 ticker.tick().await;
-                if sqlx::query!("SELECT 1 AS ok")
+                if sqlx::query("SELECT 1")
                     .fetch_one(&state_db.db)
                     .await
                     .is_err()
