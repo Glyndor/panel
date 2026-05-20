@@ -170,6 +170,16 @@ async fn dispatch_update_ws(state: &AppState, agent_id: Uuid, version: &str) {
         "sig_url": sig_url,
     });
 
+    // Insert grace-period event so WS disconnect after update doesn't fire heartbeat_lost.
+    let _ = sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'updating', $3)",
+        Uuid::now_v7(),
+        agent_id,
+        Some(format!("version={version}"))
+    )
+    .execute(&state.db)
+    .await;
+
     let signed = match cmd::sign_command(&state.config, agent_id, Uuid::nil(), "write", &command) {
         Ok(s) => s,
         Err(e) => {
@@ -208,6 +218,16 @@ async fn dispatch_update(
         "download_url": download_url,
         "sig_url": sig_url,
     });
+
+    // Insert grace-period event so WS disconnect after update doesn't fire heartbeat_lost.
+    let _ = sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'updating', $3)",
+        Uuid::now_v7(),
+        agent_id,
+        Some(format!("version={version}"))
+    )
+    .execute(&state.db)
+    .await;
 
     let signed = match cmd::sign_command(&state.config, agent_id, Uuid::nil(), "write", &command) {
         Ok(s) => s,
