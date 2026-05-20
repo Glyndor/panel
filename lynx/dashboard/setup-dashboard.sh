@@ -48,7 +48,7 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 LYNX_DIR="/etc/lynx"
 CERTS_DIR="/etc/lynx/tls"
 WG_DIR="/etc/wireguard"
-COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-compose.yml"
+COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)/docker-compose.yml"
 LISTEN_PORT=19443
 AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
@@ -301,7 +301,7 @@ if $existing; then
     case "$choice" in
         2)
             log_info "Redirecting to auto-update..."
-            exec "$(dirname "${BASH_SOURCE[0]}")/update-dashboard.sh"
+            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-dashboard.sh"
             ;;
         3)
             echo ""
