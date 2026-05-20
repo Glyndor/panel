@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM users u\n            JOIN user_roles ur ON ur.user_id = u.id\n            JOIN role_permissions rp ON rp.role_id = ur.role_id\n            JOIN permissions p ON p.id = rp.permission_id\n            WHERE u.username = 'testadmin' AND p.key = '*:*'\n        ) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "55d0910d203cc5078dd12dbbc18bb2f98ec9cc7cd377f32e0c876c9af97be73f"
+}

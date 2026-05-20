@@ -42,7 +42,9 @@ pub async fn register_agent(
     State(state): State<AppState>,
     Json(req): Json<RegisterAgentRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let wg_ip = wg::allocate_ip(&state.db, req.agent_id).await?;
+    // Reserve IP first (no FK yet — agent row doesn't exist), then insert agent,
+    // then claim the IP (FK satisfied after insert).
+    let wg_ip = wg::reserve_ip(&state.db).await?;
 
     let sync_token = format!("{}", uuid::Uuid::now_v7()).replace('-', "")
         + &format!("{}", uuid::Uuid::now_v7()).replace('-', "");
@@ -68,6 +70,10 @@ pub async fn register_agent(
     )
     .fetch_one(&state.db)
     .await?;
+
+    if let Err(e) = wg::claim_ip(&state.db, &wg_ip, req.agent_id).await {
+        tracing::error!(agent_id = %req.agent_id, ip = %wg_ip, error = %e, "failed to claim WG IP");
+    }
 
     let psk = match wg::create_psk(req.agent_id) {
         Ok(p) => p,
