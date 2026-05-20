@@ -328,17 +328,21 @@ _require_cmd() {
     log_ok "$1 found"
 }
 
-_apt_ensure podman   podman
-_apt_ensure openssl  openssl
-_apt_ensure nft      nftables
-_apt_ensure wg       wireguard-tools
-_apt_ensure curl     curl
-_apt_ensure python3  python3
-_apt_ensure pip3     python3-pip
+_apt_ensure podman         podman
+_apt_ensure openssl        openssl
+_apt_ensure nft            nftables
+_apt_ensure wg             wireguard-tools
+_apt_ensure curl           curl
+_apt_ensure python3        python3
+_apt_ensure pip3           python3-pip
+# newuidmap/newgidmap: required for rootless Podman user namespaces
+_apt_ensure newuidmap      uidmap
+# slirp4netns: required for rootless Podman networking (user-space TCP/IP stack)
+_apt_ensure slirp4netns    slirp4netns
 # netavark 1.x uses the iptables firewall driver for bridge networks.
 # On Ubuntu/Debian, the 'iptables' package installs the nft-compat shim —
 # not legacy iptables — so it passes Lynx's incompatibility check.
-_apt_ensure iptables iptables
+_apt_ensure iptables       iptables
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 

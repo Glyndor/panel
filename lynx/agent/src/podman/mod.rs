@@ -62,11 +62,14 @@ pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
 pub fn podman_as_tenant(tenant_id: &str, args: &[&str]) -> Result<std::process::Output> {
     let username = format!("lynx-tenant-{tenant_id}");
     let uid = tenant_uid(tenant_id)?;
+    // Start in / so the tenant user can always access the cwd (their home or
+    // a restricted directory might not be world-readable).
     Command::new("runuser")
         .args(["-u", &username, "--", "podman"])
         .args(args)
         .env("HOME", format!("/var/lib/lynx/orgs/{tenant_id}"))
         .env("XDG_RUNTIME_DIR", format!("/run/user/{uid}"))
+        .current_dir("/")
         .output()
         .context("runuser podman")
 }
