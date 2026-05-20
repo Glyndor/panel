@@ -871,6 +871,9 @@ if [[ "$IS_DASHBOARD_VPS" == "true" ]]; then
         iifname \"podman*\" tcp dport 53 accept
 "
     DASHBOARD_FORWARD_NFT="
+        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)
+        ip daddr 10.89.0.0/16 ct state new accept
+
         # Container-to-container traffic on Netavark bridge networks
         iifname \"podman*\" oifname \"podman*\" accept
 
