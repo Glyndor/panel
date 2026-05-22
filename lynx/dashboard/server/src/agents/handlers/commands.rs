@@ -150,7 +150,7 @@ pub async fn reboot_agent(
     }
 
     let command = json!({ "type": "vps.reboot" });
-    let signed = sign_command(&state.config, id, user.user_id, "admin", &command)?;
+    let signed = sign_command(&state.config, id, user.user_id, "destructive", &command)?;
 
     sqlx::query!(
         "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, $3, $4)",
