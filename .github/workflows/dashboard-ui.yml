@@ -7,7 +7,7 @@ on:
       - "lynx/dashboard/ui/**"
       - ".github/workflows/dashboard-ui.yml"
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "lynx/dashboard/ui/**"
       - ".github/workflows/dashboard-ui.yml"

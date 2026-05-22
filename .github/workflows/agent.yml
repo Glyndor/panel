@@ -10,7 +10,7 @@ on:
       - "lynx/Cargo.lock"
       - ".github/workflows/agent.yml"
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "lynx/agent/**"
       - "lynx/translators/**"
