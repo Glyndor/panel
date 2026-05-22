@@ -21,6 +21,8 @@ pub struct Config {
     pub tls_key_der: Option<Zeroizing<Vec<u8>>>,
     /// X.509 CA certificate DER — used to verify dashboard client certs.
     pub tls_ca_cert_der: Option<Vec<u8>>,
+    /// Dashboard panel port to open in nftables (Some(19443) on dashboard VPS, None on remote agents).
+    pub dashboard_port: Option<u16>,
 }
 
 impl Config {
@@ -32,7 +34,13 @@ impl Config {
         let agent_id_str = std::env::var("AGENT_ID").context("AGENT_ID required")?;
         let agent_id = uuid::Uuid::parse_str(&agent_id_str).context("AGENT_ID must be UUID v7")?;
 
-        let dashboard_verify_key = load_key32_or_dev("DASHBOARD_VERIFY_KEY")?;
+        // The dashboard signing public key (Ed25519) is mandatory: every command
+        // from the dashboard (heartbeat ACK, container ops, nftables push,
+        // update.self, ...) is verified against it.  A missing or wrong key
+        // makes the agent reject every command and lock down within 5 minutes
+        // — fail fast at startup instead of silently entering lockdown later.
+        let dashboard_verify_key = load_key32("DASHBOARD_VERIFY_KEY")
+            .context("DASHBOARD_VERIFY_KEY (or DASHBOARD_VERIFY_KEY_FILE) is required — supply the dashboard's Ed25519 signing pubkey from setup-dashboard.sh output")?;
         let internal_token = load_secret("INTERNAL_TOKEN")?;
         let listen_addr =
             std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:9090".to_string());
@@ -44,6 +52,10 @@ impl Config {
         let tls_cert_der = load_der_file_opt("TLS_CERT_DER_FILE");
         let tls_key_der = load_der_file_zeroize_opt("TLS_KEY_DER_FILE");
         let tls_ca_cert_der = load_der_file_opt("TLS_CA_CERT_DER_FILE");
+
+        let dashboard_port = std::env::var("DASHBOARD_PORT")
+            .ok()
+            .and_then(|s| s.parse::<u16>().ok());
 
         Ok(Config {
             database_url,
@@ -57,6 +69,7 @@ impl Config {
             tls_cert_der,
             tls_key_der,
             tls_ca_cert_der,
+            dashboard_port,
         })
     }
 }
@@ -97,15 +110,4 @@ fn load_der_file_opt(env: &str) -> Option<Vec<u8>> {
 
 fn load_der_file_zeroize_opt(env: &str) -> Option<Zeroizing<Vec<u8>>> {
     load_der_file_opt(env).map(Zeroizing::new)
-}
-
-fn load_key32_or_dev(env: &str) -> Result<[u8; 32]> {
-    if std::env::var(env).is_err() && std::env::var(format!("{env}_FILE")).is_err() {
-        tracing::warn!("{env} not configured — using ephemeral dev key (INSECURE)");
-        let mut key = [0u8; 32];
-        use rand::Rng;
-        rand::rng().fill_bytes(&mut key);
-        return Ok(key);
-    }
-    load_key32(env)
 }

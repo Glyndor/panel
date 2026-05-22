@@ -118,7 +118,10 @@ jobs:
         run: cargo clippy --package lynx-agent -- -D warnings
 
       - name: test
-        run: cargo test --package lynx-agent --bin lynx-agent
+        # Audit-chain integrity test mutates the globally-last audit_log row
+        # and expects the next append to catch the tamper — parallel tests
+        # would race that global state.
+        run: cargo test --package lynx-agent --bin lynx-agent -- --test-threads=1
 
       - name: audit
         run: cargo audit --ignore RUSTSEC-2023-0071
@@ -164,6 +167,13 @@ jobs:
         if: ${{ matrix.use_cross }}
         run: cargo install cross --locked
 
+      - name: Set version from tag
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          VERSION="${TAG#agent@}"
+          sed -i "0,/^version = \"[^\"]*\"/{s/^version = \"[^\"]*\"/version = \"${VERSION}\"/}" agent/Cargo.toml
+          echo "Set agent version to ${VERSION}"
+
       - name: Build agent (musl static)
         env:
           SQLX_OFFLINE: "true"
@@ -171,10 +181,12 @@ jobs:
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release \
               --package lynx-agent \
+              --package lynx-compose \
               --target ${{ matrix.rust-target }}
           else
             cargo build --release \
               --package lynx-agent \
+              --package lynx-compose \
               --target ${{ matrix.rust-target }}
           fi
 
@@ -189,12 +201,24 @@ jobs:
           cp "$BINARY" "$ARTIFACT"
           python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ARTIFACT"
 
+      - name: Sign lynx-compose binary
+        working-directory: ${{ github.workspace }}
+        env:
+          RELEASE_SIGN_KEY: ${{ secrets.RELEASE_SIGN_KEY }}
+        run: |
+          BINARY="lynx/target/${{ matrix.rust-target }}/release/lynx-compose"
+          ARTIFACT="lynx-compose-linux-${{ matrix.arch }}"
+          cp "$BINARY" "$ARTIFACT"
+          python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ARTIFACT"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: agent-${{ matrix.arch }}
           path: |
             lynx-agent-linux-${{ matrix.arch }}
             lynx-agent-linux-${{ matrix.arch }}.sig
+            lynx-compose-linux-${{ matrix.arch }}
+            lynx-compose-linux-${{ matrix.arch }}.sig
           retention-days: 1
 
   release:
@@ -219,4 +243,8 @@ jobs:
             lynx-agent-linux-x86_64 \
             lynx-agent-linux-x86_64.sig \
             lynx-agent-linux-arm64 \
-            lynx-agent-linux-arm64.sig
+            lynx-agent-linux-arm64.sig \
+            lynx-compose-linux-x86_64 \
+            lynx-compose-linux-x86_64.sig \
+            lynx-compose-linux-arm64 \
+            lynx-compose-linux-arm64.sig

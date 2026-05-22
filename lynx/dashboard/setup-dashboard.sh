@@ -7,7 +7,7 @@
 #     - Podman networks (3 isolated: db, cache, app)
 #     - Podman secrets (randomly generated, no trace)
 #     - PostgreSQL 18 container with isolated app user
-#     - Redis 8 container with password auth
+#     - Valkey 8 container with password auth
 #     - Backend (Rust) + Frontend (Next.js) containers
 #     - nftables rules (ports 22 + 19443)
 #     - Self-signed TLS certificate (90-day, auto-rotated via systemd timer)
@@ -46,15 +46,13 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 # --- Constants --------------------------------------------------------------
 
 LYNX_DIR="/etc/lynx"
-CERTS_DIR="/etc/lynx/certs"
+CERTS_DIR="/etc/lynx/tls"
 WG_DIR="/etc/wireguard"
-COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-compose.yml"
+COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)/docker-compose.yml"
 LISTEN_PORT=19443
 AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
 DASHBOARD_WG_IP="10.100.0.1"
-WG_SUBNET="10.100.0.0/16"
-CONTAINER_RUNTIME="podman"
 
 # --- Root check -------------------------------------------------------------
 
@@ -68,44 +66,78 @@ fi
 _cleanup_existing() {
     log_section "Removing existing installation"
 
-    # Stop and remove containers
-    for ctr in lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-redis; do
+    # Gracefully stop containers before removal so volumes are not locked
+    log_info "Stopping containers..."
+    for ctr in lynx-dashboard-nginx lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-valkey; do
+        podman stop --time 5 "$ctr" 2>/dev/null || true
+    done
+    # Catch any stray lynx-dashboard-* containers from partial prior installs
+    podman ps -q --filter name=lynx-dashboard 2>/dev/null | xargs -r podman stop --time 5 2>/dev/null || true
+
+    # Remove named containers then any remaining lynx-dashboard-* matches
+    for ctr in lynx-dashboard-nginx lynx-dashboard-frontend lynx-dashboard-backend lynx-dashboard-postgres lynx-dashboard-valkey; do
         if podman container exists "$ctr" 2>/dev/null; then
             log_info "Removing container: $ctr"
             podman rm -f "$ctr" 2>/dev/null || true
         fi
     done
+    podman ps -aq --filter name=lynx-dashboard 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
 
-    # Remove volumes
+    # Fail explicitly if any container could not be removed — leftover containers
+    # hold volumes open and leave secrets mounted, causing password mismatches on reinstall
+    if podman ps -aq --filter name=lynx-dashboard 2>/dev/null | grep -q .; then
+        log_error "Failed to remove all lynx-dashboard-* containers — manual cleanup required:"
+        podman ps -a --format '{{.Names}}\t{{.Status}}' --filter name=lynx-dashboard 2>/dev/null
+        exit 1
+    fi
+
+    # Remove volumes — project name is forced to lynx-dashboard (-p flag) so
+    # postgres_data → lynx-dashboard_postgres_data, frontend_next_cache →
+    # lynx-dashboard_frontend_next_cache. The extra patterns catch volumes from
+    # runs before the -p flag was added (e.g. lynx-install_postgres_data).
     podman volume rm lynx-dashboard_postgres_data 2>/dev/null || true
+    podman volume rm lynx-dashboard_frontend_next_cache 2>/dev/null || true
+    podman volume rm dashboard_postgres_data 2>/dev/null || true
+    # Broad pattern sweep for installs run from any directory name
+    podman volume ls --format '{{.Name}}' 2>/dev/null \
+        | grep -E 'postgres_data|frontend_next_cache' \
+        | xargs -r podman volume rm 2>/dev/null || true
 
     # Remove networks
     for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
         podman network rm "$net" 2>/dev/null || true
     done
 
-    # Remove secrets
+    # Remove known secrets then sweep any remaining lynx-* secrets
     for secret in lynx-dashboard-pg-root lynx-dashboard-pg-pass lynx-dashboard-redis-pass \
                   lynx-dashboard-database-url lynx-dashboard-redis-url \
                   lynx-dashboard-api-token lynx-dashboard-kek lynx-dashboard-pepper \
                   lynx-dashboard-jwt-sign-private lynx-dashboard-jwt-sign-public \
                   lynx-dashboard-jwt-enc-private lynx-dashboard-jwt-enc-public \
                   lynx-dashboard-ca-private lynx-dashboard-ca-public \
+                  lynx-dashboard-x509-ca-cert lynx-dashboard-x509-ca-key \
                   lynx-dashboard-setup-token \
                   lynx-dashboard-local-agent-psk; do
         podman secret rm "$secret" 2>/dev/null || true
     done
+    podman secret ls --format '{{.Name}}' 2>/dev/null | grep '^lynx-' | xargs -r podman secret rm 2>/dev/null || true
 
     # Remove WireGuard interface
-    if ip link show wg-lynx-dashboard &>/dev/null; then
-        ip link delete wg-lynx-dashboard 2>/dev/null || true
+    if ip link show wg-lynx-dash &>/dev/null; then
+        ip link delete wg-lynx-dash 2>/dev/null || true
     fi
-    rm -f "$WG_DIR/wg-lynx-dashboard.conf"
+    rm -f "$WG_DIR/wg-lynx-dash.conf"
 
     # Remove systemd units
+    systemctl disable --now lynx-dashboard-containers.service 2>/dev/null || true
     systemctl disable --now lynx-dashboard-rotate-certs.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/lynx-dashboard-containers.service
     rm -f /etc/systemd/system/lynx-dashboard-rotate-certs.{service,timer}
     systemctl daemon-reload
+
+    # Flush nftables table so container DNS queries are not blocked during reinstall
+    nft delete table inet lynx-dashboard 2>/dev/null || true
+    rm -f /etc/nftables-lynx-dashboard.conf
 
     rm -rf "$LYNX_DIR"
     log_ok "Cleanup complete"
@@ -122,6 +154,17 @@ if [[ "$TOTAL_RAM_MB" -lt 512 ]]; then
     exit 1
 fi
 log_ok "RAM: ${TOTAL_RAM_MB} MB (minimum 512 MB satisfied)"
+
+# Disk pre-check (§1.4) — PostgreSQL container, Podman images and the agent
+# binaries together easily exceed 2 GB; bail out early instead of failing mid-
+# install when a `pull` or `cp` exhausts the volume.
+FREE_DISK_MB=$(df -BM --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
+    log_error "Insufficient disk: ${FREE_DISK_MB:-0} MB free on /, minimum 2048 MB required"
+    log_info  "Free up space (e.g. \`podman system prune -a\`) and re-run."
+    exit 1
+fi
+log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
 
 # --- Incompatible software --------------------------------------------------
 
@@ -189,29 +232,43 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables — only block the legacy binary, not the nftables compat layer (iptables-nft)
-if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q 'nf_tables'; then
+# iptables — now ALWAYS incompatible. Netavark 1.10+ uses the nftables firewall
+# driver natively; the iptables-nft shim that earlier Lynx versions tolerated is
+# no longer needed. Any iptables binary signals an external firewall manager.
+if command -v iptables &>/dev/null; then
     _incompatible_found=true
-    log_warn "Removing incompatible: iptables (legacy binary, not nftables-compat)"
+    log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
     log_info "  Reason: ${_REASON_FW}"
     case "$DISTRO" in
         debian) apt-get purge -y iptables 2>/dev/null || true ;;
         rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
         *)      log_warn "Unknown distro — remove iptables manually" ;;
     esac
-    log_ok "Removed: iptables (legacy)"
+    log_ok "Removed: iptables"
 fi
 
 if $_incompatible_found; then
-    # Flush any residual kernel rules left behind by Docker / iptables
-    if command -v iptables-legacy &>/dev/null; then
-        iptables-legacy -F              2>/dev/null || true
-        iptables-legacy -X              2>/dev/null || true
-        iptables-legacy -t nat    -F    2>/dev/null || true
-        iptables-legacy -t nat    -X    2>/dev/null || true
-        iptables-legacy -t mangle -F    2>/dev/null || true
-        iptables-legacy -t mangle -X    2>/dev/null || true
-    fi
+    # Flush residual kernel rules left behind by Docker / ufw / iptables.
+    # On Ubuntu 24.04+, 'iptables' is iptables-nft and flushes nftables ip/ip6
+    # filter tables (the ones ufw and Docker create). Also flush iptables-legacy
+    # if present (older distros or explicitly installed).
+    for _ipt in iptables ip6tables iptables-legacy ip6tables-legacy; do
+        if command -v "$_ipt" &>/dev/null; then
+            "$_ipt" -P INPUT  ACCEPT 2>/dev/null || true
+            "$_ipt" -P FORWARD ACCEPT 2>/dev/null || true
+            "$_ipt" -P OUTPUT ACCEPT 2>/dev/null || true
+            "$_ipt" -F              2>/dev/null || true
+            "$_ipt" -X              2>/dev/null || true
+            "$_ipt" -t nat    -F    2>/dev/null || true
+            "$_ipt" -t nat    -X    2>/dev/null || true
+            "$_ipt" -t mangle -F    2>/dev/null || true
+            "$_ipt" -t mangle -X    2>/dev/null || true
+        fi
+    done
+    # Also nuke any lingering nftables filter tables (ufw/Docker on systems where
+    # iptables-nft maps to nft tables named 'filter').
+    nft delete table ip  filter 2>/dev/null || true
+    nft delete table ip6 filter 2>/dev/null || true
     log_ok "Incompatible software removed — residual firewall rules cleared"
 else
     log_ok "No incompatible software found"
@@ -256,7 +313,7 @@ if $existing; then
     case "$choice" in
         2)
             log_info "Redirecting to auto-update..."
-            exec "$(dirname "${BASH_SOURCE[0]}")/update-dashboard.sh"
+            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-dashboard.sh"
             ;;
         3)
             echo ""
@@ -276,9 +333,41 @@ if $existing; then
     esac
 fi
 
+# --- DNS preflight check ----------------------------------------------------
+
+log_section "Checking network connectivity"
+
+if ! getent hosts archive.ubuntu.com &>/dev/null && ! getent hosts packages.fedoraproject.org &>/dev/null; then
+    log_warn "DNS resolution failing — attempting to fix..."
+    # Replace symlink (systemd-resolved stub) with a static file using a known-good resolver
+    rm -f /etc/resolv.conf
+    echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+    # Final check
+    if ! getent hosts archive.ubuntu.com &>/dev/null 2>&1; then
+        log_error "DNS resolution is unavailable. Please fix your network configuration and retry."
+        exit 1
+    fi
+    log_ok "DNS resolution restored (set nameserver to 8.8.8.8)"
+else
+    log_ok "DNS resolution working"
+fi
+
 # --- Install dependencies ---------------------------------------------------
 
 log_section "Checking system dependencies"
+
+# Wait up to 60s for any running apt/dpkg process to finish, then clear stale locks.
+_wait_apt_lock() {
+    local _deadline=$(( $(date +%s) + 60 ))
+    while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null; do
+        if [[ $(date +%s) -ge $_deadline ]]; then
+            log_warn "apt lock held for 60s — force-clearing stale lock files"
+            rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
+            break
+        fi
+        sleep 2
+    done
+}
 
 _apt_updated=false
 _apt_ensure() {
@@ -288,6 +377,7 @@ _apt_ensure() {
         return
     fi
     log_info "Installing $pkg..."
+    _wait_apt_lock
     if ! $_apt_updated; then
         # Enable universe repo (needed for podman on Ubuntu)
         if command -v add-apt-repository &>/dev/null; then
@@ -296,7 +386,7 @@ _apt_ensure() {
         DEBIAN_FRONTEND=noninteractive apt-get update -qq
         _apt_updated=true
     fi
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" -qq
     if command -v "$cmd" &>/dev/null; then
         log_ok "$cmd installed"
     else
@@ -313,15 +403,106 @@ _require_cmd() {
     log_ok "$1 found"
 }
 
-_apt_ensure podman  podman
-_apt_ensure openssl openssl
-_apt_ensure nft     nftables
-_apt_ensure wg      wireguard-tools
-_apt_ensure curl    curl
-_apt_ensure python3 python3
-_apt_ensure pip3    python3-pip
+_apt_ensure podman         podman
+# podman-compose replaced by `lynx-compose` (Rust binary shipped with the release),
+# which removes the python3 / pip3 runtime dependency entirely.
+# openssl replaced by `lynx-dashboard-backend` subcommands for random/keypair/cert ops.
+_apt_ensure nft            nftables
+_apt_ensure wg             wireguard-tools
+_apt_ensure curl           curl
+_apt_ensure python3        python3
+# python3-cryptography provides the Ed25519 signature verification needed for
+# binary downloads. Once binaries are installed all crypto runs in Rust; this is
+# only the bootstrap dependency. Use the apt-shipped package rather than pip3
+# so the host never needs python3-pip.
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
+
+# Netavark + aardvark-dns: required for container-to-container DNS resolution.
+# Podman defaults to the older CNI backend which lacks DNS on Ubuntu 24.04.
+# These packages live under /usr/lib/podman/ — not in PATH, so _apt_ensure can't check by command.
+for _pkg in netavark aardvark-dns; do
+    if ! dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
+        log_info "Installing $_pkg..."
+        if ! $_apt_updated; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            _apt_updated=true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$_pkg" -qq
+        if dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
+            log_ok "$_pkg installed"
+        else
+            log_error "Failed to install $_pkg"
+            exit 1
+        fi
+    else
+        log_ok "$_pkg found"
+    fi
+done
+
+# Netavark 1.10+ supports a native nftables firewall driver — older versions
+# fall back to iptables-nft. Lynx requires the nftables driver so the iptables
+# package can be dropped entirely (it remains in the incompatible-software list).
+# Upgrade netavark from upstream when the distro ships a version < 1.10.
+NETAVARK_REQUIRED="1.10.0"
+NETAVARK_UPSTREAM_VER="1.15.2"
+_netavark_bin=""
+for _candidate in /usr/lib/podman/netavark /usr/libexec/podman/netavark; do
+    if [[ -x "$_candidate" ]]; then
+        _netavark_bin="$_candidate"
+        break
+    fi
+done
+
+if [[ -z "$_netavark_bin" ]]; then
+    log_error "netavark binary not found in /usr/lib/podman or /usr/libexec/podman"
+    exit 1
+fi
+
+_netavark_ver="$("$_netavark_bin" --version 2>&1 | awk '/netavark/ {print $2; exit}')"
+log_info "netavark on disk: ${_netavark_ver}"
+
+_version_lt() {
+    # Returns 0 (true) when $1 < $2 in semver dotted-numeric order.
+    [[ "$1" = "$2" ]] && return 1
+    [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]]
+}
+
+if _version_lt "$_netavark_ver" "$NETAVARK_REQUIRED"; then
+    log_warn "netavark $_netavark_ver < $NETAVARK_REQUIRED — upgrading from upstream"
+    _uname_m="$(uname -m)"
+    case "$_uname_m" in
+        x86_64|amd64)   _na_asset="netavark.gz" ;;
+        aarch64|arm64)  _na_asset="netavark.aarch64.gz" ;;
+        *) log_error "Unsupported arch for netavark upgrade: $_uname_m"; exit 1 ;;
+    esac
+    NETAVARK_DL="https://github.com/containers/netavark/releases/download/v${NETAVARK_UPSTREAM_VER}/${_na_asset}"
+    NETAVARK_TMP="$(mktemp /tmp/lynx-netavark.XXXXXX.gz)"
+    if ! curl -fsSL --max-time 120 "$NETAVARK_DL" -o "$NETAVARK_TMP"; then
+        log_error "Failed to download netavark from $NETAVARK_DL"
+        rm -f "$NETAVARK_TMP"
+        exit 1
+    fi
+    gunzip -f "$NETAVARK_TMP"
+    NETAVARK_BIN_TMP="${NETAVARK_TMP%.gz}"
+    chmod 755 "$NETAVARK_BIN_TMP"
+    install -m 755 "$NETAVARK_BIN_TMP" "$_netavark_bin"
+    rm -f "$NETAVARK_BIN_TMP"
+    log_ok "netavark upgraded to upstream v${NETAVARK_UPSTREAM_VER}"
+fi
+unset _netavark_bin _netavark_ver _candidate _na_asset _uname_m
+
+# Configure Podman to use Netavark with the native nftables firewall driver
+# (instead of iptables-nft), removing the iptables-package dependency.
+if ! grep -q 'firewall_driver.*nftables' /etc/containers/containers.conf 2>/dev/null; then
+    mkdir -p /etc/containers
+    {
+        grep -v 'network_backend\|firewall_driver\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
+        printf '\n[network]\nnetwork_backend = "netavark"\nfirewall_driver = "nftables"\n'
+    } > /tmp/lynx-containers.conf
+    mv /tmp/lynx-containers.conf /etc/containers/containers.conf
+    log_ok "Podman configured: netavark backend, nftables firewall driver"
+fi
 
 # --- NTP synchronization check ----------------------------------------------
 #
@@ -359,8 +540,10 @@ unset _ntp_active
 
 log_section "Creating directories"
 
-mkdir -p "$LYNX_DIR" "$CERTS_DIR" "$WG_DIR"
+NGINX_DIR="$LYNX_DIR/nginx"
+mkdir -p "$LYNX_DIR" "$CERTS_DIR" "$WG_DIR" "$NGINX_DIR"
 chmod 700 "$LYNX_DIR" "$CERTS_DIR" "$WG_DIR"
+chmod 755 "$NGINX_DIR"
 log_ok "Directories created"
 
 # --- Podman networks --------------------------------------------------------
@@ -376,93 +559,19 @@ for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
     fi
 done
 
-# --- Generate secrets -------------------------------------------------------
+# --- Download core binaries -------------------------------------------------
 #
-# Secrets flow directly via pipe — never stored in files or shell history.
-# Subshells ensure vars don't leak to parent environment.
-# Passwords are overwritten in memory before the subshell exits.
+# The backend binary is needed BEFORE secret generation: every Lynx crypto
+# primitive (random tokens, Ed25519/X25519 keypairs, X.509 CA) is produced by
+# `lynx-dashboard-backend` subcommands so the host does not need `openssl`.
+# Binaries are signed with Ed25519; the public key is hardcoded below and the
+# private key lives only in GitHub Actions secrets.
 
-log_section "Generating secrets"
-
-log_info "Generating PostgreSQL root password..."
-(
-    PG_ROOT=$(openssl rand -hex 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root -
-    PG_ROOT="$(openssl rand -hex 32)"  # overwrite
-)
-
-log_info "Generating PostgreSQL app password and database URL..."
-(
-    PG_PASS=$(openssl rand -hex 32)
-    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass -
-    printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
-        | podman secret create lynx-dashboard-database-url -
-    PG_PASS="$(openssl rand -hex 32)"  # overwrite
-)
-
-log_info "Generating Redis password and URL..."
-(
-    REDIS_PASS=$(openssl rand -hex 32)
-    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass -
-    printf 'redis://:%s@lynx-dashboard-redis:6379' "$REDIS_PASS" \
-        | podman secret create lynx-dashboard-redis-url -
-    REDIS_PASS="$(openssl rand -hex 32)"  # overwrite
-)
-
-log_info "Generating API token..."
-openssl rand -hex 32 | podman secret create lynx-dashboard-api-token -
-
-log_info "Generating KEK (Key Encryption Key)..."
-openssl rand -base64 32 | tr -d '\n' | podman secret create lynx-dashboard-kek -
-
-log_info "Generating pepper..."
-openssl rand -hex 32 | podman secret create lynx-dashboard-pepper -
-
-log_info "Generating JWT signing keypair (Ed25519)..."
-(
-    PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
-    PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private -
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public -
-)
-
-log_info "Generating JWT encryption keypair (X25519)..."
-(
-    PRIV_PEM=$(openssl genpkey -algorithm x25519 2>/dev/null)
-    PRIV_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private -
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public -
-)
-
-log_info "Generating CA keypair (Ed25519)..."
-(
-    PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
-    PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private -
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public -
-)
-
-log_info "Generating setup token (one-time bootstrap)..."
-SETUP_TOKEN=$(openssl rand -hex 32)
-printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token -
-
-log_ok "All secrets generated — values purged from memory"
-
-# --- Download binaries from GitHub Releases ---------------------------------
-#
-# Binaries are signed with Ed25519. Public key is hardcoded in each binary
-# and verified here during install. The private key lives only in GitHub
-# Actions secrets — never in the repo.
-
-log_section "Downloading dashboard binaries"
+log_section "Downloading core binaries"
 
 GITHUB_REPO="Jaro-c/Lynx"
 RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
 
-# Detect architecture
 _ARCH=$(uname -m)
 case "$_ARCH" in
     x86_64)  ARCH="x86_64" ;;
@@ -474,7 +583,6 @@ case "$_ARCH" in
 esac
 log_info "Architecture: $ARCH"
 
-# Fetch latest dashboard release tag
 log_info "Fetching latest dashboard release..."
 LATEST_TAG=$(curl -fsSL \
     "https://api.github.com/repos/${GITHUB_REPO}/releases" \
@@ -494,7 +602,9 @@ if [[ -z "$LATEST_TAG" ]]; then
 fi
 log_ok "Latest release: ${LATEST_TAG}"
 
-RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_TAG}"
+# LYNX_RELEASE_BASE lets local-host testing point binary downloads at a private
+# HTTP server (e.g. `python3 -m http.server`) before a real release exists.
+RELEASE_BASE="${LYNX_RELEASE_BASE:-https://github.com/${GITHUB_REPO}/releases/download/${LATEST_TAG}}"
 BIN_DIR="/etc/lynx/bin"
 FRONTEND_DIR="/etc/lynx/frontend"
 
@@ -504,16 +614,15 @@ chmod 700 "$BIN_DIR" "$FRONTEND_DIR"
 # Verify Ed25519 signature. Args: <file> <sig-file>
 _verify_release_sig() {
     local file="$1" sig_file="$2"
-    python3 - "$file" "$sig_file" <<'PYEOF'
+    python3 - "$RELEASE_VERIFY_KEY_B64" "$file" "$sig_file" <<'PYEOF'
 import sys, base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
-pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(sys.argv[1] + "=="))
 
-with open(sys.argv[1], "rb") as f:
-    data = f.read()
 with open(sys.argv[2], "rb") as f:
+    data = f.read()
+with open(sys.argv[3], "rb") as f:
     sig = f.read()
 try:
     pub_key.verify(sig, data)
@@ -523,13 +632,22 @@ except Exception as e:
 PYEOF
 }
 
-# Ensure cryptography lib is available for signature verification
+# Ensure cryptography lib is available for signature verification.
+# Prefer the distro-shipped python3-cryptography package over pip so the host
+# does not need python3-pip on minimal systems.
 if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
-    log_info "Installing Python cryptography library..."
-    pip3 install --quiet cryptography
+    log_info "Installing python3-cryptography..."
+    case "$DISTRO" in
+        debian) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-cryptography -qq ;;
+        rhel)   { dnf install -y python3-cryptography 2>/dev/null || yum install -y python3-cryptography 2>/dev/null; } ;;
+        *)      log_error "Cannot install python3-cryptography on unknown distro"; exit 1 ;;
+    esac
+    python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" || {
+        log_error "python3-cryptography not importable after install"
+        exit 1
+    }
 fi
 
-# Download and verify backend binary
 log_info "Downloading backend binary..."
 BACKEND_FILE="${BIN_DIR}/lynx-dashboard-backend"
 BACKEND_TMP="${BIN_DIR}/lynx-dashboard-backend.new"
@@ -551,6 +669,126 @@ rm -f "${BACKEND_TMP}.sig"
 chmod 755 "$BACKEND_TMP"
 mv "$BACKEND_TMP" "$BACKEND_FILE"
 log_ok "Backend installed: ${BACKEND_FILE}"
+
+log_info "Downloading lynx-compose binary..."
+COMPOSE_FILE_BIN="${BIN_DIR}/lynx-compose"
+COMPOSE_TMP="${BIN_DIR}/lynx-compose.new"
+
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}" \
+    -o "$COMPOSE_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}.sig" \
+    -o "${COMPOSE_TMP}.sig"
+
+log_info "Verifying lynx-compose signature..."
+if ! _verify_release_sig "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"; then
+    log_error "lynx-compose signature verification FAILED — aborting"
+    rm -f "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"
+    exit 1
+fi
+rm -f "${COMPOSE_TMP}.sig"
+chmod 755 "$COMPOSE_TMP"
+mv "$COMPOSE_TMP" "$COMPOSE_FILE_BIN"
+log_ok "lynx-compose installed: ${COMPOSE_FILE_BIN}"
+
+# --- Generate secrets -------------------------------------------------------
+#
+# Secrets flow directly via pipe — never stored in files or shell history.
+# Subshells ensure vars don't leak to parent environment.
+# All cryptographic primitives are generated by the lynx-dashboard-backend
+# binary subcommands so the host does not need an `openssl` binary.
+
+log_section "Generating secrets"
+
+LB="$BACKEND_FILE"  # short alias for the rest of this section
+
+log_info "Generating PostgreSQL root password..."
+(
+    PG_ROOT=$("$LB" gen-rand 32)
+    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root - >/dev/null
+    PG_ROOT="$("$LB" gen-rand 32)"  # overwrite
+)
+
+log_info "Generating PostgreSQL app password and database URL..."
+(
+    PG_PASS=$("$LB" gen-rand 32)
+    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass - >/dev/null
+    printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
+        | podman secret create lynx-dashboard-database-url - >/dev/null
+    PG_PASS="$("$LB" gen-rand 32)"  # overwrite
+)
+
+log_info "Generating Valkey password and URL..."
+(
+    REDIS_PASS=$("$LB" gen-rand 32)
+    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass - >/dev/null
+    printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
+        | podman secret create lynx-dashboard-redis-url - >/dev/null
+    REDIS_PASS="$("$LB" gen-rand 32)"  # overwrite
+)
+
+log_info "Generating API token..."
+"$LB" gen-rand 32 | podman secret create lynx-dashboard-api-token - >/dev/null
+log_info "Generating KEK (Key Encryption Key)..."
+"$LB" gen-rand 32 --encoding base64 | podman secret create lynx-dashboard-kek - >/dev/null
+log_info "Generating pepper..."
+"$LB" gen-rand 32 | podman secret create lynx-dashboard-pepper - >/dev/null
+
+log_info "Generating JWT signing keypair (Ed25519)..."
+# The public half is also the agent's `DASHBOARD_VERIFY_KEY` — the agent verifies
+# every dashboard-signed command (including heartbeat ACK) against it.  Write it
+# to a well-known file (mode 644 — public material) so:
+#   - the agent install script on the same host can default to reading it
+#   - the operator can `cat` it to copy onto remote agents
+DASHBOARD_SIGN_PUBKEY_FILE="$LYNX_DIR/dashboard-sign-pubkey"
+DASHBOARD_SIGN_PUBKEY=""
+{
+    KEYPAIR=$("$LB" gen-ed25519)
+    PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
+    DASHBOARD_SIGN_PUBKEY=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
+    printf '%s' "$DASHBOARD_SIGN_PUBKEY" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
+    printf '%s' "$DASHBOARD_SIGN_PUBKEY" > "$DASHBOARD_SIGN_PUBKEY_FILE"
+    chmod 644 "$DASHBOARD_SIGN_PUBKEY_FILE"
+    PRIV_SEED=$("$LB" gen-rand 32)  # overwrite in memory
+}
+
+log_info "Generating JWT encryption keypair (X25519)..."
+(
+    KEYPAIR=$("$LB" gen-x25519)
+    PRIV_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '1p')
+    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public - >/dev/null
+)
+
+log_info "Generating CA keypair (Ed25519)..."
+(
+    KEYPAIR=$("$LB" gen-ed25519)
+    PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
+    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
+)
+
+log_info "Generating X.509 CA certificate for mTLS (Ed25519)..."
+(
+    CA_OUT=$("$LB" gen-x509-ca)
+    CA_CERT_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '1p')
+    CA_KEY_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '2p')
+    printf '%s' "$CA_CERT_DER_B64" | podman secret create lynx-dashboard-x509-ca-cert - >/dev/null
+    printf '%s' "$CA_KEY_DER_B64"  | podman secret create lynx-dashboard-x509-ca-key  - >/dev/null
+    CA_OUT="$("$LB" gen-rand 64)"
+    CA_CERT_DER_B64="$("$LB" gen-rand 64)"
+    CA_KEY_DER_B64="$("$LB" gen-rand 64)"
+)
+
+log_info "Generating setup token (one-time bootstrap)..."
+SETUP_TOKEN=$("$LB" gen-rand 32)
+printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token - >/dev/null
+log_ok "All secrets generated — values purged from memory"
+unset LB
 
 # Download and verify frontend binary + assets
 log_info "Downloading frontend binary..."
@@ -597,15 +835,30 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_ok "Frontend installed: ${FRONTEND_DIR}/"
 
+# Write version file
+printf '%s' "${LATEST_TAG#dashboard@}" > "$BIN_DIR/lynx-dashboard-version"
+log_ok "Version: ${LATEST_TAG#dashboard@}"
+
 # --- Start services ---------------------------------------------------------
 
 log_section "Starting services"
 
 COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
 
+# Copy init SQL to a persistent location so the bind mount survives reboots.
+# docker-compose.yml uses ${LYNX_DB_INIT_DIR:-./server/db/init} — this sets
+# the production path; local dev falls back to the relative repo path.
+LYNX_DB_INIT_DIR="/etc/lynx/db/init"
+mkdir -p "$LYNX_DB_INIT_DIR"
+chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
+cp "$COMPOSE_DIR/server/db/init/"*.sql "$LYNX_DB_INIT_DIR/"
+chmod 644 "$LYNX_DB_INIT_DIR/"*.sql
+export LYNX_DB_INIT_DIR
+log_ok "Init SQL copied to $LYNX_DB_INIT_DIR"
+
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
-podman compose -f "$COMPOSE_FILE" up -d postgres
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
 
 log_info "Waiting for PostgreSQL to be healthy..."
 for i in $(seq 1 30); do
@@ -621,18 +874,18 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# 2. Redis
-log_info "Starting Redis..."
-podman compose -f "$COMPOSE_FILE" up -d redis
+# 2. Valkey
+log_info "Starting Valkey..."
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d valkey
 
-log_info "Waiting for Redis to be healthy..."
+log_info "Waiting for Valkey to be healthy..."
 for i in $(seq 1 30); do
-    if podman inspect lynx-dashboard-redis --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
-        log_ok "Redis is healthy"
+    if podman inspect lynx-dashboard-valkey --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "Valkey is healthy"
         break
     fi
     if [[ $i -eq 30 ]]; then
-        log_error "Redis did not become healthy in time"
+        log_error "Valkey did not become healthy in time"
         exit 1
     fi
     sleep 2
@@ -640,7 +893,7 @@ done
 
 # 3. Backend
 log_info "Starting backend..."
-podman compose -f "$COMPOSE_FILE" up -d backend
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d backend
 
 log_info "Waiting for backend to be healthy..."
 for i in $(seq 1 40); do
@@ -650,16 +903,51 @@ for i in $(seq 1 40); do
     fi
     if [[ $i -eq 40 ]]; then
         log_error "Backend did not become healthy in time"
-        podman logs lynx-dashboard-backend --tail 50
+        podman logs --tail 50 lynx-dashboard-backend
         exit 1
     fi
     sleep 3
 done
 
+# Resync PostgreSQL app user password to match the Podman secret.
+# The backend may run a 90-day scheduled rotation on first startup (no prior
+# rotation record in a fresh DB) and partially update the PostgreSQL password
+# without updating the Podman secret (the `podman` binary is not available
+# inside the Alpine container). The rotation runs ~30s after startup; we wait
+# 15s after "healthy" to ensure the rotation has finished before we re-anchor
+# PostgreSQL to the value in the Podman secret.
+log_info "Waiting for any startup key rotation to settle..."
+sleep 15
+log_info "Synchronizing PostgreSQL app user password..."
+_PG_PASS_SYNC=$(podman secret inspect lynx-dashboard-pg-pass --showsecret --format '{{.SecretData}}' 2>/dev/null)
+if [[ -n "$_PG_PASS_SYNC" ]]; then
+    if printf "ALTER USER lynx_dashboard_app PASSWORD '%s';\n" "$_PG_PASS_SYNC" \
+        | podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard \
+        >/dev/null 2>&1; then
+        log_ok "PostgreSQL app user password synchronized"
+    else
+        log_warn "Could not sync PostgreSQL password (non-critical — backend may reconnect)"
+    fi
+fi
+unset _PG_PASS_SYNC
+
 # 4. Frontend
 log_info "Starting frontend..."
-podman compose -f "$COMPOSE_FILE" up -d frontend
-log_ok "Frontend started"
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend
+
+log_info "Waiting for frontend to be healthy..."
+for i in $(seq 1 40); do
+    if podman inspect lynx-dashboard-frontend --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "Frontend is healthy"
+        break
+    fi
+    if [[ $i -eq 40 ]]; then
+        log_error "Frontend did not become healthy in time"
+        podman logs --tail 30 lynx-dashboard-frontend
+        exit 1
+    fi
+    sleep 3
+done
 
 # --- TLS certificate --------------------------------------------------------
 
@@ -671,12 +959,11 @@ KEY="$CERTS_DIR/dashboard.key"
 _generate_cert() {
     local cn
     cn=$(hostname -f 2>/dev/null || hostname)
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-        -keyout "$KEY" -out "$CERT" \
-        -days 90 -nodes -sha256 \
-        -subj "/CN=${cn}/O=Lynx/OU=Dashboard" \
-        -addext "subjectAltName=DNS:${cn},IP:$(hostname -I | awk '{print $1}')" \
-        2>/dev/null
+    "$BACKEND_FILE" cert-self-signed \
+        --cn "$cn" \
+        --days 90 \
+        --cert-out "$CERT" \
+        --key-out "$KEY"
     chmod 600 "$KEY"
     chmod 644 "$CERT"
     log_ok "Certificate generated: $CERT (90 days, P-256)"
@@ -692,13 +979,13 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-    -keyout /etc/lynx/certs/dashboard.key -out /etc/lynx/certs/dashboard.crt \
-    -days 90 -nodes -sha256 \
-    -subj "/CN=$(hostname -f)/O=Lynx/OU=Dashboard" \
-    -addext "subjectAltName=DNS:$(hostname -f),IP:$(hostname -I | awk '"'"'{print $1}'"'"')" \
-    && chmod 600 /etc/lynx/certs/dashboard.key \
-    && podman kill -s HUP lynx-dashboard-frontend'
+ExecStart=/bin/bash -c '/etc/lynx/bin/lynx-dashboard-backend cert-self-signed \
+    --cn "$(hostname -f)" \
+    --days 90 \
+    --cert-out /etc/lynx/tls/dashboard.crt \
+    --key-out /etc/lynx/tls/dashboard.key \
+    && chmod 600 /etc/lynx/tls/dashboard.key \
+    && podman kill -s HUP lynx-dashboard-nginx'
 EOF
 
 cat > /etc/systemd/system/lynx-dashboard-rotate-certs.timer << 'EOF'
@@ -720,11 +1007,106 @@ systemctl daemon-reload
 systemctl enable --now lynx-dashboard-rotate-certs.timer
 log_ok "Certificate rotation timer enabled (every 80 days)"
 
+# --- nginx TLS reverse proxy ------------------------------------------------
+
+log_section "Configuring nginx TLS reverse proxy"
+
+# nginx config: TLS termination on 19443, proxy to frontend.
+# The resolver directive points at Podman's embedded DNS (the lynx-dashboard-app
+# network gateway, always the .1 of whichever subnet Netavark assigns).  Using a
+# variable for proxy_pass forces nginx to re-resolve the "frontend" hostname on
+# every request so it picks up the new container IP after an auto-update restart.
+NGINX_RESOLVER=$(podman network inspect lynx-dashboard-app \
+    --format '{{range .Subnets}}{{.Gateway}}{{end}}' 2>/dev/null \
+    || echo "10.89.0.1")
+cat > "$NGINX_DIR/default.conf" << NGINXEOF
+server {
+    listen 19443 ssl;
+    listen [::]:19443 ssl;
+
+    ssl_certificate     /etc/lynx/tls/dashboard.crt;
+    ssl_certificate_key /etc/lynx/tls/dashboard.key;
+    ssl_protocols       TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # Re-resolve the frontend hostname after each update-triggered restart.
+    resolver ${NGINX_RESOLVER} valid=5s ipv6=off;
+
+    location / {
+        set \$upstream http://frontend:3000;
+        proxy_pass         \$upstream;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 120s;
+    }
+
+    error_page 502 503 /updating.html;
+    location = /updating.html {
+        root /etc/lynx/nginx;
+    }
+}
+NGINXEOF
+
+# Maintenance page served by nginx while frontend is being updated
+cat > "$NGINX_DIR/updating.html" << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Lynx — Updating</title>
+<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
+.box{text-align:center;padding:2rem}h1{font-size:1.5rem;margin-bottom:.5rem}p{color:#94a3b8}</style>
+</head>
+<body><div class="box"><h1>Lynx is updating</h1><p>The dashboard will be back shortly.</p></div></body>
+</html>
+EOF
+
+log_ok "nginx configuration written"
+
+# 5. nginx
+# Remove any stale nginx container created earlier by podman-compose (it may have been
+# created before nginx.conf/certs existed, or have stale --requires pointing to
+# since-recreated container IDs). Start it fresh directly to bypass the dependency graph.
+log_info "Starting nginx..."
+podman rm -f lynx-dashboard-nginx 2>/dev/null || true
+podman run -d \
+    --name lynx-dashboard-nginx \
+    --network lynx-dashboard-app \
+    -p "19443:19443" \
+    -v /etc/lynx/tls:/etc/lynx/tls:ro \
+    -v /etc/lynx/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro \
+    -v /etc/lynx/nginx/updating.html:/etc/lynx/nginx/updating.html:ro \
+    --restart unless-stopped \
+    --health-cmd "pgrep nginx > /dev/null" \
+    --health-interval 10s \
+    --health-timeout 5s \
+    --health-retries 5 \
+    --health-start-period 10s \
+    docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+
+log_info "Waiting for nginx to be healthy..."
+for i in $(seq 1 20); do
+    if podman inspect lynx-dashboard-nginx --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "nginx is healthy"
+        break
+    fi
+    if [[ $i -eq 20 ]]; then
+        log_error "nginx did not become healthy in time"
+        podman logs --tail 20 lynx-dashboard-nginx
+        exit 1
+    fi
+    sleep 3
+done
+
 # --- WireGuard — local agent tunnel -----------------------------------------
 
 log_section "Setting up WireGuard tunnel (dashboard ↔ local agent)"
 
-WG_CONF="$WG_DIR/wg-lynx-dashboard.conf"
+WG_CONF="$WG_DIR/wg-lynx-dash.conf"
 
 # Generate dashboard keypair + PSK
 DASHBOARD_PRIV=$(wg genkey)
@@ -732,8 +1114,8 @@ DASHBOARD_PUB=$(printf '%s' "$DASHBOARD_PRIV" | wg pubkey)
 # PSK is kept in scope until final output so admin can copy it for the agent install script.
 # It is also stored as a Podman secret for the dashboard backend (peer management).
 AGENT_PSK=$(wg genpsk)
-printf '%s' "$AGENT_PSK" | podman secret create lynx-dashboard-local-agent-psk -
-
+podman secret rm lynx-dashboard-local-agent-psk 2>/dev/null || true
+printf '%s' "$AGENT_PSK" | podman secret create lynx-dashboard-local-agent-psk - >/dev/null
 # The local agent keypair is generated by the agent install script.
 # Peer block is written by the agent install script after bootstrap.
 cat > "$WG_CONF" << EOF
@@ -750,48 +1132,53 @@ ListenPort = ${AGENT_WG_PORT}
 EOF
 
 chmod 600 "$WG_CONF"
-DASHBOARD_PRIV="$(openssl rand -hex 32)"  # overwrite in memory
+DASHBOARD_PRIV="$("$BACKEND_FILE" gen-rand 32)"  # overwrite in memory
 
 log_ok "WireGuard config written: $WG_CONF"
 log_ok "Dashboard WireGuard pubkey: ${DASHBOARD_PUB}"
 printf '%s' "$DASHBOARD_PUB" > "$LYNX_DIR/dashboard-wg-pubkey"
 
+# Bring up the dashboard WireGuard interface now so it exists when the backend
+# starts. Peers are added dynamically by the backend via `wg set` as agents
+# register. The interface must be up before any agent can connect.
+wg-quick up wg-lynx-dash
+systemctl enable "wg-quick@wg-lynx-dash"
+log_ok "WireGuard interface up: wg-lynx-dash (10.100.0.1/16)"
+
 # --- nftables ---------------------------------------------------------------
 
 log_section "Configuring nftables"
 
-cat > /etc/nftables-lynx-dashboard.conf << 'EOF'
-table inet lynx-dashboard {
-    chain input {
-        type filter hook input priority filter; policy drop;
+# Bootstrap ruleset uses the same table/chain names as the Rust agent binary so
+# nftables.service loads correct rules on every reboot.  The agent binary
+# overwrites this file on first startup — this is only the boot-window ruleset
+# that runs before lynx-agent.service has started.
+cat > /etc/nftables-lynx-agent.conf << 'EOF'
+destroy table inet lynx-agent
+add table inet lynx-agent
+table inet lynx-agent {
+    chain lynx-base {
+        type filter hook input priority 0; policy drop;
 
-        # Loopback
-        iifname "lo" accept
-
-        # Drop invalid state immediately
+        iif lo accept
         ct state invalid drop
-
-        # Established / related
         ct state established,related accept
 
-        # Required ICMP types (path MTU, traceroute, diagnostics)
-        ip  protocol icmp  icmp type  { destination-unreachable, time-exceeded, parameter-problem } accept
-        ip6 nexthdr  icmpv6 icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
+        # ICMP — path MTU, diagnostics, reachability
+        ip  protocol icmp  accept
+        ip6 nexthdr  icmpv6 accept
 
-        # ICMPv6 NDP — required for IPv6 neighbor discovery
-        ip6 nexthdr ipv6-icmp icmpv6 type { nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
-
-        # ICMP echo — rate limited
-        ip  protocol icmp  icmp type  echo-request ct state new limit rate 3/second burst 10 packets accept
-        ip6 nexthdr  icmpv6 icmpv6 type echo-request ct state new limit rate 3/second burst 10 packets accept
-
-        # TCP flag anomalies — drop port scans and malformed packets
+        # TCP flag anomalies
         tcp flags == 0x0 drop
         tcp flags & (fin | psh | urg) == fin | psh | urg drop
         tcp flags ack ct state new drop
 
-        # SSH — rate limited
-        tcp dport 22 ct state new limit rate 10/minute burst 5 packets accept
+        # DNS for container networks (aardvark-dns on Netavark bridge interfaces)
+        iifname "podman*" udp dport 53 accept
+        iifname "podman*" tcp dport 53 accept
+
+        # SSH — per-source-IP rate limit
+        tcp dport 22 ct state new meter ssh_throttle { ip saddr limit rate 10/minute burst 20 packets } accept
 
         # Dashboard panel
         tcp dport 19443 ct state new accept
@@ -799,59 +1186,97 @@ table inet lynx-dashboard {
         # WireGuard (agent tunnels)
         udp dport 51820 accept
 
+        # Dashboard backend accessible from WireGuard management plane only
+        ip saddr 10.100.0.1 accept
+
+        jump lynx-global
+        jump lynx-local
+
         drop
     }
 
-    chain forward {
-        type filter hook forward priority filter; policy drop;
+    # These chains are populated by the Rust agent after startup
+    chain lynx-global {}
+    chain lynx-local {}
+
+    chain lynx-forward {
+        type filter hook forward priority 0; policy drop;
 
         ct state established,related accept
 
-        # Allow backend container traffic to/from WireGuard (dashboard ↔ agents)
-        oifname "wg-lynx-dashboard" accept
-        iifname "wg-lynx-dashboard" accept
+        # New connections to published container ports (Netavark DNAT rewrites dst to 10.89.x.x)
+        ip daddr 10.89.0.0/16 ct state new accept
+
+        # Outbound traffic from dashboard containers (apk installs, GitHub, cert renewals, etc.)
+        iifname "podman*" accept
+
+        # Backend container traffic to/from WireGuard (dashboard <-> agents)
+        oifname "wg-lynx-dash" accept
+        iifname "wg-lynx-dash" accept
     }
 
-    chain output {
-        type filter hook output priority filter; policy accept;
-
-        # Ports this server should never initiate outbound connections to
-        tcp dport { 25, 465, 587 } drop  # SMTP — no email relay
-        tcp dport 23 drop                 # Telnet
-        tcp dport { 20, 21 } drop         # FTP
-        udp dport { 137, 138 } drop       # NetBIOS
-        tcp dport { 139, 445 } drop       # SMB
-        tcp dport 6667 drop               # IRC (common botnet C2)
-        tcp dport 111 drop                # RPC
-        udp dport 111 drop
-        udp dport 69 drop                 # TFTP
-        tcp dport 6000-6063 drop          # X11
-        tcp dport 1080 drop               # SOCKS proxy
-        udp dport 5353 drop               # mDNS
-        tcp dport 6881-6889 drop          # BitTorrent
-        udp dport 6881-6889 drop
+    chain lynx-output {
+        type filter hook output priority 0; policy accept;
     }
 }
 EOF
 
-# Apply ruleset
-nft -f /etc/nftables-lynx-dashboard.conf
+# Apply bootstrap ruleset
+nft -f /etc/nftables-lynx-agent.conf
 log_ok "nftables rules applied (ports: 22 rate-limited, 19443, 51820 UDP)"
 
-# Persist across reboots
+# Persist across reboots — migrate away from old lynx-dashboard include
 if [[ -f /etc/nftables.conf ]]; then
-    if ! grep -q "lynx-dashboard" /etc/nftables.conf; then
-        echo 'include "/etc/nftables-lynx-dashboard.conf"' >> /etc/nftables.conf
+    sed -i '/nftables-lynx-dashboard/d' /etc/nftables.conf
+    if ! grep -q "nftables-lynx-agent" /etc/nftables.conf; then
+        echo 'include "/etc/nftables-lynx-agent.conf"' >> /etc/nftables.conf
     fi
 fi
 systemctl enable nftables 2>/dev/null || true
+
+# --- Container auto-start on reboot -----------------------------------------
+
+log_section "Enabling container auto-start on reboot"
+
+# Podman's podman-restart.service only handles restart-policy=always.
+# Our containers use restart=unless-stopped (don't restart if manually stopped).
+# This oneshot service starts all five containers at boot, after nftables are loaded.
+cat > /etc/systemd/system/lynx-dashboard-containers.service << 'EOF'
+[Unit]
+Description=Lynx Dashboard — start containers on boot
+After=network-online.target nftables.service lynx-agent.service
+Wants=network-online.target lynx-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start \
+    lynx-dashboard-postgres \
+    lynx-dashboard-valkey \
+    lynx-dashboard-backend \
+    lynx-dashboard-frontend \
+    lynx-dashboard-nginx
+ExecStop=/usr/bin/podman stop \
+    lynx-dashboard-nginx \
+    lynx-dashboard-frontend \
+    lynx-dashboard-backend \
+    lynx-dashboard-valkey \
+    lynx-dashboard-postgres
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable lynx-dashboard-containers.service
+log_ok "Container auto-start service enabled (lynx-dashboard-containers.service)"
 
 # --- Done -------------------------------------------------------------------
 
 log_section "Installation complete"
 
 HOST_IP=$(hostname -I | awk '{print $1}')
-CERT_EXPIRY=$(openssl x509 -in "$CERT" -noout -enddate | cut -d= -f2)
+CERT_EXPIRY=$("$BACKEND_FILE" cert-expiry "$CERT")
 
 echo ""
 echo -e "${GREEN}${BOLD}Lynx Dashboard is running!${RESET}"
@@ -864,18 +1289,20 @@ echo -e "  Open this URL in your browser ${BOLD}(one-time use, expires in 24 hou
 echo -e "  ${CYAN}https://${HOST_IP}:${LISTEN_PORT}/register?setup_token=${SETUP_TOKEN}${RESET}"
 echo -e "${YELLOW}This is the only time the setup token is shown. Save the link now.${RESET}"
 echo ""
-SETUP_TOKEN="$(openssl rand -hex 32)"  # overwrite in memory
+SETUP_TOKEN="$("$BACKEND_FILE" gen-rand 32)"  # overwrite in memory
 unset SETUP_TOKEN
 echo ""
 echo -e "${BOLD}${YELLOW}=== WireGuard bootstrap data (copy for agent install) ===${RESET}"
-echo -e "  ${BOLD}Dashboard endpoint:${RESET}  ${HOST_IP}:${AGENT_WG_PORT}"
-echo -e "  ${BOLD}Dashboard pubkey:${RESET}    ${DASHBOARD_PUB}"
-echo -e "  ${BOLD}Preshared key:${RESET}       ${AGENT_PSK}"
+echo -e "  ${BOLD}Dashboard endpoint:${RESET}      ${HOST_IP}:${AGENT_WG_PORT}"
+echo -e "  ${BOLD}Dashboard WG pubkey:${RESET}     ${DASHBOARD_PUB}"
+echo -e "  ${BOLD}Preshared key:${RESET}           ${AGENT_PSK}"
+echo -e "  ${BOLD}Dashboard signing key:${RESET}   ${DASHBOARD_SIGN_PUBKEY}"
 echo -e "${YELLOW}This is the only time the PSK is shown. Copy it now.${RESET}"
+echo -e "${YELLOW}The signing key is also at: ${DASHBOARD_SIGN_PUBKEY_FILE}${RESET}"
 echo ""
 # Clear PSK from memory after display
-AGENT_PSK="$(openssl rand -hex 32)"
-unset AGENT_PSK DASHBOARD_PUB
+AGENT_PSK="$("$BACKEND_FILE" gen-rand 32)"
+unset AGENT_PSK DASHBOARD_PUB DASHBOARD_SIGN_PUBKEY
 echo -e "${YELLOW}Next step:${RESET} Run the agent install script on this VPS to complete the local WireGuard tunnel."
 echo ""
 echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Jaro-c/Lynx"

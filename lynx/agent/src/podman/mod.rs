@@ -5,6 +5,7 @@ use std::process::Command;
 /// with dedicated subuid/subgid range for rootless Podman.
 pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
     let username = format!("lynx-tenant-{tenant_id}");
+    let home_dir = format!("/var/lib/lynx/orgs/{tenant_id}");
 
     // Check if user already exists
     let exists = Command::new("id")
@@ -14,11 +15,17 @@ pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
         .success();
 
     if !exists {
-        // Create system user (no login shell, no home)
+        // Parent dir must exist before useradd --create-home runs.
+        std::fs::create_dir_all("/var/lib/lynx/orgs").context("create /var/lib/lynx/orgs")?;
+
+        // Create system user with a real home dir so rootless Podman can store its
+        // images/containers under ~/.local/share/containers/ and find its socket.
         let status = Command::new("useradd")
             .args([
                 "--system",
-                "--no-create-home",
+                "--create-home",
+                "--home-dir",
+                &home_dir,
                 "--shell",
                 "/usr/sbin/nologin",
                 &username,
@@ -30,13 +37,17 @@ pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
             anyhow::bail!("useradd failed for {username}");
         }
 
-        // Assign subuid/subgid range (65536 IDs per tenant)
+        // Assign subuid/subgid range (65536 IDs per tenant).
         add_subid_range(&username)?;
 
-        // Enable lingering so the systemd user instance starts at boot,
-        // allowing rootless containers to survive without an active login session.
+        // Enable lingering and start the user session immediately so that
+        // XDG_RUNTIME_DIR (/run/user/{uid}) is created right away.
+        let uid = tenant_uid(tenant_id)?;
         let _ = Command::new("loginctl")
             .args(["enable-linger", &username])
+            .status();
+        let _ = Command::new("systemctl")
+            .args(["start", &format!("user@{uid}.service")])
             .status();
     }
 
@@ -51,11 +62,14 @@ pub fn ensure_tenant_user(tenant_id: &str) -> Result<()> {
 pub fn podman_as_tenant(tenant_id: &str, args: &[&str]) -> Result<std::process::Output> {
     let username = format!("lynx-tenant-{tenant_id}");
     let uid = tenant_uid(tenant_id)?;
+    // Start in / so the tenant user can always access the cwd (their home or
+    // a restricted directory might not be world-readable).
     Command::new("runuser")
         .args(["-u", &username, "--", "podman"])
         .args(args)
         .env("HOME", format!("/var/lib/lynx/orgs/{tenant_id}"))
         .env("XDG_RUNTIME_DIR", format!("/run/user/{uid}"))
+        .current_dir("/")
         .output()
         .context("runuser podman")
 }
@@ -123,7 +137,8 @@ pub struct DeployOptions<'a> {
 }
 
 /// Write compose file to stable project dir, then run `podman compose up -d`.
-pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
+/// Returns the compose.yml path so the caller can persist it for startup recovery.
+pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<String> {
     let project_dir = project_dir(opts.tenant_id, opts.project_id);
     std::fs::create_dir_all(&project_dir)
         .with_context(|| format!("create project dir {project_dir}"))?;
@@ -148,11 +163,29 @@ pub fn compose_deploy(opts: DeployOptions<'_>) -> Result<()> {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+    Ok(compose_path)
+}
+
+/// Start containers for an existing compose project without recreating running ones.
+/// Used on agent startup to recover containers that should be running after a reboot.
+pub fn compose_up_no_recreate(tenant_id: &str, compose_path: &str) -> Result<()> {
+    if !std::path::Path::new(compose_path).exists() {
+        anyhow::bail!("compose file not found: {compose_path}");
+    }
+    let out = run_as_tenant(
+        tenant_id,
+        &["compose", "-f", compose_path, "up", "-d", "--no-recreate"],
+    )?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "podman compose up --no-recreate failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
     Ok(())
 }
 
 /// Tear down a project's compose stack.
-#[allow(dead_code)]
 pub fn compose_down(tenant_id: &str, project_id: &str) -> Result<()> {
     let compose_path = format!("{}/compose.yml", project_dir(tenant_id, project_id));
     if !std::path::Path::new(&compose_path).exists() {
@@ -275,11 +308,13 @@ fn run_as_tenant(tenant_id: &str, podman_args: &[&str]) -> Result<std::process::
 }
 
 fn add_subid_range(username: &str) -> Result<()> {
-    // Each tenant gets a 65536-ID range.
-    // usermod --add-subuids / --add-subgids auto-assigns from available pool.
+    let start = next_subid_start().context("find next subid range")?;
+    let end = start + 65535;
+    let range = format!("{start}-{end}");
+
     for flag in ["--add-subuids", "--add-subgids"] {
         let status = Command::new("usermod")
-            .args([flag, "65536", username])
+            .args([flag, &range, username])
             .status()
             .context("usermod subid")?;
         if !status.success() {
@@ -287,4 +322,29 @@ fn add_subid_range(username: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Find the next available subid start across /etc/subuid and /etc/subgid.
+/// Allocations start at 100,000 (standard) and each tenant takes 65,536 IDs.
+fn next_subid_start() -> Result<u64> {
+    const MIN_START: u64 = 100_000;
+    // /etc/subuid format: username:start:count — find the highest occupied end
+    let max_end = ["/etc/subuid", "/etc/subgid"]
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .flat_map(|content| {
+            content
+                .lines()
+                .filter_map(|line| {
+                    let mut parts = line.splitn(3, ':');
+                    let _ = parts.next(); // username
+                    let start: u64 = parts.next()?.parse().ok()?;
+                    let count: u64 = parts.next()?.parse().ok()?;
+                    Some(start + count)
+                })
+                .collect::<Vec<_>>()
+        })
+        .max();
+
+    Ok(max_end.unwrap_or(MIN_START).max(MIN_START))
 }

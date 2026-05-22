@@ -9,9 +9,9 @@ import {
 	type PermRef,
 	type RoleRow,
 	type UserRow,
-} from "@/actions/(dashboard)/app/admin/users";
-import { RolesPanel } from "@/components/(dashboard)/app/admin/RolesPanel";
-import { UsersPanel } from "@/components/(dashboard)/app/admin/UsersPanel";
+} from "@/actions/(dashboard)/admin/users";
+import { RolesPanel } from "@/components/(dashboard)/admin/RolesPanel";
+import { UsersPanel } from "@/components/(dashboard)/admin/UsersPanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BACKEND_URL } from "@/lib/api";
 

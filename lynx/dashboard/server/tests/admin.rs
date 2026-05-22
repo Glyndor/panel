@@ -46,10 +46,13 @@ async fn register_and_get_id(server: &axum_test::TestServer) -> (String, String,
         }))
         .await;
 
-    // Login to get access token and then /auth/me for user_id
+    // Login to get access token; the IP that signs the access token's ip_hash
+    // claim must match the IP we replay for /auth/me, otherwise the handler's
+    // IP+UA check rejects the request as `intercepted`.
+    let login_ip = unique_ip();
     let res = server
         .post("/auth/login")
-        .add_header("x-real-ip", &unique_ip())
+        .add_header("x-real-ip", &login_ip)
         .json(&json!({ "username": username, "password": password }))
         .await;
     res.assert_status_ok();
@@ -58,10 +61,10 @@ async fn register_and_get_id(server: &axum_test::TestServer) -> (String, String,
         .unwrap()
         .to_string();
 
-    // /auth/me is on the public router — no IP check, no require_auth
     let me = server
         .get("/auth/me")
         .add_header("authorization", format!("Bearer {}", token))
+        .add_header("x-real-ip", &login_ip)
         .await;
     me.assert_status_ok();
     let user_id = me.json::<Value>()["id"].as_str().unwrap().to_string();

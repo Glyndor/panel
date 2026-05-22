@@ -42,8 +42,10 @@ SCRIPTS=(
     "$SCRIPT_DIR/remove-firewall.sh"
     "$SCRIPT_DIR/install-podman.sh"
     "$SCRIPT_DIR/install-nftables.sh"
-    "$SCRIPT_DIR/dashboard/install-dashboard.sh"
-    "$SCRIPT_DIR/agent/install-agent.sh"
+    "$ROOT_DIR/lynx/dashboard/setup-dashboard.sh"
+    "$ROOT_DIR/lynx/dashboard/update-dashboard.sh"
+    "$ROOT_DIR/lynx/agent/setup-agent.sh"
+    "$ROOT_DIR/lynx/agent/update-agent.sh"
 )
 
 # -----------------------------------------------------------------------------

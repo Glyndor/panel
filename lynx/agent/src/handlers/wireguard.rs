@@ -200,3 +200,108 @@ pub fn handle_wg_data_plane_teardown(
     tracing::info!("data-plane WireGuard interface {interface} torn down");
     Ok(json!({ "ok": true, "interface": interface }))
 }
+
+const MGMT_IFACE: &str = "wg-lynx-dash";
+
+/// Add a peer to the management-plane WireGuard interface (`wg-lynx-dash`).
+/// Called by the dashboard when a new remote agent is registered.
+pub fn handle_wg_management_add_peer(
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden(
+            "wg.management.add_peer requires write permission",
+        ));
+    }
+    let pubkey = require_str(&cmd.command, "pubkey")?.to_string();
+    let allowed_ip = require_str(&cmd.command, "allowed_ip")?;
+    let psk = Zeroizing::new(require_str(&cmd.command, "psk")?.to_string());
+
+    let allowed = format!("{allowed_ip}/32");
+    let mut child = std::process::Command::new("wg")
+        .args([
+            "set",
+            MGMT_IFACE,
+            "peer",
+            &pubkey,
+            "preshared-key",
+            "/dev/stdin",
+            "allowed-ips",
+            &allowed,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg set peer: {e}")))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(psk.as_bytes())
+            .map_err(|e| AgentError::Internal(anyhow::anyhow!("write psk: {e}")))?;
+    }
+    let status = child
+        .wait()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wait wg: {e}")))?;
+    if !status.success() {
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "wg set peer failed for {MGMT_IFACE}"
+        )));
+    }
+
+    tracing::info!(pubkey = %&pubkey[..16], "management WireGuard peer added");
+    Ok(json!({ "ok": true }))
+}
+
+/// Remove a peer from the management-plane WireGuard interface (`wg-lynx-dash`).
+pub fn handle_wg_management_remove_peer(
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden(
+            "wg.management.remove_peer requires write permission",
+        ));
+    }
+    let pubkey = require_str(&cmd.command, "pubkey")?.to_string();
+
+    let status = std::process::Command::new("wg")
+        .args(["set", MGMT_IFACE, "peer", &pubkey, "remove"])
+        .status()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg set peer remove: {e}")))?;
+    if !status.success() {
+        return Err(AgentError::Internal(anyhow::anyhow!(
+            "wg peer remove failed for {MGMT_IFACE}"
+        )));
+    }
+
+    tracing::info!(pubkey = %&pubkey[..16], "management WireGuard peer removed");
+    Ok(json!({ "ok": true }))
+}
+
+/// List peers on the management-plane WireGuard interface (`wg-lynx-dash`).
+/// Returns a JSON array of base64 public keys.
+pub fn handle_wg_management_list_peers(
+    cmd: &VerifiedCommand,
+) -> std::result::Result<Value, AgentError> {
+    if cmd.permission == PermissionLevel::Read {
+        return Err(AgentError::Forbidden(
+            "wg.management.list_peers requires write permission",
+        ));
+    }
+
+    let out = std::process::Command::new("wg")
+        .args(["show", MGMT_IFACE, "peers"])
+        .output()
+        .map_err(|e| AgentError::Internal(anyhow::anyhow!("wg show peers: {e}")))?;
+
+    if !out.status.success() {
+        // Interface doesn't exist yet — return empty list.
+        return Ok(json!({ "peers": [] }));
+    }
+
+    let peers: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    Ok(json!({ "peers": peers }))
+}

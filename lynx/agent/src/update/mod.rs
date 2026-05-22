@@ -62,8 +62,8 @@ pub async fn perform_update(version: &str, download_url: &str, sig_url: &str) ->
 
     tracing::info!(version, "binary swapped — restarting via systemd");
 
-    // Systemd will restart us because the unit has Restart=on-failure (or always).
-    // We exit with code 0 so systemd treats it as a clean restart.
+    // Systemd will restart the unit (Restart=always in the service unit).
+    // Exit 0 so systemd records a clean restart, not a failure.
     std::process::exit(0);
 }
 

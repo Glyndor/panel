@@ -269,7 +269,7 @@ async fn notify_agents_migrate(
         let signed = crate::crypto::cmd::sign_command(cfg, agent.id, user_id, "write", &cmd);
 
         if let Ok(signed) = signed {
-            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
             let _ = http
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", &*cfg.internal_token))

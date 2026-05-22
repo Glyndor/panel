@@ -10,6 +10,11 @@ use uuid::Uuid;
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
 pub async fn run_scheduler(state: AppState) {
+    // Wait one full interval before the first poll so agents can reconnect via WS
+    // after a backend restart — WS-connected agents skip the HTTP poll anyway, but
+    // the race between startup and reconnection would fire a spurious heartbeat_lost.
+    tokio::time::sleep(Duration::from_secs(HEARTBEAT_INTERVAL_SECS)).await;
+
     let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -55,7 +60,7 @@ async fn poll_agents(state: &AppState) {
                         .flatten();
 
                 if let Some(ref current) = current_ver {
-                    if current != target {
+                    if is_outdated(current, target) {
                         dispatch_update_ws(state, id, target).await;
                     }
                 }
@@ -63,7 +68,7 @@ async fn poll_agents(state: &AppState) {
             continue;
         }
 
-        let url = format!("http://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/heartbeat", agent.wg_ip, agent.api_port);
         // Heartbeat ACK is a signed command so the agent can verify the dashboard's
         // Ed25519 signature — bearer token alone cannot reset the lockdown timer.
         let heartbeat_cmd = serde_json::json!({ "type": "agent.heartbeat_ack" });
@@ -134,7 +139,7 @@ async fn poll_agents(state: &AppState) {
         if new_status == "online" {
             if let Some(ref current) = reported_version {
                 if let Some(ref target) = latest {
-                    if current != target {
+                    if is_outdated(current, target) {
                         let arch = agent.arch.as_deref().unwrap_or("x86_64");
                         dispatch_update(state, id, &agent.wg_ip, agent.api_port, target, arch)
                             .await;
@@ -169,6 +174,16 @@ async fn dispatch_update_ws(state: &AppState, agent_id: Uuid, version: &str) {
         "download_url": download_url,
         "sig_url": sig_url,
     });
+
+    // Insert grace-period event so WS disconnect after update doesn't fire heartbeat_lost.
+    let _ = sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'updating', $3)",
+        Uuid::now_v7(),
+        agent_id,
+        Some(format!("version={version}"))
+    )
+    .execute(&state.db)
+    .await;
 
     let signed = match cmd::sign_command(&state.config, agent_id, Uuid::nil(), "write", &command) {
         Ok(s) => s,
@@ -209,6 +224,16 @@ async fn dispatch_update(
         "sig_url": sig_url,
     });
 
+    // Insert grace-period event so WS disconnect after update doesn't fire heartbeat_lost.
+    let _ = sqlx::query!(
+        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'updating', $3)",
+        Uuid::now_v7(),
+        agent_id,
+        Some(format!("version={version}"))
+    )
+    .execute(&state.db)
+    .await;
+
     let signed = match cmd::sign_command(&state.config, agent_id, Uuid::nil(), "write", &command) {
         Ok(s) => s,
         Err(e) => {
@@ -220,7 +245,7 @@ async fn dispatch_update(
     let client =
         super::client::build_agent_client_with_timeout(&state.config, Duration::from_secs(10));
 
-    let url = format!("http://{wg_ip}:{api_port}/cmd");
+    let url = format!("https://{wg_ip}:{api_port}/cmd");
     let result = client
         .post(&url)
         .header(
@@ -242,4 +267,23 @@ async fn dispatch_update(
             tracing::warn!(agent_id = %agent_id, "heartbeat: update.self delivery failed: {e}");
         }
     }
+}
+
+// Returns true if the agent's current version is strictly older than the latest release.
+// Prevents dispatching update.self to agents running a newer local build.
+fn is_outdated(current: &str, latest: &str) -> bool {
+    parse_semver(current) < parse_semver(latest)
+}
+
+fn parse_semver(v: &str) -> (u64, u64, u64) {
+    let v = v.trim_start_matches('v');
+    let mut parts = v.splitn(3, '.');
+    let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|s| s.split('-').next())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    (major, minor, patch)
 }

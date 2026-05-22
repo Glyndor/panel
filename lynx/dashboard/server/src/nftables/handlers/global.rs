@@ -233,7 +233,7 @@ async fn push_both_chains(
     {
         true
     } else {
-        let url = format!("http://{wg_ip}:{api_port}/cmd");
+        let url = format!("https://{wg_ip}:{api_port}/cmd");
         let tok = &*state.config.internal_token;
         reqwest::Client::new()
             .post(&url)
@@ -257,7 +257,7 @@ async fn push_both_chains(
     {
         true
     } else {
-        let url = format!("http://{wg_ip}:{api_port}/cmd");
+        let url = format!("https://{wg_ip}:{api_port}/cmd");
         let tok = &*state.config.internal_token;
         reqwest::Client::new()
             .post(&url)

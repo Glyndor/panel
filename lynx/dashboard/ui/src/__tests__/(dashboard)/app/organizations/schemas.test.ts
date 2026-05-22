@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { registerAgentSchema } from "@/schemas/(dashboard)/app/agents";
-import { createOrgSchema } from "@/schemas/(dashboard)/app/organizations";
-import { createProjectSchema, inviteMemberSchema } from "@/schemas/(dashboard)/app/organizations/[id]";
-import {
-	addTunnelSchema,
-	deployContainerSchema,
-	resourceFormSchema,
-} from "@/schemas/(dashboard)/app/organizations/[id]/projects/[proj_id]";
+import { registerAgentSchema } from "@/schemas/(dashboard)/v";
+import { createOrgSchema, createProjectSchema, inviteMemberSchema } from "@/schemas/(dashboard)/o";
+import { addTunnelSchema, deployContainerSchema, resourceFormSchema } from "@/schemas/(dashboard)/p";
 
 // ---------------------------------------------------------------------------
 // registerAgentSchema

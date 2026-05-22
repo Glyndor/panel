@@ -135,8 +135,15 @@
 			"agents": "Agentes",
 			"organizations": "Organizaciones",
 			"overview": "Resumen",
+			"member": "Mi cuenta",
 			"settings": "Ajustes",
-			"signOut": "Cerrar sesión"
+			"signOut": "Cerrar sesión",
+			"vps": "VPS",
+			"projects": "Proyectos",
+			"vpsDesc": "Gestiona tus agentes VPS y reglas de firewall",
+			"orgsDesc": "Gestiona organizaciones y miembros del equipo",
+			"projectsDesc": "Gestiona proyectos y despliegues de contenedores",
+			"selectSection": "¿A dónde quieres ir?"
 		},
 		"notifications": {
 			"clearAll": "Limpiar todo",
@@ -240,7 +247,9 @@
 			"tunnelTeardownError": "Error al eliminar el tunnel.",
 			"tunnelTeardownSuccess": "Tunnel eliminado.",
 			"verticalScale": "Escalado vertical",
-			"verticalScaleDesc": "Actualiza los límites de CPU y memoria de un contenedor en este proyecto. El contenedor se actualiza en vivo sin reinicio cuando es posible."
+			"verticalScaleDesc": "Actualiza los límites de CPU y memoria de un contenedor en este proyecto. El contenedor se actualiza en vivo sin reinicio cuando es posible.",
+			"title": "Proyectos",
+			"noProjects": "No se encontraron proyectos."
 		},
 		"settings": {
 			"branding": "Marca blanca",
@@ -353,6 +362,13 @@
 			"singleSessionDesc": "Al activarlo, iniciar sesión en un nuevo dispositivo invalidará todas las demás sesiones activas.",
 			"singleSessionError": "Error al actualizar la configuración.",
 			"singleSessionSuccess": "Configuración de sesión única actualizada.",
+			"language": "Idioma",
+			"password": "Contraseña",
+			"languageDesc": "Elige el idioma de la interfaz del panel.",
+			"member": "Mi cuenta",
+			"preferences": "Preferencias",
+			"theme": "Tema",
+			"themeDesc": "Elige entre claro, oscuro o el predeterminado del sistema.",
 			"title": "Ajustes",
 			"updateAvailable": "Actualización disponible",
 			"updateCheck": "Buscar actualizaciones",
@@ -386,7 +402,9 @@
 			"emailTaken": "Correo electrónico ya registrado",
 			"hasAccount": "¿Ya tienes cuenta?",
 			"login": "Iniciar sesión",
+			"confirmPassword": "Confirmar contraseña",
 			"password": "Contraseña",
+			"passwordMismatch": "Las contraseñas no coinciden",
 			"serverError": "Algo salió mal. Por favor inténtalo de nuevo.",
 			"submit": "Crear cuenta",
 			"submitting": "Creando cuenta...",

@@ -10,7 +10,7 @@ on:
       - "lynx/Cargo.lock"
       - ".github/workflows/agent.yml"
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "lynx/agent/**"
       - "lynx/translators/**"
@@ -155,7 +155,10 @@ jobs:
         run: sqlx migrate run --source agent/migrations
 
       - name: test
-        run: cargo test --package lynx-agent --bin lynx-agent
+        # `--test-threads=1` — the audit-chain integrity test mutates the
+        # globally-last row of `audit_log` and then expects the next append to
+        # detect the tamper.  Parallel tests would race that global state.
+        run: cargo test --package lynx-agent --bin lynx-agent -- --test-threads=1
 
   # Integration tests require nftables + Podman — self-hosted runner only.
   # Uncomment when self-hosted runner is configured.

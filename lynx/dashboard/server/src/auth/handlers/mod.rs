@@ -28,6 +28,7 @@ pub(super) fn extract_ip(headers: &HeaderMap) -> String {
     let raw = headers
         .get("x-real-ip")
         .or_else(|| headers.get("x-forwarded-for"))
+        .or_else(|| headers.get("x-peer-addr"))
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
 

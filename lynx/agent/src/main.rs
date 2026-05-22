@@ -142,23 +142,40 @@ enum AgentCommand {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Print cryptographically-secure random bytes (replaces `openssl rand`).
+    GenRand {
+        bytes: usize,
+        #[arg(long, default_value = "hex")]
+        encoding: String,
+    },
+    /// Generate a time-ordered UUIDv7 (replaces `python3 -c "import uuid; print(uuid.uuid7())"`).
+    GenUuidV7,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Rustls 0.23 requires an explicit crypto provider when multiple crates
+    // (reqwest, tokio-tungstenite, sqlx) each pull in rustls independently.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     let cli = Cli::parse();
 
-    if let Some(AgentCommand::Logs {
-        follow,
-        errors,
-        since,
-    }) = cli.command
-    {
-        return agent_logs(follow, errors, since);
+    match cli.command {
+        Some(AgentCommand::Logs {
+            follow,
+            errors,
+            since,
+        }) => return agent_logs(follow, errors, since),
+        Some(AgentCommand::GenRand {
+            ref bytes,
+            ref encoding,
+        }) => return agent_gen_rand(*bytes, encoding),
+        Some(AgentCommand::GenUuidV7) => return agent_gen_uuid_v7(),
+        _ => {}
     }
 
     let config = config::Config::load()?;
@@ -174,13 +191,13 @@ async fn main() -> anyhow::Result<()> {
         .context("run migrations")?;
 
     let lockdown = Arc::new(AtomicBool::new(false));
-    let last_heartbeat = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
 
     let state = AppState {
         db,
         config: Arc::new(config),
         lockdown: lockdown.clone(),
         nft_checksum: Arc::new(std::sync::Mutex::new(None)),
+        nft_chain_checksums: Arc::new(std::sync::Mutex::new([None, None, None])),
         nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
         nft_global_body: Arc::new(std::sync::Mutex::new(String::new())),
         nft_local_body: Arc::new(std::sync::Mutex::new(String::new())),
@@ -191,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
         cmd_rejected_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         cmd_rejected_window: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         last_dashboard_contact: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        last_heartbeat: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
     };
 
     // Reload nftables state from DB and re-apply on startup (rules don't persist across reboots).
@@ -225,6 +243,7 @@ async fn main() -> anyhow::Result<()> {
 
             let ruleset = nftables::Ruleset {
                 wireguard_port: wg_port,
+                dashboard_port: state.config.dashboard_port,
                 org_networks: vec![],
                 global_body: state.nft_global_body(),
                 local_body: state.nft_local_body(),
@@ -237,12 +256,50 @@ async fn main() -> anyhow::Result<()> {
                     if let Ok(checksum) = nftables::current_checksum() {
                         state.set_nft_checksum(checksum);
                     }
+                    state.set_nft_chain_checksums(
+                        nftables::chain_checksum("lynx-base").ok(),
+                        nftables::chain_checksum("lynx-global").ok(),
+                        nftables::chain_checksum("lynx-local").ok(),
+                    );
                     state.set_nft_last_ruleset(rendered);
                     tracing::info!("nftables ruleset re-applied from DB on startup");
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "nftables startup apply failed — will retry on first dashboard push")
                 }
+            }
+        }
+    }
+
+    // Container recovery: restart any deployments with desired=running that aren't up.
+    // Safety net for reboots — rootless Podman restart:always doesn't survive without this.
+    {
+        #[derive(sqlx::FromRow)]
+        struct DeploymentRow {
+            tenant_id: String,
+            project_id: String,
+            compose_path: String,
+        }
+        let rows: Vec<DeploymentRow> = sqlx::query_as(
+            "SELECT tenant_id, project_id, compose_path FROM container_deployments WHERE desired = 'running'"
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        for row in rows {
+            match podman::compose_up_no_recreate(&row.tenant_id, &row.compose_path) {
+                Ok(()) => tracing::info!(
+                    tenant_id = %row.tenant_id,
+                    project_id = %row.project_id,
+                    "containers recovered on startup"
+                ),
+                Err(e) => tracing::warn!(
+                    tenant_id = %row.tenant_id,
+                    project_id = %row.project_id,
+                    error = %e,
+                    "container startup recovery failed"
+                ),
             }
         }
     }
@@ -269,6 +326,29 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // PostgreSQL health watchdog — lockdown if DB unreachable
+    {
+        let state_db = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                if sqlx::query("SELECT 1")
+                    .fetch_one(&state_db.db)
+                    .await
+                    .is_err()
+                    && !state_db.is_locked_down()
+                {
+                    tracing::error!("PostgreSQL unreachable — entering lockdown");
+                    state_db
+                        .lockdown
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        });
+    }
+
     // WebSocket client — persistent connection to dashboard
     tokio::spawn(ws_client::run_ws_client(state.clone()));
 
@@ -288,13 +368,18 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(nginx::run_nginx_watchdog(state.clone()));
 
     // Heartbeat watchdog task
+    let heartbeat_state = state.clone();
     let lockdown_clone = lockdown.clone();
-    let heartbeat_clone = last_heartbeat.clone();
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(30));
         loop {
             ticker.tick().await;
-            let elapsed = heartbeat_clone.lock().unwrap().elapsed().as_secs();
+            let elapsed = heartbeat_state
+                .last_heartbeat
+                .lock()
+                .unwrap()
+                .elapsed()
+                .as_secs();
             if elapsed > HEARTBEAT_TIMEOUT_SECS && !lockdown_clone.load(Ordering::SeqCst) {
                 tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
                 lockdown_clone.store(true, Ordering::SeqCst);
@@ -310,8 +395,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/cmd", post(handlers::execute_command))
         .route("/metrics/ws", get(handlers::metrics_ws))
         .route("/heartbeat", post(heartbeat_handler))
-        // Inject last_heartbeat as a layer extension so the handler can access it.
-        .layer(axum::Extension(last_heartbeat.clone()))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
@@ -332,7 +415,6 @@ async fn main() -> anyhow::Result<()> {
 
 async fn heartbeat_handler(
     State(state): State<AppState>,
-    hb: axum::Extension<Arc<std::sync::Mutex<std::time::Instant>>>,
     Json(signed): Json<auth::SignedCommand>,
 ) -> Response {
     // Heartbeat ACK requires a valid Ed25519 signature — bearer token alone is
@@ -363,7 +445,7 @@ async fn heartbeat_handler(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    *hb.lock().unwrap() = std::time::Instant::now();
+    *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
     let is_lockdown = state.lockdown.load(Ordering::SeqCst);
     state.lockdown.store(false, Ordering::SeqCst);
 
@@ -408,5 +490,26 @@ fn agent_logs(follow: bool, errors: bool, since: Option<String>) -> anyhow::Resu
         anyhow::bail!("journalctl exited with status {status}");
     }
 
+    Ok(())
+}
+
+fn agent_gen_rand(bytes: usize, encoding: &str) -> anyhow::Result<()> {
+    use base64ct::{Base64, Encoding as _};
+    use rand::RngExt;
+
+    let mut buf = vec![0u8; bytes];
+    rand::rng().fill(&mut buf[..]);
+
+    let out = match encoding {
+        "hex" => buf.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "base64" => Base64::encode_string(&buf),
+        other => anyhow::bail!("unknown encoding: {other} (expected hex|base64)"),
+    };
+    println!("{out}");
+    Ok(())
+}
+
+fn agent_gen_uuid_v7() -> anyhow::Result<()> {
+    println!("{}", uuid::Uuid::now_v7());
     Ok(())
 }

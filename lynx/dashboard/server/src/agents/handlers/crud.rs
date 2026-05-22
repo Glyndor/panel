@@ -42,7 +42,9 @@ pub async fn register_agent(
     State(state): State<AppState>,
     Json(req): Json<RegisterAgentRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let wg_ip = wg::allocate_ip(&state.db, req.agent_id).await?;
+    // Reserve IP first (no FK yet — agent row doesn't exist), then insert agent,
+    // then claim the IP (FK satisfied after insert).
+    let wg_ip = wg::reserve_ip(&state.db).await?;
 
     let sync_token = format!("{}", uuid::Uuid::now_v7()).replace('-', "")
         + &format!("{}", uuid::Uuid::now_v7()).replace('-', "");
@@ -69,7 +71,11 @@ pub async fn register_agent(
     .fetch_one(&state.db)
     .await?;
 
-    let psk = match wg::create_psk(req.agent_id) {
+    if let Err(e) = wg::claim_ip(&state.db, &wg_ip, req.agent_id).await {
+        tracing::error!(agent_id = %req.agent_id, ip = %wg_ip, error = %e, "failed to claim WG IP");
+    }
+
+    let psk = match wg::create_psk(req.agent_id).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(agent_id = %req.agent_id, error = %e, "failed to create WG PSK");
@@ -81,7 +87,7 @@ pub async fn register_agent(
         AppError::Internal(anyhow::anyhow!("invalid allocated WG IP {wg_ip:?}: {e}"))
     })?;
 
-    if let Err(e) = wg::add_peer(&req.wg_pubkey, wg_ip_addr, &psk) {
+    if let Err(e) = wg::add_peer(&state, &req.wg_pubkey, wg_ip_addr, &psk).await {
         tracing::error!(agent_id = %req.agent_id, error = %e, "failed to add WG peer — add manually");
     }
 
@@ -148,13 +154,13 @@ pub async fn remove_agent(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if let Err(e) = wg::remove_peer(&agent.wg_pubkey) {
+    if let Err(e) = wg::remove_peer(&state, &agent.wg_pubkey).await {
         tracing::error!(agent_id = %id, error = %e, "failed to remove WG peer");
     }
 
     // Delete PSK from memory and Podman secrets.
     state.wg_psks.write().await.remove(&id);
-    wg::delete_psk(id);
+    wg::delete_psk(id).await;
 
     // Release IP back to pool before deleting the agent row (FK constraint).
     if let Err(e) = wg::release_ip(&state.db, id).await {

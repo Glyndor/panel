@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { updateLocaleAction } from "@/actions/(dashboard)/app/settings/preferences";
+import { updateLocaleAction } from "@/actions/(dashboard)/app/member/preferences";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
