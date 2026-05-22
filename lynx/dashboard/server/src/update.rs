@@ -447,14 +447,14 @@ mod tests {
 
     #[test]
     fn other_domain_rejected() {
-        assert!(validate_github_url("https://example.com/file").is_err());
+        assert!(validate_github_url("https://example.com/file").is_err()); // audit-urls: ok — test fixture for SSRF rejection
     }
 
     #[test]
     fn github_subdomain_rejected() {
         // raw.githubusercontent.com is NOT in the allowlist — only github.com and
         // objects.githubusercontent.com.  Subdomain typo-squat must be rejected.
-        assert!(validate_github_url("https://raw.githubusercontent.com/foo/bar").is_err());
+        assert!(validate_github_url("https://raw.githubusercontent.com/foo/bar").is_err()); // audit-urls: ok — test fixture for SSRF rejection
     }
 
     #[test]
