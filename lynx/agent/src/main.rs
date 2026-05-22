@@ -142,6 +142,14 @@ enum AgentCommand {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Print cryptographically-secure random bytes (replaces `openssl rand`).
+    GenRand {
+        bytes: usize,
+        #[arg(long, default_value = "hex")]
+        encoding: String,
+    },
+    /// Generate a time-ordered UUIDv7 (replaces `python3 -c "import uuid; print(uuid.uuid7())"`).
+    GenUuidV7,
 }
 
 #[tokio::main]
@@ -156,13 +164,18 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    if let Some(AgentCommand::Logs {
-        follow,
-        errors,
-        since,
-    }) = cli.command
-    {
-        return agent_logs(follow, errors, since);
+    match cli.command {
+        Some(AgentCommand::Logs {
+            follow,
+            errors,
+            since,
+        }) => return agent_logs(follow, errors, since),
+        Some(AgentCommand::GenRand {
+            ref bytes,
+            ref encoding,
+        }) => return agent_gen_rand(*bytes, encoding),
+        Some(AgentCommand::GenUuidV7) => return agent_gen_uuid_v7(),
+        _ => {}
     }
 
     let config = config::Config::load()?;
@@ -472,5 +485,26 @@ fn agent_logs(follow: bool, errors: bool, since: Option<String>) -> anyhow::Resu
         anyhow::bail!("journalctl exited with status {status}");
     }
 
+    Ok(())
+}
+
+fn agent_gen_rand(bytes: usize, encoding: &str) -> anyhow::Result<()> {
+    use base64ct::{Base64, Encoding as _};
+    use rand::RngExt;
+
+    let mut buf = vec![0u8; bytes];
+    rand::rng().fill(&mut buf[..]);
+
+    let out = match encoding {
+        "hex" => buf.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "base64" => Base64::encode_string(&buf),
+        other => anyhow::bail!("unknown encoding: {other} (expected hex|base64)"),
+    };
+    println!("{out}");
+    Ok(())
+}
+
+fn agent_gen_uuid_v7() -> anyhow::Result<()> {
+    println!("{}", uuid::Uuid::now_v7());
     Ok(())
 }

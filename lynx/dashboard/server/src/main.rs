@@ -33,6 +33,47 @@ enum Command {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Print cryptographically-secure random bytes (replaces `openssl rand`).
+    GenRand {
+        /// Number of random bytes to generate.
+        bytes: usize,
+        /// Output encoding (`hex` or `base64`). Defaults to `hex`.
+        #[arg(long, default_value = "hex")]
+        encoding: String,
+    },
+    /// Generate an Ed25519 keypair and print the raw 32-byte seed and 32-byte
+    /// public key as base64 (replaces `openssl genpkey -algorithm ed25519` +
+    /// `openssl pkey -outform DER | tail -c 32 | base64`).
+    GenEd25519,
+    /// Generate an X25519 keypair and print the 32-byte private key and
+    /// 32-byte public key as base64 (replaces `openssl genpkey -algorithm x25519`).
+    GenX25519,
+    /// Issue a self-signed P-256 ECDSA certificate (replaces `openssl req -x509
+    /// -newkey ec`). Writes PEM cert and key to the given paths.
+    CertSelfSigned {
+        /// Subject common name (e.g. `lynx-dashboard`).
+        #[arg(long)]
+        cn: String,
+        /// Validity period in days.
+        #[arg(long, default_value_t = 90)]
+        days: u32,
+        /// Output path for the certificate (PEM).
+        #[arg(long)]
+        cert_out: std::path::PathBuf,
+        /// Output path for the private key (PEM).
+        #[arg(long)]
+        key_out: std::path::PathBuf,
+    },
+    /// Print the expiry timestamp of a PEM certificate as an ISO-8601 date
+    /// (replaces `openssl x509 -noout -enddate`).
+    CertExpiry {
+        /// Path to the PEM certificate.
+        cert: std::path::PathBuf,
+    },
+    /// Generate an Ed25519 X.509 CA certificate and key, both DER-encoded and
+    /// base64-encoded (replaces the openssl pipeline that built the Lynx
+    /// internal CA). Prints two lines: cert_der_b64, then key_der_b64.
+    GenX509Ca,
 }
 
 #[tokio::main]
@@ -48,14 +89,29 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    // Handle logs subcommand before connecting to DB — works even when backend is down.
-    if let Some(Command::Logs {
-        follow,
-        errors,
-        since,
-    }) = cli.command
-    {
-        return cmd_logs(follow, errors, since);
+    // Subcommands that do not need a DB connection — handled before config loads
+    // so install/update scripts can invoke them on a fresh host.
+    match cli.command {
+        Some(Command::Logs {
+            follow,
+            errors,
+            since,
+        }) => return cmd_logs(follow, errors, since),
+        Some(Command::GenRand {
+            ref bytes,
+            ref encoding,
+        }) => return cmd_gen_rand(*bytes, encoding),
+        Some(Command::GenEd25519) => return cmd_gen_ed25519(),
+        Some(Command::GenX25519) => return cmd_gen_x25519(),
+        Some(Command::CertSelfSigned {
+            ref cn,
+            days,
+            ref cert_out,
+            ref key_out,
+        }) => return cmd_cert_self_signed(cn, days, cert_out, key_out),
+        Some(Command::CertExpiry { ref cert }) => return cmd_cert_expiry(cert),
+        Some(Command::GenX509Ca) => return cmd_gen_x509_ca(),
+        _ => {}
     }
 
     let config = config::Config::load()?;
@@ -210,8 +266,14 @@ fn cmd_logs(follow: bool, errors: bool, since: Option<String>) -> anyhow::Result
 
 async fn run_cli_command(cmd: Command, db: &sqlx::PgPool) -> anyhow::Result<()> {
     match cmd {
-        // Logs is handled before DB connect — should never reach here.
-        Command::Logs { .. } => unreachable!(),
+        // All non-DB subcommands are handled before DB connect — should never reach here.
+        Command::Logs { .. }
+        | Command::GenRand { .. }
+        | Command::GenEd25519
+        | Command::GenX25519
+        | Command::CertSelfSigned { .. }
+        | Command::CertExpiry { .. }
+        | Command::GenX509Ca => unreachable!(),
         Command::ResetAdminPassword { username } => {
             let user = sqlx::query!(
                 "SELECT id FROM users WHERE username = $1",
@@ -251,4 +313,118 @@ fn generate_random_password() -> String {
     (0..24)
         .map(|_| charset[rng.random_range(0..charset.len())])
         .collect()
+}
+
+fn fill_random(buf: &mut [u8]) {
+    use rand::RngExt;
+    rand::rng().fill(buf);
+}
+
+fn cmd_gen_rand(bytes: usize, encoding: &str) -> anyhow::Result<()> {
+    use base64ct::{Base64, Encoding as _};
+
+    let mut buf = vec![0u8; bytes];
+    fill_random(&mut buf);
+
+    let out = match encoding {
+        "hex" => buf.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "base64" => Base64::encode_string(&buf),
+        other => anyhow::bail!("unknown encoding: {other} (expected hex|base64)"),
+    };
+    println!("{out}");
+    Ok(())
+}
+
+fn cmd_gen_ed25519() -> anyhow::Result<()> {
+    use base64ct::{Base64, Encoding as _};
+    use ed25519_dalek::SigningKey;
+
+    let mut seed = [0u8; 32];
+    fill_random(&mut seed);
+    let signing_key = SigningKey::from_bytes(&seed);
+    let verifying_key = signing_key.verifying_key();
+
+    println!("{}", Base64::encode_string(&seed));
+    println!("{}", Base64::encode_string(verifying_key.as_bytes()));
+    Ok(())
+}
+
+fn cmd_gen_x25519() -> anyhow::Result<()> {
+    use base64ct::{Base64, Encoding as _};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let mut secret_bytes = [0u8; 32];
+    fill_random(&mut secret_bytes);
+    let secret = StaticSecret::from(secret_bytes);
+    let public = PublicKey::from(&secret);
+
+    println!("{}", Base64::encode_string(secret.as_bytes()));
+    println!("{}", Base64::encode_string(public.as_bytes()));
+    Ok(())
+}
+
+fn cmd_cert_self_signed(
+    cn: &str,
+    days: u32,
+    cert_out: &std::path::Path,
+    key_out: &std::path::Path,
+) -> anyhow::Result<()> {
+    use chrono::Datelike;
+    use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ECDSA_P256_SHA256};
+
+    let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).context("generate key pair")?;
+
+    let mut params = CertificateParams::new(vec![cn.to_string()]).context("cert params")?;
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName, cn);
+    params.distinguished_name = dn;
+
+    let now = chrono::Utc::now();
+    let later = now + chrono::Duration::days(days as i64);
+    params.not_before = rcgen::date_time_ymd(now.year(), now.month() as u8, now.day() as u8);
+    params.not_after =
+        rcgen::date_time_ymd(later.year(), later.month() as u8, later.day() as u8);
+
+    let cert = params
+        .self_signed(&key_pair)
+        .context("issue self-signed certificate")?;
+
+    std::fs::write(cert_out, cert.pem()).context("write cert pem")?;
+    std::fs::write(key_out, key_pair.serialize_pem()).context("write key pem")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(key_out, std::fs::Permissions::from_mode(0o600))
+            .context("chmod key file")?;
+    }
+
+    Ok(())
+}
+
+fn cmd_gen_x509_ca() -> anyhow::Result<()> {
+    use base64ct::{Base64, Encoding as _};
+
+    let (cert_der, key_der) = crypto::pki::generate_x509_ca().context("generate X.509 CA")?;
+    println!("{}", Base64::encode_string(&cert_der));
+    println!("{}", Base64::encode_string(&key_der));
+    Ok(())
+}
+
+fn cmd_cert_expiry(cert: &std::path::Path) -> anyhow::Result<()> {
+    use x509_parser::pem::parse_x509_pem;
+    use x509_parser::prelude::FromDer;
+
+    let pem_bytes = std::fs::read(cert).context("read cert file")?;
+    let (_, pem) = parse_x509_pem(&pem_bytes).context("parse PEM")?;
+    let (_, x509) = x509_parser::certificate::X509Certificate::from_der(&pem.contents)
+        .context("parse X509")?;
+
+    let not_after = x509.validity().not_after;
+    let timestamp = not_after.timestamp();
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0)
+        .ok_or_else(|| anyhow::anyhow!("invalid cert not_after timestamp: {}", timestamp))?;
+    // RFC-2822 — shell scripts parse with `date -d`.
+    println!("{}", dt.to_rfc2822());
+    Ok(())
 }
