@@ -28,9 +28,8 @@ use super::{
         handle_nginx_install_cert, handle_nginx_update_config,
     },
     wireguard::{
-        handle_wg_data_plane_setup, handle_wg_data_plane_teardown,
-        handle_wg_management_add_peer, handle_wg_management_list_peers,
-        handle_wg_management_remove_peer, handle_wg_rotate_psk,
+        handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_management_add_peer,
+        handle_wg_management_list_peers, handle_wg_management_remove_peer, handle_wg_rotate_psk,
     },
 };
 
@@ -204,7 +203,9 @@ async fn command_dispatch(
         // Handled here so WS path can also process it via run_verified_command.
         "agent.heartbeat_ack" => {
             *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
-            state.lockdown.store(false, std::sync::atomic::Ordering::SeqCst);
+            state
+                .lockdown
+                .store(false, std::sync::atomic::Ordering::SeqCst);
             Ok(json!({ "ok": true }))
         }
         other => {

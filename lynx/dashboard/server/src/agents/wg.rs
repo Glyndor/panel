@@ -176,11 +176,9 @@ pub async fn reconcile_peers(state: &AppState) {
         })
         .unwrap_or_default();
 
-    let db_rows = match sqlx::query!(
-        "SELECT id, wg_pubkey, wg_ip::text AS \"wg_ip!\" FROM agents"
-    )
-    .fetch_all(&state.db)
-    .await
+    let db_rows = match sqlx::query!("SELECT id, wg_pubkey, wg_ip::text AS \"wg_ip!\" FROM agents")
+        .fetch_all(&state.db)
+        .await
     {
         Ok(rows) => rows,
         Err(e) => {

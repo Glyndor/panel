@@ -382,8 +382,7 @@ fn cmd_cert_self_signed(
     let now = chrono::Utc::now();
     let later = now + chrono::Duration::days(days as i64);
     params.not_before = rcgen::date_time_ymd(now.year(), now.month() as u8, now.day() as u8);
-    params.not_after =
-        rcgen::date_time_ymd(later.year(), later.month() as u8, later.day() as u8);
+    params.not_after = rcgen::date_time_ymd(later.year(), later.month() as u8, later.day() as u8);
 
     let cert = params
         .self_signed(&key_pair)
@@ -417,8 +416,8 @@ fn cmd_cert_expiry(cert: &std::path::Path) -> anyhow::Result<()> {
 
     let pem_bytes = std::fs::read(cert).context("read cert file")?;
     let (_, pem) = parse_x509_pem(&pem_bytes).context("parse PEM")?;
-    let (_, x509) = x509_parser::certificate::X509Certificate::from_der(&pem.contents)
-        .context("parse X509")?;
+    let (_, x509) =
+        x509_parser::certificate::X509Certificate::from_der(&pem.contents).context("parse X509")?;
 
     let not_after = x509.validity().not_after;
     let timestamp = not_after.timestamp();

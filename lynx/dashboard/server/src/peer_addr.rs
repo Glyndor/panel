@@ -1,5 +1,5 @@
-use axum::{extract::ConnectInfo, middleware::Next, response::Response};
 use axum::extract::Request;
+use axum::{extract::ConnectInfo, middleware::Next, response::Response};
 use std::net::SocketAddr;
 
 /// Middleware: injects the TCP peer address as `X-Peer-Addr` header when the
