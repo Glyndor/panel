@@ -18,16 +18,19 @@ use tracing::{info, warn};
 use super::containers::require_str;
 use super::{
     containers::{
-        handle_container_deploy, handle_container_list, handle_container_remove,
-        handle_container_restart, handle_container_start, handle_container_stop,
-        handle_container_update, handle_tenant_ensure,
+        handle_container_deploy, handle_container_down, handle_container_list,
+        handle_container_remove, handle_container_restart, handle_container_start,
+        handle_container_stop, handle_container_update, handle_tenant_ensure,
     },
     nftables::{handle_nftables_accept, handle_nftables_apply, handle_nftables_restore},
     nginx_cmd::{
         handle_certbot_obtain, handle_close_setup_port, handle_nginx_deploy,
         handle_nginx_install_cert, handle_nginx_update_config,
     },
-    wireguard::{handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_rotate_psk},
+    wireguard::{
+        handle_wg_data_plane_setup, handle_wg_data_plane_teardown, handle_wg_management_add_peer,
+        handle_wg_management_list_peers, handle_wg_management_remove_peer, handle_wg_rotate_psk,
+    },
 };
 
 pub async fn health() -> StatusCode {
@@ -173,7 +176,8 @@ async fn command_dispatch(
         "nftables.accept" => handle_nftables_accept(state, cmd),
         "container.list" => handle_container_list(cmd),
         "tenant.ensure" => handle_tenant_ensure(cmd),
-        "container.deploy" => handle_container_deploy(cmd),
+        "container.deploy" => handle_container_deploy(state, cmd).await,
+        "container.down" => handle_container_down(state, cmd).await,
         "container.start" => handle_container_start(cmd),
         "container.stop" => handle_container_stop(cmd),
         "container.remove" => handle_container_remove(cmd),
@@ -181,6 +185,9 @@ async fn command_dispatch(
         "container.update" => handle_container_update(cmd),
         "update.self" => handle_update_self(cmd).await,
         "wg.rotate_psk" => handle_wg_rotate_psk(cmd),
+        "wg.management.add_peer" => handle_wg_management_add_peer(cmd),
+        "wg.management.remove_peer" => handle_wg_management_remove_peer(cmd),
+        "wg.management.list_peers" => handle_wg_management_list_peers(cmd),
         "wg.data_plane.setup" => handle_wg_data_plane_setup(cmd),
         "wg.data_plane.teardown" => handle_wg_data_plane_teardown(cmd),
         "dashboard.migrate" => handle_dashboard_migrate(state, cmd).await,
@@ -192,6 +199,15 @@ async fn command_dispatch(
         "certbot.obtain" => handle_certbot_obtain(state, cmd).await,
         "nftables.close_setup_port" => Ok(handle_close_setup_port(state, cmd)?),
         "db.rotate_password" => handle_db_rotate_password(state, cmd).await,
+        // Heartbeat ACK resets the lockdown timer and exits lockdown.
+        // Handled here so WS path can also process it via run_verified_command.
+        "agent.heartbeat_ack" => {
+            *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
+            state
+                .lockdown
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!({ "ok": true }))
+        }
         other => {
             warn!("unknown command type: {other}");
             Err(AgentError::BadRequest("unknown command type"))

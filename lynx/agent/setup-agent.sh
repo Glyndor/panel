@@ -48,9 +48,8 @@ LYNX_WG_CONF="$LYNX_WG_DIR/lynx-wg.conf"   # source of truth (spec path)
 WG_DIR="/etc/wireguard"
 WG_CONF_LINK="$WG_DIR/wg-lynx-agent.conf"   # symlink for wg-quick compatibility
 WG_IFACE="wg-lynx-agent"
-AGENT_WG_IP="10.100.0.2"
+AGENT_WG_IP=""           # set from dashboard-assigned IP during onboarding prompt
 DASHBOARD_WG_IP="10.100.0.1"
-WG_SUBNET="10.100.0.0/24"
 WG_PORT=51820
 AGENT_PORT=9090
 LYNX_AGENT_USER="lynx-agent"
@@ -58,11 +57,12 @@ PG_NETWORK="lynx-agent-db"
 PG_CONTAINER="lynx-agent-postgres"
 PG_IMAGE="docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359"
 PG_DB="lynx_agent"
+PG_SUBNET="172.20.100.0/24"
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY_PATH="/usr/local/bin/lynx-agent"
+BIN_DIR="/etc/lynx/bin"
+BINARY_PATH="$BIN_DIR/lynx-agent"
 
 # --- Root check -------------------------------------------------------------
 
@@ -77,6 +77,8 @@ _cleanup_existing() {
     log_section "Removing existing agent installation"
 
     systemctl disable --now lynx-agent.service 2>/dev/null || true
+    systemctl disable --now lynx-agent-postgres.service 2>/dev/null || true
+    rm -f /etc/systemd/system/lynx-agent-postgres.service
 
     # Remove WireGuard
     if ip link show "$WG_IFACE" &>/dev/null; then
@@ -84,8 +86,12 @@ _cleanup_existing() {
     fi
     rm -f "$WG_CONF_LINK" "$LYNX_WG_CONF"
 
-    # Remove PostgreSQL container + data
-    podman rm -f "$PG_CONTAINER" 2>/dev/null || true
+    # Remove PostgreSQL container + data.
+    # Use stop+rm (not rm -f) so netavark tears down iptables port-forwarding rules
+    # before the network is removed. Force removal skips this cleanup and leaves
+    # stale DNAT rules that silently capture traffic for the next install.
+    podman stop --time 10 "$PG_CONTAINER" 2>/dev/null || true
+    podman rm "$PG_CONTAINER" 2>/dev/null || true
     podman volume rm lynx-agent-pg-data 2>/dev/null || true
     podman network rm "$PG_NETWORK" 2>/dev/null || true
 
@@ -94,7 +100,7 @@ _cleanup_existing() {
         podman secret rm "$s" 2>/dev/null || true
     done
 
-    # Remove systemd unit
+    # Remove systemd units
     rm -f /etc/systemd/system/lynx-agent.service
     systemctl daemon-reload
 
@@ -120,6 +126,17 @@ if [[ "$TOTAL_RAM_MB" -lt 512 ]]; then
     exit 1
 fi
 log_ok "RAM: ${TOTAL_RAM_MB} MB (minimum 512 MB satisfied)"
+
+# Disk pre-check (§1.4) — PostgreSQL image, agent binary, lynx-compose and
+# org/container data easily exceed 2 GB; bail out early instead of failing mid-
+# install when a `pull` or container start exhausts the volume.
+FREE_DISK_MB=$(df -BM --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
+    log_error "Insufficient disk: ${FREE_DISK_MB:-0} MB free on /, minimum 2048 MB required"
+    log_info  "Free up space (e.g. \`podman system prune -a\`) and re-run."
+    exit 1
+fi
+log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
 
 # --- Incompatible software --------------------------------------------------
 
@@ -187,17 +204,20 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables — only block the legacy binary, not the nftables compat layer (iptables-nft)
-if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q 'nf_tables'; then
+# iptables — now ALWAYS incompatible (netavark 1.10+ uses the nftables firewall
+# driver). The iptables-nft shim was tolerated by earlier Lynx versions because
+# netavark needed it; we removed that requirement. Any iptables binary on the
+# host now signals an external firewall manager and is purged.
+if command -v iptables &>/dev/null; then
     _incompatible_found=true
-    log_warn "Removing incompatible: iptables (legacy binary, not nftables-compat)"
+    log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
     log_info "  Reason: ${_REASON_FW}"
     case "$DISTRO" in
         debian) apt-get purge -y iptables 2>/dev/null || true ;;
         rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
         *)      log_warn "Unknown distro — remove iptables manually" ;;
     esac
-    log_ok "Removed: iptables (legacy)"
+    log_ok "Removed: iptables"
 fi
 
 if $_incompatible_found; then
@@ -221,8 +241,11 @@ unset _REASON_DOCKER _REASON_CTR _REASON_FW
 log_section "Checking for existing installation"
 
 existing=false
-if [[ -d "$LYNX_DIR" ]] || id "$LYNX_AGENT_USER" &>/dev/null || \
-   systemctl list-unit-files lynx-agent.service &>/dev/null 2>&1 | grep -q lynx-agent; then
+# Check for agent-specific markers only — /etc/lynx is shared with the dashboard
+# on VPSes that host both. /etc/lynx alone does not mean the agent is installed.
+if id "$LYNX_AGENT_USER" &>/dev/null || \
+   systemctl list-unit-files lynx-agent.service 2>/dev/null | grep -q lynx-agent || \
+   [[ -f "$AGENT_CONF" ]] || podman container exists "$PG_CONTAINER" 2>/dev/null; then
     existing=true
 fi
 
@@ -230,19 +253,30 @@ if $existing; then
     log_warn "Existing agent installation detected."
     echo ""
     echo -e "  ${BOLD}1)${RESET} Abort (default)"
-    echo -e "  ${BOLD}2)${RESET} Reinstall clean → destroys all agent data"
+    echo -e "  ${BOLD}2)${RESET} Update → updates binary, preserves all data"
+    echo -e "  ${BOLD}3)${RESET} Reinstall clean → destroys all agent data"
     echo ""
-    read -rp "Choice [1/2]: " choice
+    read -rp "Choice [1/2/3]: " choice
     choice="${choice:-1}"
 
     case "$choice" in
         2)
+            log_info "Redirecting to update..."
+            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-agent.sh"
+            ;;
+        3)
             echo ""
             log_warn "This will permanently destroy all agent data on this machine."
             read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
             if [[ "$confirm" != "reinstall lynx-agent" ]]; then
                 log_error "Confirmation phrase mismatch. Aborting."
                 exit 1
+            fi
+            # Preserve agent ID across reinstalls — dashboard still has the old one registered
+            _SAVED_AGENT_ID=""
+            if [[ -f "$LYNX_DIR/agent-id" ]]; then
+                _SAVED_AGENT_ID=$(cat "$LYNX_DIR/agent-id")
+                log_info "Preserving Agent ID for reinstall: $_SAVED_AGENT_ID"
             fi
             _cleanup_existing
             ;;
@@ -253,25 +287,141 @@ if $existing; then
     esac
 fi
 
-# --- Check dependencies -----------------------------------------------------
+# --- DNS preflight check ----------------------------------------------------
+
+log_section "Checking network connectivity"
+
+if ! getent hosts archive.ubuntu.com &>/dev/null && ! getent hosts packages.fedoraproject.org &>/dev/null; then
+    log_warn "DNS resolution failing — attempting to fix..."
+    rm -f /etc/resolv.conf
+    echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+    if ! getent hosts archive.ubuntu.com &>/dev/null 2>&1; then
+        log_error "DNS resolution is unavailable. Please fix your network configuration and retry."
+        exit 1
+    fi
+    log_ok "DNS resolution restored (set nameserver to 8.8.8.8)"
+else
+    log_ok "DNS resolution working"
+fi
+
+# --- Install dependencies ---------------------------------------------------
 
 log_section "Checking system dependencies"
 
-_require_cmd() {
-    if ! command -v "$1" &>/dev/null; then
-        log_error "Required: $1 ($2)"
+_apt_updated=false
+_apt_ensure() {
+    local cmd="$1" pkg="$2"
+    if command -v "$cmd" &>/dev/null; then
+        log_ok "$cmd found"
+        return
+    fi
+    log_info "Installing $pkg..."
+    if ! $_apt_updated; then
+        if command -v add-apt-repository &>/dev/null; then
+            add-apt-repository -y universe &>/dev/null || true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        _apt_updated=true
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" -qq
+    if command -v "$cmd" &>/dev/null; then
+        log_ok "$cmd installed"
+    else
+        log_error "Failed to install $pkg (command: $cmd)"
         exit 1
     fi
-    log_ok "$1"
 }
 
-_require_cmd podman    "apt install podman"
-_require_cmd openssl   "apt install openssl"
-_require_cmd nft       "apt install nftables"
-_require_cmd wg        "apt install wireguard-tools"
-_require_cmd wg-quick  "apt install wireguard-tools"
+_require_cmd() {
+    if ! command -v "$1" &>/dev/null; then
+        log_error "Required command not found: $1 — $2"
+        exit 1
+    fi
+    log_ok "$1 found"
+}
+
+_apt_ensure podman         podman
+# openssl replaced by `lynx-agent` subcommands for random/keypair ops.
+_apt_ensure nft            nftables
+_apt_ensure wg             wireguard-tools
+_apt_ensure curl           curl
+_apt_ensure python3        python3
+# python3-cryptography is the bootstrap Ed25519 verifier; installed below only
+# when missing. Drop python3-pip from the dependency set entirely.
+# newuidmap/newgidmap: required for rootless Podman user namespaces
+_apt_ensure newuidmap      uidmap
+# slirp4netns: required for rootless Podman networking (user-space TCP/IP stack)
+_apt_ensure slirp4netns    slirp4netns
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
+
+for _pkg in netavark aardvark-dns; do
+    if ! dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
+        log_info "Installing $_pkg..."
+        if ! $_apt_updated; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            _apt_updated=true
+        fi
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$_pkg" -qq
+        dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii' || { log_error "Failed to install $_pkg"; exit 1; }
+        log_ok "$_pkg installed"
+    else
+        log_ok "$_pkg found"
+    fi
+done
+
+# Netavark 1.10+ supports a native nftables firewall driver — older versions
+# require iptables-nft. Lynx upgrades from upstream so the iptables package can
+# be dropped entirely (it remains on the incompatible-software list).
+NETAVARK_REQUIRED="1.10.0"
+NETAVARK_UPSTREAM_VER="1.15.2"
+_netavark_bin=""
+for _candidate in /usr/lib/podman/netavark /usr/libexec/podman/netavark; do
+    [[ -x "$_candidate" ]] && _netavark_bin="$_candidate" && break
+done
+if [[ -z "$_netavark_bin" ]]; then
+    log_error "netavark binary not found in /usr/lib/podman or /usr/libexec/podman"
+    exit 1
+fi
+_netavark_ver="$("$_netavark_bin" --version 2>&1 | awk '/netavark/ {print $2; exit}')"
+log_info "netavark on disk: ${_netavark_ver}"
+
+_version_lt() {
+    [[ "$1" = "$2" ]] && return 1
+    [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]]
+}
+
+if _version_lt "$_netavark_ver" "$NETAVARK_REQUIRED"; then
+    log_warn "netavark $_netavark_ver < $NETAVARK_REQUIRED — upgrading from upstream"
+    _uname_m="$(uname -m)"
+    case "$_uname_m" in
+        x86_64|amd64)   _na_asset="netavark.gz" ;;
+        aarch64|arm64)  _na_asset="netavark.aarch64.gz" ;;
+        *) log_error "Unsupported arch for netavark upgrade: $_uname_m"; exit 1 ;;
+    esac
+    NETAVARK_DL="https://github.com/containers/netavark/releases/download/v${NETAVARK_UPSTREAM_VER}/${_na_asset}"
+    NETAVARK_TMP="$(mktemp /tmp/lynx-netavark.XXXXXX.gz)"
+    if ! curl -fsSL --max-time 120 "$NETAVARK_DL" -o "$NETAVARK_TMP"; then
+        log_error "Failed to download netavark from $NETAVARK_DL"
+        rm -f "$NETAVARK_TMP"
+        exit 1
+    fi
+    gunzip -f "$NETAVARK_TMP"
+    install -m 755 "${NETAVARK_TMP%.gz}" "$_netavark_bin"
+    rm -f "${NETAVARK_TMP%.gz}"
+    log_ok "netavark upgraded to upstream v${NETAVARK_UPSTREAM_VER}"
+fi
+unset _netavark_bin _netavark_ver _candidate _na_asset _uname_m
+
+if ! grep -q 'firewall_driver.*nftables' /etc/containers/containers.conf 2>/dev/null; then
+    mkdir -p /etc/containers
+    {
+        grep -v 'network_backend\|firewall_driver\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
+        printf '\n[network]\nnetwork_backend = "netavark"\nfirewall_driver = "nftables"\n'
+    } > /tmp/lynx-containers.conf
+    mv /tmp/lynx-containers.conf /etc/containers/containers.conf
+    log_ok "Podman configured: netavark backend, nftables firewall driver"
+fi
 
 # --- NTP synchronization check ----------------------------------------------
 #
@@ -310,46 +460,167 @@ unset _ntp_active
 log_section "Dashboard connection setup"
 
 echo ""
-echo -e "${YELLOW}You need the values shown at the end of the dashboard install.${RESET}"
+echo -e "${YELLOW}You need the values shown when you registered this VPS in the dashboard.${RESET}"
 echo ""
 
 read -rp "  Dashboard WireGuard endpoint (IP:PORT, e.g. 1.2.3.4:51820): " DASHBOARD_ENDPOINT
 read -rp "  Dashboard WireGuard public key: " DASHBOARD_PUBKEY
 read -rsp "  Preshared key (PSK): " PSK
 echo ""
+read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
+echo ""
 
-if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" ]]; then
-    log_error "All three values are required."
+# Dashboard Ed25519 signing public key — required for the agent to verify
+# every dashboard-signed command (heartbeat ACK, container ops, nftables push,
+# update.self, ...).  Without it the agent rejects every command and enters
+# lockdown after the 5-minute heartbeat timeout.
+#
+# Local-agent path: if running on the same host as the dashboard, the install
+# script already wrote it to /etc/lynx/dashboard-sign-pubkey — auto-detect that
+# default to avoid an unnecessary prompt.
+DEFAULT_DASHBOARD_SIGN_PUBKEY=""
+if [[ -r /etc/lynx/dashboard-sign-pubkey ]]; then
+    DEFAULT_DASHBOARD_SIGN_PUBKEY=$(< /etc/lynx/dashboard-sign-pubkey)
+fi
+if [[ -n "$DEFAULT_DASHBOARD_SIGN_PUBKEY" ]]; then
+    read -rp "  Dashboard signing public key (Ed25519, base64) [default: detected]: " DASHBOARD_SIGN_PUBKEY
+    DASHBOARD_SIGN_PUBKEY="${DASHBOARD_SIGN_PUBKEY:-$DEFAULT_DASHBOARD_SIGN_PUBKEY}"
+else
+    read -rp "  Dashboard signing public key (Ed25519, base64): " DASHBOARD_SIGN_PUBKEY
+fi
+unset DEFAULT_DASHBOARD_SIGN_PUBKEY
+echo ""
+
+if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
+    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
     exit 1
 fi
 
-DASHBOARD_IP="${DASHBOARD_ENDPOINT%%:*}"
-DASHBOARD_WG_LISTEN="${DASHBOARD_ENDPOINT##*:}"
+AGENT_WG_IP="$AGENT_WG_IP_INPUT"
 
 # --- Create directories -----------------------------------------------------
 
 log_section "Creating directories"
 
 mkdir -p "$LYNX_DIR"
-chmod 700 "$LYNX_DIR"
+chmod 755 "$LYNX_DIR"
 log_ok "$LYNX_DIR"
+
+# --- Download core agent binary ---------------------------------------------
+#
+# The agent binary is needed BEFORE secret generation and UUID generation:
+# both rely on `lynx-agent gen-rand` / `lynx-agent gen-uuid-v7` so the host
+# does not need `openssl` or Python's uuid module on minimal systems.
+
+log_section "Downloading lynx-agent binary"
+
+GITHUB_REPO="Jaro-c/Lynx"
+RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+
+_ARCH=$(uname -m)
+case "$_ARCH" in
+    x86_64)  ARCH="x86_64" ;;
+    aarch64) ARCH="arm64" ;;
+    *)
+        log_error "Unsupported architecture: $_ARCH"
+        exit 1
+        ;;
+esac
+log_info "Architecture: $ARCH"
+
+if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
+    log_info "Installing python3-cryptography..."
+    case "$DISTRO" in
+        debian) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-cryptography -qq ;;
+        rhel)   { dnf install -y python3-cryptography 2>/dev/null || yum install -y python3-cryptography 2>/dev/null; } ;;
+        *)      log_error "Cannot install python3-cryptography on unknown distro"; exit 1 ;;
+    esac
+    python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" || {
+        log_error "python3-cryptography not importable after install"
+        exit 1
+    }
+fi
+
+log_info "Fetching latest agent release..."
+LATEST_AGENT_TAG=$(curl -fsSL \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+    | python3 -c "
+import sys, json
+releases = json.load(sys.stdin)
+for r in releases:
+    tag = r.get('tag_name', '')
+    if tag.startswith('agent@') and not r.get('prerelease'):
+        print(tag)
+        break
+" 2>/dev/null)
+
+if [[ -z "$LATEST_AGENT_TAG" ]]; then
+    log_error "No agent release found in ${GITHUB_REPO}"
+    exit 1
+fi
+log_ok "Latest release: ${LATEST_AGENT_TAG}"
+
+# LYNX_RELEASE_BASE lets local-host testing point binary downloads at a private
+# HTTP server. Production installs use the canonical GitHub release URL.
+RELEASE_BASE="${LYNX_RELEASE_BASE:-https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}}"
+mkdir -p "$BIN_DIR"
+chmod 755 "$BIN_DIR"
+
+_verify_release_sig() {
+    local file="$1" sig_file="$2"
+    python3 - "$RELEASE_VERIFY_KEY_B64" "$file" "$sig_file" <<'PYEOF'
+import sys, base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(sys.argv[1] + "=="))
+
+with open(sys.argv[2], "rb") as f:
+    data = f.read()
+with open(sys.argv[3], "rb") as f:
+    sig = f.read()
+try:
+    pub_key.verify(sig, data)
+except Exception as e:
+    print(f"signature invalid: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+AGENT_TMP="${BIN_DIR}/lynx-agent.new"
+
+log_info "Downloading agent binary..."
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}" \
+    -o "$AGENT_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}.sig" \
+    -o "${AGENT_TMP}.sig"
+
+log_info "Verifying agent signature..."
+if ! _verify_release_sig "$AGENT_TMP" "${AGENT_TMP}.sig"; then
+    log_error "Agent signature verification FAILED — aborting"
+    rm -f "$AGENT_TMP" "${AGENT_TMP}.sig"
+    exit 1
+fi
+rm -f "${AGENT_TMP}.sig"
+chmod 755 "$AGENT_TMP"
+mv "$AGENT_TMP" "$BINARY_PATH"
+log_ok "Agent binary installed: ${BINARY_PATH}"
 
 # --- Generate agent UUID ----------------------------------------------------
 
 log_section "Generating agent identity"
 
-# UUIDv7: time-ordered. Generate with Python or fall back to uuidgen.
-if python3 -c "import uuid; print(uuid.uuid7())" &>/dev/null 2>&1; then
-    AGENT_ID=$(python3 -c "import uuid; print(uuid.uuid7())")
-elif command -v uuidgen &>/dev/null && uuidgen --version 2>&1 | grep -q "2\.4[0-9]"; then
-    AGENT_ID=$(uuidgen --time)
+if [[ -n "${_SAVED_AGENT_ID:-}" ]]; then
+    AGENT_ID="$_SAVED_AGENT_ID"
+    log_ok "Reusing existing Agent ID: $AGENT_ID"
+    unset _SAVED_AGENT_ID
 else
-    # Construct a v7-like UUID using current time + random bytes
-    TS_MS=$(date +%s%3N)
-    TS_HEX=$(printf '%012x' "$TS_MS")
-    RAND=$(openssl rand -hex 10)
-    AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-$(printf '%x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f)))${RAND:4:2})-${RAND:6:12}"
+    AGENT_ID=$("$BINARY_PATH" gen-uuid-v7)
 fi
+# Always persist so successive reinstalls preserve the ID
+printf '%s' "$AGENT_ID" > "$LYNX_DIR/agent-id"
+chmod 600 "$LYNX_DIR/agent-id"
 log_ok "Agent ID: $AGENT_ID"
 
 # --- Create system user -----------------------------------------------------
@@ -378,8 +649,6 @@ loginctl enable-linger "$LYNX_AGENT_USER" 2>/dev/null || true
 
 log_section "Configuring subuid/subgid ranges"
 
-AGENT_UID=$(id -u "$LYNX_AGENT_USER")
-
 # Agent user: 1,000,000 – 1,065,535 (65536 IDs)
 if ! grep -q "^${LYNX_AGENT_USER}:" /etc/subuid 2>/dev/null; then
     echo "${LYNX_AGENT_USER}:1000000:65536" >> /etc/subuid
@@ -396,29 +665,22 @@ log_section "Generating agent secrets"
 
 log_info "PostgreSQL root password..."
 (
-    PG_ROOT=$(openssl rand -hex 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-agent-pg-root -
-    PG_ROOT="$(openssl rand -hex 32)"
+    PG_ROOT=$("$BINARY_PATH" gen-rand 32)
+    printf '%s' "$PG_ROOT" | podman secret create lynx-agent-pg-root - >/dev/null
+    PG_ROOT="$("$BINARY_PATH" gen-rand 32)"
 )
 
-log_info "PostgreSQL app password + database URL..."
+log_info "PostgreSQL app password..."
 mkdir -p /etc/lynx/credentials
 chmod 700 /etc/lynx/credentials
-(
-    PG_PASS=$(openssl rand -hex 32)
-    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@localhost:5434/${PG_DB}"
-    printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass -
-    printf '%s' "$DB_URL" | podman secret create lynx-agent-database-url -
-    # Write credential file now — only moment we have the URL in memory
-    printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
-    chmod 600 /etc/lynx/credentials/database-url
-    PG_PASS="$(openssl rand -hex 32)"
-    DB_URL="$(openssl rand -hex 32)"
-)
+# PG_PASS stays in outer shell until DATABASE_URL can be written (needs container IP).
+# Zeroized after writing the credential file.
+PG_PASS=$("$BINARY_PATH" gen-rand 32)
+printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass - >/dev/null
 
 log_info "Internal bearer token..."
-INTERNAL_TOKEN=$(openssl rand -hex 32)
-printf '%s' "$INTERNAL_TOKEN" | podman secret create lynx-agent-internal-token -
+INTERNAL_TOKEN=$("$BINARY_PATH" gen-rand 32)
+printf '%s' "$INTERNAL_TOKEN" | podman secret create lynx-agent-internal-token - >/dev/null
 
 log_ok "Agent secrets generated"
 
@@ -427,8 +689,8 @@ log_ok "Agent secrets generated"
 log_section "Creating Podman network: $PG_NETWORK"
 
 if ! podman network exists "$PG_NETWORK" 2>/dev/null; then
-    podman network create "$PG_NETWORK"
-    log_ok "Network created: $PG_NETWORK"
+    podman network create "$PG_NETWORK" --subnet "$PG_SUBNET"
+    log_ok "Network created: $PG_NETWORK ($PG_SUBNET)"
 else
     log_warn "Network $PG_NETWORK already exists — skipping"
 fi
@@ -446,7 +708,7 @@ cat > "$PG_INIT_DIR/01-init.sql" << 'PGSQL'
 CREATE USER lynx_agent_app WITH PASSWORD :'app_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 GRANT CONNECT ON DATABASE lynx_agent TO lynx_agent_app;
 \connect lynx_agent
-GRANT USAGE ON SCHEMA public TO lynx_agent_app;
+GRANT USAGE, CREATE ON SCHEMA public TO lynx_agent_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_agent_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -463,13 +725,13 @@ log_section "Starting PostgreSQL for agent"
 podman run -d \
     --name "$PG_CONTAINER" \
     --network "$PG_NETWORK" \
+    --publish 127.0.0.1:5434:5432 \
     --secret lynx-agent-pg-root,target=lynx-agent-pg-root \
     --secret lynx-agent-pg-pass,target=lynx-agent-pg-pass \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_DB="$PG_DB" \
     -e POSTGRES_PASSWORD_FILE=/run/secrets/lynx-agent-pg-root \
-    -p 127.0.0.1:5434:5432 \
-    -v lynx-agent-pg-data:/var/lib/postgresql/data \
+    -v lynx-agent-pg-data:/var/lib/postgresql \
     -v "$PG_INIT_DIR:/docker-entrypoint-initdb.d:ro" \
     --restart unless-stopped \
     "$PG_IMAGE"
@@ -482,38 +744,49 @@ for i in $(seq 1 40); do
     fi
     if [[ $i -eq 40 ]]; then
         log_error "PostgreSQL did not become healthy"
-        podman logs "$PG_CONTAINER" --tail 30
+        podman logs --tail 30 "$PG_CONTAINER"
         exit 1
     fi
     sleep 2
 done
 
-# --- Install agent binary ---------------------------------------------------
+# Write DATABASE_URL using the host-mapped port — stable across container restarts
+# regardless of which IP the container is assigned inside the Podman network.
+(
+    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@127.0.0.1:5434/${PG_DB}"
+    printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
+    chmod 600 /etc/lynx/credentials/database-url
+    DB_URL="$("$BINARY_PATH" gen-rand 32)"
+)
+PG_PASS="$("$BINARY_PATH" gen-rand 32)"
 
-log_section "Installing lynx-agent binary"
+# --- Download agent binary from GitHub Releases ----------------------------
 
-if [[ -f "$SCRIPT_DIR/target/release/lynx-agent" ]]; then
-    install -m 755 "$SCRIPT_DIR/target/release/lynx-agent" "$BINARY_PATH"
-    log_ok "Installed from local build: $BINARY_PATH"
-elif [[ -f "$SCRIPT_DIR/target/debug/lynx-agent" ]]; then
-    install -m 755 "$SCRIPT_DIR/target/debug/lynx-agent" "$BINARY_PATH"
-    log_warn "Installed debug build — not for production"
-else
-    log_error "lynx-agent binary not found. Build with: cargo build --release"
-    log_error "Expected at: $SCRIPT_DIR/target/release/lynx-agent"
-    exit 1
-fi
+# Agent binary already downloaded earlier — version file gets written below.
+printf '%s' "${LATEST_AGENT_TAG#agent@}" > "$BIN_DIR/lynx-agent-version"
+log_ok "Version: ${LATEST_AGENT_TAG#agent@}"
 
 # --- Write agent env file ---------------------------------------------------
 
 log_section "Writing agent configuration"
 
+# Detect if this is the dashboard VPS — setup-dashboard.sh leaves nginx config
+IS_DASHBOARD_VPS=false
+DASHBOARD_PORT_CONF=""
+if [[ -f /etc/lynx/nginx/default.conf ]]; then
+    IS_DASHBOARD_VPS=true
+    DASHBOARD_PORT_CONF="DASHBOARD_PORT=19443"
+    log_info "Dashboard VPS detected — local agent mode, will open port 19443"
+fi
+
 cat > "$AGENT_CONF" << EOF
 AGENT_ID=${AGENT_ID}
 DATABASE_URL_FILE=/run/credentials/lynx-agent.service/database-url
 INTERNAL_TOKEN_FILE=/run/credentials/lynx-agent.service/internal-token
+DASHBOARD_VERIFY_KEY_FILE=/run/credentials/lynx-agent.service/lynx-dashboard-pubkey
 LISTEN_ADDR=127.0.0.1:${AGENT_PORT}
 RUST_LOG=info
+${DASHBOARD_PORT_CONF}
 EOF
 
 chmod 600 "$AGENT_CONF"
@@ -525,52 +798,73 @@ printf '%s' "$INTERNAL_TOKEN" > /etc/lynx/credentials/internal-token
 chmod 600 /etc/lynx/credentials/internal-token
 
 # Clear INTERNAL_TOKEN from memory
-INTERNAL_TOKEN="$(openssl rand -hex 32)"
+INTERNAL_TOKEN="$("$BINARY_PATH" gen-rand 32)"
 unset INTERNAL_TOKEN
+
+# Persist the dashboard's Ed25519 signing public key as a credential — every
+# command from the dashboard (heartbeat ACK, container ops, nftables push,
+# update.self, ...) is verified against this key.  Without it, the agent
+# rejects every command and enters lockdown after 5 minutes.
+printf '%s' "$DASHBOARD_SIGN_PUBKEY" > /etc/lynx/credentials/lynx-dashboard-pubkey
+chmod 600 /etc/lynx/credentials/lynx-dashboard-pubkey
+unset DASHBOARD_SIGN_PUBKEY
 
 # --- Create systemd service -------------------------------------------------
 
 log_section "Installing systemd service"
 
+# Service that starts the PostgreSQL container at boot.
+# Podman's podman-restart.service only handles restart-policy=always;
+# our container uses unless-stopped, so we manage boot startup explicitly.
+cat > /etc/systemd/system/lynx-agent-postgres.service << 'EOF'
+[Unit]
+Description=Lynx Agent — PostgreSQL container
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start lynx-agent-postgres
+ExecStop=/usr/bin/podman stop -t 30 lynx-agent-postgres
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > /etc/systemd/system/lynx-agent.service << EOF
 [Unit]
 Description=Lynx Agent — infrastructure orchestration service
 Documentation=https://github.com/Jaro-c/Lynx
-After=network.target ${PG_CONTAINER}-container.service
-Requires=network.target
+After=network.target lynx-agent-postgres.service
+Requires=network.target lynx-agent-postgres.service
 
 [Service]
 Type=simple
-User=${LYNX_AGENT_USER}
-Group=${LYNX_AGENT_USER}
+User=root
+Group=root
 EnvironmentFile=${AGENT_CONF}
 ExecStart=${BINARY_PATH}
-Restart=on-failure
+Restart=always
 RestartSec=5s
 TimeoutStopSec=30s
-
-# Capabilities required for nftables, Podman tenant management
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID
 
 # Systemd credentials (tmpfs — never touches disk)
 LoadCredential=database-url:/etc/lynx/credentials/database-url
 LoadCredential=internal-token:/etc/lynx/credentials/internal-token
+LoadCredential=lynx-dashboard-pubkey:/etc/lynx/credentials/lynx-dashboard-pubkey
 
-# Security hardening
-NoNewPrivileges=no
-ProtectSystem=strict
-ProtectHome=yes
+# Minimal hardening — agent is a privileged system daemon (package management,
+# nftables, system user creation, binary self-update all require root).
 PrivateTmp=yes
-ReadWritePaths=/run/containers /var/lib/containers /home
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+systemctl enable lynx-agent-postgres.service
 systemctl enable lynx-agent.service
-log_ok "Service installed: lynx-agent.service"
+log_ok "Services installed: lynx-agent-postgres.service, lynx-agent.service"
 
 # --- WireGuard agent side ---------------------------------------------------
 
@@ -591,18 +885,15 @@ LOCAL_IFACE_IP=$(ip route get "$DASHBOARD_HOST" 2>/dev/null | grep -oP 'src \K\S
 PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || \
             curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
 
-NAT_DETECTED=false
 KEEPALIVE_LINE=""
 
 if [[ -n "$LOCAL_IFACE_IP" && -n "$PUBLIC_IP" && "$LOCAL_IFACE_IP" != "$PUBLIC_IP" ]]; then
-    NAT_DETECTED=true
     KEEPALIVE_LINE="PersistentKeepalive = 25"
     log_info "NAT detected (interface IP: ${LOCAL_IFACE_IP}, public IP: ${PUBLIC_IP})"
     log_info "Enabling PersistentKeepalive = 25 to maintain NAT table entry"
     log_warn "If your provider's NAT timeout is < 25s or blocks persistent UDP, the tunnel may be unstable"
 elif [[ -z "$PUBLIC_IP" ]]; then
     # Cannot determine — enable keepalive as safe default
-    NAT_DETECTED=true
     KEEPALIVE_LINE="PersistentKeepalive = 25"
     log_warn "Could not determine public IP — enabling PersistentKeepalive = 25 as safe default"
 else
@@ -625,7 +916,7 @@ mkdir -p "$LYNX_WG_DIR"
 cat > "$LYNX_WG_CONF" << EOF
 [Interface]
 PrivateKey = ${AGENT_PRIV}
-Address = ${AGENT_WG_IP}/24
+Address = ${AGENT_WG_IP}/32
 
 ${WG_PEER_BLOCK}
 EOF
@@ -637,8 +928,8 @@ chown lynx-agent:lynx-agent "$LYNX_WG_CONF"
 mkdir -p "$WG_DIR"
 ln -sf "$LYNX_WG_CONF" "$WG_CONF_LINK"
 
-AGENT_PRIV="$(openssl rand -hex 32)"  # overwrite
-PSK="$(openssl rand -hex 32)"
+AGENT_PRIV="$("$BINARY_PATH" gen-rand 32)"  # overwrite
+PSK="$("$BINARY_PATH" gen-rand 32)"
 unset AGENT_PRIV PSK
 
 # Bring up WireGuard
@@ -658,13 +949,36 @@ fi
 
 log_section "Configuring nftables (agent)"
 
+# Build optional dashboard-VPS-only rules
+DASHBOARD_PORT_NFT=""
+DASHBOARD_DNS_NFT=""
+DASHBOARD_FORWARD_WG_NFT=""
+if [[ "$IS_DASHBOARD_VPS" == "true" ]]; then
+    DASHBOARD_PORT_NFT="        # Dashboard panel port
+        tcp dport 19443 ct state new accept
+"
+    DASHBOARD_DNS_NFT="        # DNS for container networks (aardvark-dns on Netavark bridge interfaces)
+        iifname \"podman*\" udp dport 53 accept
+        iifname \"podman*\" tcp dport 53 accept
+"
+    DASHBOARD_FORWARD_WG_NFT="
+        # Backend container traffic to/from WireGuard (dashboard <-> agents)
+        oifname \"wg-lynx-dash\" accept
+        iifname \"wg-lynx-dash\" accept"
+fi
+
+# Bootstrap ruleset — uses same chain names as the Rust agent (lynx-base, lynx-forward, lynx-output).
+# The agent binary will flush and replace this on startup via render_ruleset().
+# The flush prefix ensures no orphaned chains from previous installs survive.
 cat > /etc/nftables-lynx-agent.conf << EOF
+destroy table inet lynx-agent
+add table inet lynx-agent
 table inet lynx-agent {
-    chain input {
+    chain lynx-base {
         type filter hook input priority 0; policy drop;
 
         # Loopback
-        iifname "lo" accept
+        iif lo accept
 
         # Established / related
         ct state established,related accept
@@ -673,26 +987,38 @@ table inet lynx-agent {
         ip  protocol icmp  accept
         ip6 nexthdr  icmpv6 accept
 
-        # SSH — emergency access only
-        tcp dport 22 accept
+        # SSH — per-source-IP rate limit
+        tcp dport 22 ct state new meter ssh_throttle { ip saddr limit rate 10/minute burst 20 packets } accept
 
         # WireGuard inbound (dashboard connects here)
         udp dport ${WG_PORT} accept
 
+${DASHBOARD_PORT_NFT}
+${DASHBOARD_DNS_NFT}
         # Agent API — only from WireGuard interface
         iifname "${WG_IFACE}" tcp dport ${AGENT_PORT} accept
 
         drop
     }
 
-    chain forward {
+    chain lynx-global {}
+    chain lynx-local {}
+
+    chain lynx-forward {
         type filter hook forward priority 0; policy drop;
 
-        # Allow forwarding within lynx org networks
-        iifname "lynx-org-*" oifname "lynx-org-*" accept
+        ct state established,related accept
+
+        # Netavark DNAT rewrites destination to 10.89.x.x for published container ports.
+        # Without this rule the DNAT'd packets are dropped here (policy drop).
+        ip daddr 10.89.0.0/16 ct state new accept
+
+        # Outbound traffic from Podman containers (package installs, GitHub, cert renewals, etc.)
+        iifname "podman*" accept
+${DASHBOARD_FORWARD_WG_NFT}
     }
 
-    chain output {
+    chain lynx-output {
         type filter hook output priority 0; policy accept;
     }
 }

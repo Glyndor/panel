@@ -47,7 +47,7 @@ async fn relay_project_command(
         &command,
     )?;
 
-    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+    let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
     let tok = &*state.config.internal_token;
     let client = reqwest::Client::new();
     let resp = client
@@ -125,7 +125,7 @@ pub async fn update_container_resources(
         &command,
     )?;
 
-    let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+    let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
     let tok = &*state.config.internal_token;
     let client = reqwest::Client::new();
     let resp = client

@@ -138,7 +138,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
 
     for agent in &agents {
         // Generate new PSK and persist to Podman secret (replaces old one).
-        let new_psk = match wg::create_psk(agent.id) {
+        let new_psk = match wg::create_psk(agent.id).await {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(agent_id = %agent.id, "PSK generation failed: {e} — skipping");
@@ -185,7 +185,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
             .map_err(AppError::Internal)?;
 
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
 
         let _ = client
             .post(&url)
@@ -240,7 +240,7 @@ async fn rotate_agent_certs(state: &AppState) -> Result<(), AppError> {
                 cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
                     .map_err(AppError::Internal)?;
 
-            let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+            let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
             let result = client
                 .post(&url)
                 .header(
@@ -291,34 +291,29 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
     .await
     .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
-    let status = std::process::Command::new("podman")
-        .args([
-            "secret",
-            "create",
-            "--replace",
-            "lynx-dashboard-pg-pass",
-            "-",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(new_pass.as_bytes());
-            }
-            child.wait()
-        });
+    // Build the new database URL by replacing the password in the current URL.
+    let new_db_url = {
+        let mut u = url::Url::parse(&state.config.database_url)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("invalid DATABASE_URL: {e}")))?;
+        let _ = u.set_password(Some(&*new_pass));
+        Zeroizing::new(u.to_string())
+    };
 
-    match status {
-        Ok(s) if s.success() => {
-            tracing::info!("PostgreSQL app password rotated and Podman secret updated");
-        }
-        Ok(s) => {
-            tracing::warn!(code = ?s.code(), "podman secret create --replace failed for pg-pass");
-        }
-        Err(e) => {
-            tracing::warn!("podman secret replace pg-pass spawn error: {e}");
-        }
+    let mut pg_ok = false;
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-pg-pass", new_pass.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for pg-pass failed: {e}");
+    } else {
+        pg_ok = true;
+    }
+
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-database-url", new_db_url.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for database-url failed: {e}");
+    } else if pg_ok {
+        tracing::info!("PostgreSQL app password rotated and Podman secrets updated");
     }
 
     Ok(())
@@ -346,34 +341,29 @@ pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
         .await
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
-    let status = std::process::Command::new("podman")
-        .args([
-            "secret",
-            "create",
-            "--replace",
-            "lynx-dashboard-redis-pass",
-            "-",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(new_pass.as_bytes());
-            }
-            child.wait()
-        });
+    // Build the new Redis URL by replacing the password in the current URL.
+    let new_redis_url = {
+        let mut u = url::Url::parse(&state.config.redis_url)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("invalid REDIS_URL: {e}")))?;
+        let _ = u.set_password(Some(&*new_pass));
+        Zeroizing::new(u.to_string())
+    };
 
-    match status {
-        Ok(s) if s.success() => {
-            tracing::info!("Redis password rotated and Podman secret updated");
-        }
-        Ok(s) => {
-            tracing::warn!(code = ?s.code(), "podman secret create --replace failed for redis-pass");
-        }
-        Err(e) => {
-            tracing::warn!("podman secret replace redis-pass spawn error: {e}");
-        }
+    let mut redis_ok = false;
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-redis-pass", new_pass.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for redis-pass failed: {e}");
+    } else {
+        redis_ok = true;
+    }
+
+    if let Err(e) =
+        crate::podman::secret_replace("lynx-dashboard-redis-url", new_redis_url.as_bytes()).await
+    {
+        tracing::warn!("podman secret update for redis-url failed: {e}");
+    } else if redis_ok {
+        tracing::info!("Redis password rotated and Podman secrets updated");
     }
 
     Ok(())
@@ -430,7 +420,7 @@ pub async fn rotate_expiring_certs(state: &AppState, threshold_days: i64) -> Res
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
             .map_err(AppError::Internal)?;
 
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
         let result = client
             .post(&url)
             .header(

@@ -4,6 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -13,6 +14,8 @@ pub struct AppState {
     pub lockdown: Arc<AtomicBool>,
     /// Last known-good nftables checksum after apply(). None = no ruleset applied yet.
     pub nft_checksum: Arc<Mutex<Option<String>>>,
+    /// Per-chain checksums captured after each successful apply() — used for divergence attribution.
+    pub nft_chain_checksums: Arc<Mutex<[Option<String>; 3]>>,
     /// Rendered nft ruleset from last successful apply() — used for restore.
     pub nft_last_ruleset: Arc<Mutex<Option<String>>>,
     /// Body of the lynx-global chain (input, managed by dashboard global rules).
@@ -34,6 +37,10 @@ pub struct AppState {
     /// Epoch-second of last successful dashboard contact (WS connect or message received).
     /// 0 = never connected. Used by the fallback updater to detect dashboard absence.
     pub last_dashboard_contact: Arc<AtomicU64>,
+    /// Instant of last received heartbeat ACK from dashboard.
+    /// Reset by both the HTTP /heartbeat handler and the WS heartbeat_ack path.
+    /// The lockdown watchdog fires when this exceeds HEARTBEAT_TIMEOUT_SECS.
+    pub last_heartbeat: Arc<Mutex<Instant>>,
 }
 
 impl AppState {
@@ -90,6 +97,24 @@ impl AppState {
 
     pub fn expected_nft_checksum(&self) -> Option<String> {
         self.nft_checksum.lock().unwrap().clone()
+    }
+
+    /// Store per-chain checksums: (base, global, local).
+    pub fn set_nft_chain_checksums(
+        &self,
+        base: Option<String>,
+        global: Option<String>,
+        local: Option<String>,
+    ) {
+        let mut g = self.nft_chain_checksums.lock().unwrap();
+        g[0] = base;
+        g[1] = global;
+        g[2] = local;
+    }
+
+    /// Expected chain checksum by index: 0=base, 1=global, 2=local.
+    pub fn expected_chain_checksum(&self, idx: usize) -> Option<String> {
+        self.nft_chain_checksums.lock().unwrap()[idx].clone()
     }
 
     pub fn set_nft_last_ruleset(&self, ruleset: String) {

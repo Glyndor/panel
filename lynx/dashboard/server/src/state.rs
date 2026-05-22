@@ -14,6 +14,12 @@ pub struct AgentWsConn {
     pub pending: Arc<tokio::sync::Mutex<HashMap<Uuid, oneshot::Sender<serde_json::Value>>>>,
 }
 
+/// Per-agent broadcast channel for real-time metric fan-out — wrapped in Arc
+/// so the WS hub cleanup can use `Arc::ptr_eq` to avoid removing a newer
+/// session's entry.
+pub type AgentMetricTx = Arc<broadcast::Sender<Arc<String>>>;
+pub type AgentMetricTxMap = Arc<RwLock<HashMap<Uuid, AgentMetricTx>>>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
@@ -28,7 +34,7 @@ pub struct AppState {
     pub agent_ws_conns: Arc<RwLock<HashMap<Uuid, Arc<AgentWsConn>>>>,
     /// Per-agent broadcast channels for real-time metric fan-out to frontend WS clients.
     /// Keyed by agent_id. Channels are created on agent connect, dropped on disconnect.
-    pub agent_metric_tx: Arc<RwLock<HashMap<Uuid, broadcast::Sender<Arc<String>>>>>,
+    pub agent_metric_tx: AgentMetricTxMap,
     /// Global broadcast channel for agent events pushed to all subscribed admin browser sessions.
     pub events_tx: Arc<broadcast::Sender<Arc<String>>>,
 }

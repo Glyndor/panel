@@ -95,21 +95,51 @@ async fn check_releases(state: &AppState) {
     }
 }
 
+/// Parse a semver string into a (major, minor, patch) tuple for ordering.
+fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
+    let v = v.trim_start_matches('v');
+    let mut parts = v.splitn(3, '.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts
+        .next()
+        .and_then(|p| p.split('-').next())?
+        .parse()
+        .ok()?;
+    Some((major, minor, patch))
+}
+
 async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
-    let outdated = match sqlx::query!(
-        "SELECT id, wg_ip::text AS wg_ip, api_port, COALESCE(arch, 'x86_64') AS arch \
-         FROM agents WHERE status = 'online' AND (version IS NULL OR version != $1)",
-        latest
+    let latest_tuple = match parse_semver(latest) {
+        Some(t) => t,
+        None => {
+            tracing::warn!(version = %latest, "scheduler: cannot parse latest agent version — skipping dispatch");
+            return;
+        }
+    };
+
+    let candidates = match sqlx::query!(
+        "SELECT id, wg_ip::text AS wg_ip, api_port, COALESCE(arch, 'x86_64') AS arch, version \
+         FROM agents WHERE status = 'online'",
     )
     .fetch_all(&state.db)
     .await
     {
         Ok(rows) => rows,
         Err(e) => {
-            tracing::warn!("scheduler: failed to query outdated agents: {e}");
+            tracing::warn!("scheduler: failed to query agents: {e}");
             return;
         }
     };
+
+    // Only send update.self to agents running a version strictly older than latest.
+    let outdated: Vec<_> = candidates
+        .into_iter()
+        .filter(|a| {
+            let current = a.version.as_deref().unwrap_or("0.0.0");
+            parse_semver(current).is_none_or(|t| t < latest_tuple)
+        })
+        .collect();
 
     if outdated.is_empty() {
         return;
@@ -153,7 +183,7 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
                 }
             };
 
-        let url = format!("http://{}:{}/cmd", agent.wg_ip, agent.api_port);
+        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
         let result = client
             .post(&url)
             .header(

@@ -1,4 +1,5 @@
 use crate::{auth::SignedCommand, handlers::run_verified_command, metrics, state::AppState};
+use base64ct::{Base64UrlUnpadded, Encoding};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
@@ -185,7 +186,13 @@ async fn handle_message(state: &AppState, text: &str) -> Option<Value> {
                 .map_err(|e| tracing::warn!(error = %e, "invalid command payload"))
                 .ok()?;
 
-            if state.is_locked_down() {
+            // Heartbeat ACKs must bypass the lockdown gate so the dashboard can
+            // rescue a locked-down agent via WS (mirrors the HTTP /heartbeat path).
+            let is_heartbeat_ack = peek_inner_command_type(&signed)
+                .map(|t| t == "agent.heartbeat_ack")
+                .unwrap_or(false);
+
+            if !is_heartbeat_ack && state.is_locked_down() {
                 return Some(json!({
                     "type": "command_response",
                     "id": req_id,
@@ -214,4 +221,17 @@ async fn handle_message(state: &AppState, text: &str) -> Option<Value> {
         "ping" => Some(json!({"type": "pong"})),
         _ => None,
     }
+}
+
+/// Decode the base64url payload to peek at the inner command `type` field
+/// without performing signature verification. Used only to decide whether to
+/// bypass the lockdown gate — full verification still happens inside
+/// `run_verified_command`.
+fn peek_inner_command_type(signed: &SignedCommand) -> Option<String> {
+    let bytes = Base64UrlUnpadded::decode_vec(&signed.payload).ok()?;
+    let val: Value = serde_json::from_slice(&bytes).ok()?;
+    val.get("command")?
+        .get("type")?
+        .as_str()
+        .map(|s| s.to_string())
 }

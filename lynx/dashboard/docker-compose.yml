@@ -33,16 +33,16 @@ services:
       - BACKEND_URL=http://lynx-dashboard-backend:8080
       - NEXT_TELEMETRY_DISABLED=1
     volumes:
-      - /etc/lynx/frontend:/etc/lynx/frontend:ro
+      - /etc/lynx/frontend:/etc/lynx/frontend
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 30s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     restart: unless-stopped
     networks:
       - lynx-dashboard-app
@@ -51,6 +51,11 @@ services:
     container_name: lynx-dashboard-backend
     image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     command: ["/etc/lynx/bin/lynx-dashboard-backend"]
+    # Bind only to the WireGuard management interface — agents reach the backend
+    # via 10.100.0.1, never via the public IP. The frontend reaches it via the
+    # internal lynx-dashboard-app Podman network, not via the published port.
+    ports:
+      - "10.100.0.1:8080:8080"
     volumes:
       - /etc/lynx/bin:/etc/lynx/bin
       - /etc/lynx/frontend:/etc/lynx/frontend
@@ -67,6 +72,8 @@ services:
       - JWT_ENC_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-public
       - CA_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-ca-private
       - CA_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-ca-public
+      - X509_CA_CERT_FILE=/run/secrets/lynx-dashboard-x509-ca-cert
+      - X509_CA_KEY_FILE=/run/secrets/lynx-dashboard-x509-ca-key
       - SETUP_TOKEN_FILE=/run/secrets/lynx-dashboard-setup-token
       - RUST_LOG=${RUST_LOG:-info}
     secrets:
@@ -81,11 +88,13 @@ services:
       - lynx-dashboard-jwt-enc-public
       - lynx-dashboard-ca-private
       - lynx-dashboard-ca-public
+      - lynx-dashboard-x509-ca-cert
+      - lynx-dashboard-x509-ca-key
       - lynx-dashboard-setup-token
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      valkey:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
@@ -111,7 +120,7 @@ services:
       - lynx-dashboard-pg-pass
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./server/db/init:/docker-entrypoint-initdb.d:ro
+      - ${LYNX_DB_INIT_DIR:-./server/db/init}:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
       interval: 5s
@@ -121,19 +130,19 @@ services:
     networks:
       - lynx-dashboard-db
 
-  redis:
-    container_name: lynx-dashboard-redis
-    image: docker.io/library/redis@sha256:02c2454cd3b6277389101b9d42d009f8518255930f8b06ae33624e324f8c6455
+  valkey:
+    container_name: lynx-dashboard-valkey
+    image: docker.io/valkey/valkey@sha256:b027235326507cfdade9b6684056ec1d0b0c0757412e628245129b5d7b788618
     command:
       - sh
       - -c
-      - 'redis-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
+      - 'valkey-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
     secrets:
       - lynx-dashboard-redis-pass
     healthcheck:
       test:
         - CMD-SHELL
-        - 'redis-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
+        - 'valkey-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
       interval: 5s
       timeout: 3s
       retries: 10
@@ -180,6 +189,10 @@ secrets:
   lynx-dashboard-ca-private:
     external: true
   lynx-dashboard-ca-public:
+    external: true
+  lynx-dashboard-x509-ca-cert:
+    external: true
+  lynx-dashboard-x509-ca-key:
     external: true
   lynx-dashboard-setup-token:
     external: true

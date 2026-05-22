@@ -80,6 +80,15 @@ async fn check_and_remove(state: &AppState) {
 }
 
 fn is_present(sw: &IncompatibleSoftware) -> bool {
+    // iptables is special: the `iptables` package is present on Ubuntu/Debian as the
+    // nftables compatibility shim (iptables-nft), which is allowed. Only flag when the
+    // binary self-identifies as the legacy backend via "(legacy)" in --version output.
+    // This check must come first — the generic package check below would return true for
+    // any installed `iptables` package including the harmless nft compat layer.
+    if sw.name == "iptables" {
+        return is_legacy_iptables();
+    }
+
     // Check if the process is running.
     if let Some(proc_name) = sw.process {
         let running = Command::new("pgrep")
@@ -114,12 +123,6 @@ fn is_present(sw: &IncompatibleSoftware) -> bool {
         }
     }
 
-    // Special case: iptables — only flag if the direct (non-nft compat) iptables binary
-    // is present and pointing to a non-nftables backend.
-    if sw.name == "iptables" {
-        return is_legacy_iptables();
-    }
-
     false
 }
 
@@ -134,6 +137,12 @@ fn is_legacy_iptables() -> bool {
         });
     let version_str = String::from_utf8_lossy(&out.stdout);
     // If it says "(legacy)" the host uses direct iptables, not the nft compat layer.
+    contains_legacy_marker(&version_str)
+}
+
+/// Extracted predicate for unit testing — returns true when the iptables version
+/// string indicates the legacy (non-nftables) backend.
+fn contains_legacy_marker(version_str: &str) -> bool {
     version_str.contains("(legacy)")
 }
 
@@ -173,6 +182,121 @@ fn command_exists(cmd: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- contains_legacy_marker (iptables version string detection) ---
+
+    #[test]
+    fn legacy_marker_detected_in_legacy_version_string() {
+        assert!(contains_legacy_marker("iptables v1.8.7 (legacy)"));
+    }
+
+    #[test]
+    fn legacy_marker_not_detected_in_nftables_version_string() {
+        assert!(!contains_legacy_marker("iptables v1.8.7 (nf_tables)"));
+    }
+
+    #[test]
+    fn legacy_marker_not_detected_in_empty_string() {
+        assert!(!contains_legacy_marker(""));
+    }
+
+    #[test]
+    fn legacy_marker_not_detected_in_unrelated_string() {
+        assert!(!contains_legacy_marker("some random text"));
+    }
+
+    #[test]
+    fn legacy_marker_case_sensitive() {
+        // "(Legacy)" with capital L is NOT the same as "(legacy)" — intentional.
+        assert!(!contains_legacy_marker("iptables v1.8.7 (Legacy)"));
+    }
+
+    // --- INCOMPATIBLE static list structural invariants ---
+
+    #[test]
+    fn incompatible_list_is_non_empty() {
+        assert!(!INCOMPATIBLE.is_empty());
+    }
+
+    #[test]
+    fn every_incompatible_entry_has_at_least_one_package() {
+        for entry in INCOMPATIBLE {
+            assert!(
+                !entry.packages.is_empty(),
+                "entry '{}' has no packages listed",
+                entry.name
+            );
+        }
+    }
+
+    #[test]
+    fn docker_entry_has_process_set() {
+        let docker = INCOMPATIBLE.iter().find(|e| e.name == "docker");
+        assert!(
+            docker.is_some(),
+            "docker entry missing from INCOMPATIBLE list"
+        );
+        assert_eq!(
+            docker.unwrap().process,
+            Some("dockerd"),
+            "docker process should be 'dockerd'"
+        );
+    }
+
+    #[test]
+    fn iptables_entry_has_no_process() {
+        let iptables = INCOMPATIBLE.iter().find(|e| e.name == "iptables");
+        assert!(
+            iptables.is_some(),
+            "iptables entry missing from INCOMPATIBLE list"
+        );
+        assert!(
+            iptables.unwrap().process.is_none(),
+            "iptables should have process: None (only package check applies)"
+        );
+    }
+
+    #[test]
+    fn ufw_entry_has_no_process() {
+        let ufw = INCOMPATIBLE.iter().find(|e| e.name == "ufw");
+        assert!(ufw.is_some(), "ufw entry missing from INCOMPATIBLE list");
+        assert!(
+            ufw.unwrap().process.is_none(),
+            "ufw should have process: None"
+        );
+    }
+
+    #[test]
+    fn all_entry_names_are_unique() {
+        let mut names: Vec<&str> = INCOMPATIBLE.iter().map(|e| e.name).collect();
+        let original_len = names.len();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            original_len,
+            "duplicate names in INCOMPATIBLE list"
+        );
+    }
+
+    // --- command_exists (pure boolean — tests with well-known commands) ---
+
+    #[test]
+    fn command_exists_returns_true_for_sh() {
+        // /bin/sh is available on every POSIX system including GitHub Actions runners.
+        assert!(command_exists("sh"));
+    }
+
+    #[test]
+    fn command_exists_returns_false_for_nonexistent_command() {
+        assert!(!command_exists(
+            "lynx_definitely_not_a_real_command_xyz_12345"
+        ));
+    }
 }
 
 async fn notify_dashboard(state: &AppState, software: &str, detail: &str) {

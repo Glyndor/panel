@@ -1,18 +1,13 @@
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import { Suspense } from "react";
-import { getMigrationStatus } from "@/actions/(dashboard)/app/settings/migration";
-import { getMe } from "@/actions/(dashboard)/app/settings/profile";
-import { BrandingForm } from "@/components/(dashboard)/app/settings/BrandingForm";
-import { ChangePasswordForm } from "@/components/(dashboard)/app/settings/ChangePasswordForm";
-import { DomainSection } from "@/components/(dashboard)/app/settings/DomainSection";
-import { MigrationSection } from "@/components/(dashboard)/app/settings/MigrationSection";
-import { RotateButton } from "@/components/(dashboard)/app/settings/RotateButton";
-import { RotationLog } from "@/components/(dashboard)/app/settings/RotationLog";
-import { SessionList } from "@/components/(dashboard)/app/settings/SessionList";
-import { SessionListSkeleton } from "@/components/(dashboard)/app/settings/SessionListSkeleton";
-import { SingleSessionToggle } from "@/components/(dashboard)/app/settings/SingleSessionToggle";
-import { UpdateSection } from "@/components/(dashboard)/app/settings/UpdateSection";
+import { getMigrationStatus } from "@/actions/(dashboard)/settings/migration";
+import { BrandingForm } from "@/components/(dashboard)/settings/BrandingForm";
+import { DomainSection } from "@/components/(dashboard)/settings/DomainSection";
+import { MigrationSection } from "@/components/(dashboard)/settings/MigrationSection";
+import { RotateButton } from "@/components/(dashboard)/settings/RotateButton";
+import { RotationLog } from "@/components/(dashboard)/settings/RotationLog";
+import { UpdateSection } from "@/components/(dashboard)/settings/UpdateSection";
 import { BACKEND_URL } from "@/lib/api";
 
 interface Branding {
@@ -84,54 +79,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
 		fetchBranding(),
 	]);
 	const token = jar.get("access_token")?.value ?? "";
-	const [domainCfg, migrationState, me] = await Promise.all([
-		fetchDomainConfig(token),
-		getMigrationStatus(),
-		getMe(),
-	]);
+	const [domainCfg, migrationState] = await Promise.all([fetchDomainConfig(token), getMigrationStatus()]);
 
 	return (
 		<div className="flex flex-col p-6 gap-8 max-w-3xl">
 			<h1 className="text-xl font-semibold">{t("title")}</h1>
-
-			{me && (
-				<section className="flex flex-col gap-3">
-					<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-						{t("profile")}
-					</h2>
-					<div className="rounded-lg border p-4 flex flex-col gap-4">
-						<div>
-							<p className="text-xs text-muted-foreground">{t("profileUsername")}</p>
-							<p className="text-sm font-medium font-mono">{me.username}</p>
-						</div>
-						<div className="border-t pt-4">
-							<p className="text-sm font-medium mb-3">{t("changePassword")}</p>
-							<ChangePasswordForm
-								labels={{
-									btn: t("changePasswordBtn"),
-									currentPassword: t("currentPassword"),
-									error: t("changePasswordError"),
-									newPassword: t("newPassword"),
-									success: t("changePasswordSuccess"),
-									wrong: t("changePasswordWrong"),
-								}}
-								locale={locale}
-							/>
-						</div>
-						<div className="border-t pt-4">
-							<SingleSessionToggle
-								initial={me.single_session}
-								labels={{
-									desc: t("singleSessionDesc"),
-									error: t("singleSessionError"),
-									label: t("singleSession"),
-									success: t("singleSessionSuccess"),
-								}}
-							/>
-						</div>
-					</div>
-				</section>
-			)}
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("domain")}</h2>
@@ -290,13 +242,6 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
 					</div>
 				</section>
 			)}
-
-			<section className="flex flex-col gap-3">
-				<h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("sessions")}</h2>
-				<Suspense fallback={<SessionListSkeleton />}>
-					<SessionList locale={locale} token={token} />
-				</Suspense>
-			</section>
 		</div>
 	);
 }

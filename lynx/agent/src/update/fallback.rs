@@ -18,6 +18,14 @@ pub async fn run_fallback_updater(state: AppState) {
     loop {
         ticker.tick().await;
 
+        // No dashboard URL = agent not yet onboarded. Skip fallback updates entirely:
+        // without a dashboard the agent is in setup mode and the WS connection will
+        // never establish last_contact, which would otherwise immediately satisfy the
+        // absence threshold on every restart and cause an infinite update loop.
+        if state.config.dashboard_url.is_none() {
+            continue;
+        }
+
         let last_contact = state.last_dashboard_contact.load(Ordering::SeqCst);
         let now = epoch_secs();
 
@@ -125,4 +133,78 @@ fn epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_semver ---
+
+    #[test]
+    fn parse_semver_normal() {
+        assert_eq!(parse_semver("1.2.3"), (1, 2, 3));
+    }
+
+    #[test]
+    fn parse_semver_v_prefix() {
+        assert_eq!(parse_semver("v2.0.0"), (2, 0, 0));
+    }
+
+    #[test]
+    fn parse_semver_missing_patch() {
+        assert_eq!(parse_semver("1.0"), (1, 0, 0));
+    }
+
+    #[test]
+    fn parse_semver_empty() {
+        assert_eq!(parse_semver(""), (0, 0, 0));
+    }
+
+    #[test]
+    fn parse_semver_garbage() {
+        assert_eq!(parse_semver("garbage"), (0, 0, 0));
+    }
+
+    #[test]
+    fn parse_semver_zeros() {
+        assert_eq!(parse_semver("0.0.0"), (0, 0, 0));
+    }
+
+    // --- is_newer ---
+
+    #[test]
+    fn is_newer_patch_bump() {
+        assert!(is_newer("1.2.0", "1.1.0"));
+    }
+
+    #[test]
+    fn is_newer_older_version_is_false() {
+        assert!(!is_newer("1.1.0", "1.2.0"));
+    }
+
+    #[test]
+    fn is_newer_equal_versions_is_false() {
+        assert!(!is_newer("1.0.0", "1.0.0"));
+    }
+
+    #[test]
+    fn is_newer_major_bump() {
+        assert!(is_newer("2.0.0", "1.9.9"));
+    }
+
+    #[test]
+    fn is_newer_v_prefix_stripped() {
+        assert!(is_newer("v1.2.0", "1.1.0"));
+    }
+
+    #[test]
+    fn is_newer_both_v_prefix() {
+        assert!(is_newer("v2.1.0", "v2.0.9"));
+    }
+
+    #[test]
+    fn is_newer_minor_rollback_is_false() {
+        assert!(!is_newer("1.0.0", "1.0.1"));
+    }
 }

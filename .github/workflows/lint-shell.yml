@@ -9,10 +9,10 @@ on:
   pull_request:
     branches:
       - main
+      - develop
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   shellcheck:
@@ -20,6 +20,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Syntax check (bash -n)
+        run: |
+          failed=0
+          for f in \
+            install.sh \
+            scripts/detect-os.sh \
+            scripts/remove-docker.sh \
+            scripts/remove-firewall.sh \
+            scripts/install-podman.sh \
+            scripts/install-nftables.sh \
+            lynx/dashboard/setup-dashboard.sh \
+            lynx/dashboard/update-dashboard.sh \
+            lynx/agent/setup-agent.sh \
+            lynx/agent/update-agent.sh
+          do
+            if bash -n "$f"; then
+              echo "OK  $f"
+            else
+              echo "ERR $f"
+              failed=$((failed + 1))
+            fi
+          done
+          exit "$failed"
+
+      - name: Install shellcheck
+        run: |
+          VERSION="0.10.0"
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${VERSION}/shellcheck-v${VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v${VERSION}/shellcheck
+          shellcheck --version
 
       - name: Run shellcheck
         run: bash scripts/lint.sh

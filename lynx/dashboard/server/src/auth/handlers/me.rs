@@ -1,11 +1,13 @@
 use super::build_jwt_keys;
 use crate::{
+    alerts,
     auth::session,
-    crypto::jwt,
+    crypto::{hash, jwt},
     error::{AppError, Result},
     state::AppState,
 };
 use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use subtle::ConstantTimeEq as _;
 
 pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse> {
     let token = headers
@@ -22,13 +24,60 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
         return Err(AppError::Unauthorized);
     }
 
+    // Check IP + UA — same policy as require_auth middleware
+    let client_ip = headers
+        .get("x-real-ip")
+        .or_else(|| headers.get("x-forwarded-for"))
+        .or_else(|| headers.get("x-peer-addr"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
+        .unwrap_or_default();
+    let client_ua = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let expected_ip = hash::ip_hash(&client_ip);
+    let expected_ua = hash::ua_hash(&client_ua);
+    let ip_ok: bool = claims
+        .ip_hash
+        .as_bytes()
+        .ct_eq(expected_ip.as_bytes())
+        .into();
+    let ua_ok: bool = claims
+        .ua_hash
+        .as_bytes()
+        .ct_eq(expected_ua.as_bytes())
+        .into();
+    if !ip_ok | !ua_ok {
+        let _ = session::revoke_access_jti(&mut redis, claims.jti).await;
+        let _ = session::log_event(&state.db, claims.session_id, "intercepted").await;
+        let _ = session::delete_by_session_id(&state.db, claims.session_id).await;
+        alerts::fire(
+            &state,
+            "intercepted",
+            Some(format!(
+                "session={} ip_mismatch={}",
+                claims.session_id,
+                claims.ip_hash != expected_ip
+            )),
+            None,
+        )
+        .await;
+        return Err(AppError::Unauthorized);
+    }
+
     let user = sqlx::query!(
-        "SELECT username, single_session FROM users WHERE id = $1",
+        "SELECT username, single_session, force_password_change FROM users WHERE id = $1",
         claims.sub
     )
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::Unauthorized)?;
+
+    if user.force_password_change {
+        return Err(AppError::ForcePasswordChange);
+    }
 
     let is_admin: bool = sqlx::query_scalar!(
         r#"SELECT EXISTS(

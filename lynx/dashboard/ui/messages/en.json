@@ -135,8 +135,15 @@
 			"agents": "Agents",
 			"organizations": "Organizations",
 			"overview": "Overview",
+			"member": "My Account",
 			"settings": "Settings",
-			"signOut": "Sign out"
+			"signOut": "Sign out",
+			"vps": "VPS",
+			"projects": "Projects",
+			"vpsDesc": "Manage your VPS agents and firewall rules",
+			"orgsDesc": "Manage organizations and team members",
+			"projectsDesc": "Manage projects and container deployments",
+			"selectSection": "Where would you like to go?"
 		},
 		"notifications": {
 			"clearAll": "Clear all",
@@ -240,7 +247,9 @@
 			"tunnelTeardownError": "Failed to tear down tunnel.",
 			"tunnelTeardownSuccess": "Tunnel torn down.",
 			"verticalScale": "Vertical Scaling",
-			"verticalScaleDesc": "Update CPU and memory limits for a container in this project. The container will be updated live without restart when possible."
+			"verticalScaleDesc": "Update CPU and memory limits for a container in this project. The container will be updated live without restart when possible.",
+			"title": "Projects",
+			"noProjects": "No projects found."
 		},
 		"settings": {
 			"branding": "White-label Branding",
@@ -353,6 +362,13 @@
 			"singleSessionDesc": "When enabled, signing in on a new device will invalidate all other active sessions.",
 			"singleSessionError": "Failed to update setting.",
 			"singleSessionSuccess": "Single session setting updated.",
+			"language": "Language",
+			"password": "Password",
+			"languageDesc": "Choose the language for the dashboard interface.",
+			"member": "My Account",
+			"preferences": "Preferences",
+			"theme": "Theme",
+			"themeDesc": "Choose between light, dark, or system default.",
 			"title": "Settings",
 			"updateAvailable": "Update available",
 			"updateCheck": "Check for updates",
@@ -386,7 +402,9 @@
 			"emailTaken": "Email already registered",
 			"hasAccount": "Already have an account?",
 			"login": "Sign in",
+			"confirmPassword": "Confirm password",
 			"password": "Password",
+			"passwordMismatch": "Passwords do not match",
 			"serverError": "Something went wrong. Please try again.",
 			"submit": "Create account",
 			"submitting": "Creating account...",

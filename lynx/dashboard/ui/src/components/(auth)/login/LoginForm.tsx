@@ -1,9 +1,11 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { loginAction } from "@/actions/(auth)/login";
@@ -17,6 +19,7 @@ type Props = { locale: string };
 export function LoginForm({ locale }: Props) {
 	const t = useTranslations("auth.login");
 	const router = useRouter();
+	const [showPassword, setShowPassword] = useState(false);
 
 	const {
 		register,
@@ -55,7 +58,7 @@ export function LoginForm({ locale }: Props) {
 	};
 
 	return (
-		<form className="flex flex-col gap-5" onSubmit={handleSubmit(onSubmit)}>
+		<form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
 			<Field>
 				<FieldLabel htmlFor="username">{t("username")}</FieldLabel>
 				<Input
@@ -70,18 +73,29 @@ export function LoginForm({ locale }: Props) {
 
 			<Field>
 				<FieldLabel htmlFor="password">{t("password")}</FieldLabel>
-				<Input
-					id="password"
-					type="password"
-					{...register("password")}
-					autoComplete="current-password"
-					className="h-10"
-					disabled={isSubmitting}
-				/>
+				<div className="relative">
+					<Input
+						id="password"
+						type={showPassword ? "text" : "password"}
+						{...register("password")}
+						autoComplete="current-password"
+						className="h-10 pr-10"
+						disabled={isSubmitting}
+					/>
+					<button
+						type="button"
+						tabIndex={-1}
+						onClick={() => setShowPassword((v) => !v)}
+						className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors cursor-pointer select-none"
+						aria-label={showPassword ? "Hide password" : "Show password"}
+					>
+						{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+					</button>
+				</div>
 				<FieldError errors={[errors.password]} />
 			</Field>
 
-			<Button className="w-full h-10 mt-1" disabled={isSubmitting} type="submit">
+			<Button className="w-full h-10 mt-2" variant="brand" disabled={isSubmitting} type="submit">
 				{isSubmitting ? t("submitting") : t("submit")}
 			</Button>
 

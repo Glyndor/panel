@@ -78,12 +78,21 @@ async fn check_once(state: &AppState) {
     notify_dashboard(state, chain, base_diverged).await;
 }
 
-fn is_chain_diverged(_state: &AppState, chain: &str) -> bool {
-    // We don't store per-chain expected checksums, so approximate by checking
-    // if the chain is accessible. If nft fails (chain deleted), that's divergence.
-    // For base specifically, any table-level divergence implies base was touched
-    // if global/local weren't modified — conservative assumption.
-    super::chain_checksum(chain).is_err()
+fn is_chain_diverged(state: &AppState, chain: &str) -> bool {
+    let idx = match chain {
+        "lynx-base" => 0,
+        "lynx-global" => 1,
+        "lynx-local" => 2,
+        _ => return false,
+    };
+    let expected = match state.expected_chain_checksum(idx) {
+        Some(c) => c,
+        None => return false, // no baseline stored — can't determine
+    };
+    match super::chain_checksum(chain) {
+        Ok(current) => current != expected,
+        Err(_) => true, // chain deleted or inaccessible
+    }
 }
 
 fn restore(state: &AppState) -> anyhow::Result<()> {
@@ -93,9 +102,14 @@ fn restore(state: &AppState) -> anyhow::Result<()> {
 
     super::apply_raw(&last)?;
 
-    // Update expected checksum to match what we just applied.
+    // Update expected checksums to match what we just applied.
     let checksum = super::current_checksum()?;
     state.set_nft_checksum(checksum);
+    state.set_nft_chain_checksums(
+        super::chain_checksum("lynx-base").ok(),
+        super::chain_checksum("lynx-global").ok(),
+        super::chain_checksum("lynx-local").ok(),
+    );
     Ok(())
 }
 

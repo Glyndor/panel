@@ -5,7 +5,7 @@ import {
 	changePasswordSchema,
 	domainSetupSchema,
 	migrationStartSchema,
-} from "@/schemas/(dashboard)/app/settings";
+} from "@/schemas/(dashboard)/settings";
 
 // ---------------------------------------------------------------------------
 // changePasswordSchema

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS(\n                SELECT 1 FROM agent_events\n                WHERE agent_id = $1\n                  AND event IN ('rebooting', 'updating')\n                  AND created_at > NOW() - INTERVAL '5 minutes'\n            ) AS \"exists!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1f076c18911c6f19f59f2b08563a7f0f397421e8a602f61ec9273e21d1ee54c5"
+}
