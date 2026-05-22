@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT wg_ip::text AS wg_ip, api_port FROM agents WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wg_ip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "api_port",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "94b1cb3a0ba7f37ccfc86c83499caa7c5ba238d97731f21cb4f366d676d039e4"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_config SET status='error', error_message=$1, updated_at=NOW() WHERE id=1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a70e3f0396f786f2559abd657a1f627c3b18973a8ac08b85290d8e6061a0f244"
+}

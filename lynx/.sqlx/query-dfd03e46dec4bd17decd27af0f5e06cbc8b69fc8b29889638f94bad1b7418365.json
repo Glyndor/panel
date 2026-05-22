@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, scope, agent_id, kind, port, port_end, protocol,\n               ip_list, ip_version, rate_per_min, description,\n               priority, enabled, direction, created_by, created_at, updated_at\n        FROM nftables_rules\n        WHERE scope = 'global' AND enabled = true\n        ORDER BY priority ASC, created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "agent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "port_end",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "protocol",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "ip_list",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 8,
+        "name": "ip_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "rate_per_min",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "direction",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "dfd03e46dec4bd17decd27af0f5e06cbc8b69fc8b29889638f94bad1b7418365"
+}

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, detail, created_at\n        FROM agent_events\n        WHERE agent_id = $1\n          AND event = 'nftables_divergence'\n          AND created_at > COALESCE(\n              (SELECT created_at FROM agent_events\n               WHERE agent_id = $1 AND event IN ('nftables_restored', 'nftables_accepted')\n               ORDER BY created_at DESC LIMIT 1),\n              '1970-01-01'::timestamptz\n          )\n        ORDER BY created_at DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "detail",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f13916ea4ced9c5abe7f12e162508b64f3cd51152586dcff67cdd4c1bc18399a"
+}

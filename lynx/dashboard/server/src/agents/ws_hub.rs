@@ -94,6 +94,25 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
     // Push pending global rule syncs if the agent missed any while offline.
     push_pending_global_sync(&state, agent_id).await;
 
+    // If this is the local agent reconnecting, reconcile WireGuard peers.
+    // Covers the VPS-reboot case: wg-quick brings up the interface empty and the
+    // backend needs to re-add every DB peer via the local agent.
+    let is_local = sqlx::query_scalar!(
+        "SELECT is_local_agent FROM agents WHERE id=$1",
+        agent_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false);
+    if is_local {
+        let reconcile_state = state.clone();
+        tokio::spawn(async move {
+            crate::agents::wg::reconcile_peers(&reconcile_state).await;
+        });
+    }
+
     loop {
         tokio::select! {
             Some(msg) = rx.recv() => {

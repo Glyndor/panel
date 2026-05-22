@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use zeroize::Zeroizing;
 
 const PODMAN_SOCK: &str = "/run/podman/podman.sock";
 
 /// Make a raw HTTP/1.1 request over the Podman Unix socket.
-/// Returns the HTTP status code.
-async fn podman_http(method: &str, path: &str, body: &[u8]) -> Result<u16> {
+/// Returns (status, body) — body is the response payload after the blank line.
+async fn podman_http_full(method: &str, path: &str, body: &[u8]) -> Result<(u16, Vec<u8>)> {
     let mut stream = UnixStream::connect(PODMAN_SOCK)
         .await
         .context("connect to podman socket")?;
@@ -37,7 +38,20 @@ async fn podman_http(method: &str, path: &str, body: &[u8]) -> Result<u16> {
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(0);
 
-    Ok(status)
+    // Split off body after the first \r\n\r\n.
+    let body_start = response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|p| p + 4)
+        .unwrap_or(response.len());
+    let body = response[body_start..].to_vec();
+
+    Ok((status, body))
+}
+
+/// Convenience wrapper when only the status code is needed.
+async fn podman_http(method: &str, path: &str, body: &[u8]) -> Result<u16> {
+    podman_http_full(method, path, body).await.map(|(s, _)| s)
 }
 
 /// Create or replace a Podman secret via the socket API.
@@ -65,4 +79,19 @@ pub async fn secret_delete(name: &str) {
     if let Err(e) = podman_http("DELETE", &path, &[]).await {
         tracing::warn!(%name, "podman socket: secret delete failed: {e}");
     }
+}
+
+/// Read a Podman secret value via the socket API. Used when the secret was
+/// created after the backend container started and isn't mounted in /run/secrets.
+/// Returns None if the secret doesn't exist or the API call fails.
+pub async fn secret_read(name: &str) -> Option<Zeroizing<String>> {
+    let path = format!("/v4.0.0/libpod/secrets/{name}/json?showsecret=true");
+    let (status, body) = podman_http_full("GET", &path, &[]).await.ok()?;
+    if status != 200 {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&body).ok()?;
+    v.get("SecretData")
+        .and_then(|s| s.as_str())
+        .map(|s| Zeroizing::new(s.trim().to_string()))
 }
