@@ -137,7 +137,7 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
         .into_iter()
         .filter(|a| {
             let current = a.version.as_deref().unwrap_or("0.0.0");
-            parse_semver(current).map_or(true, |t| t < latest_tuple)
+            parse_semver(current).is_none_or(|t| t < latest_tuple)
         })
         .collect();
 
