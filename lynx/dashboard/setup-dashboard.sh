@@ -221,17 +221,19 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables — only block the legacy binary, not the nftables compat layer (iptables-nft)
-if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q 'nf_tables'; then
+# iptables — now ALWAYS incompatible. Netavark 1.10+ uses the nftables firewall
+# driver natively; the iptables-nft shim that earlier Lynx versions tolerated is
+# no longer needed. Any iptables binary signals an external firewall manager.
+if command -v iptables &>/dev/null; then
     _incompatible_found=true
-    log_warn "Removing incompatible: iptables (legacy binary, not nftables-compat)"
+    log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
     log_info "  Reason: ${_REASON_FW}"
     case "$DISTRO" in
         debian) apt-get purge -y iptables 2>/dev/null || true ;;
         rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
         *)      log_warn "Unknown distro — remove iptables manually" ;;
     esac
-    log_ok "Removed: iptables (legacy)"
+    log_ok "Removed: iptables"
 fi
 
 if $_incompatible_found; then
@@ -391,24 +393,23 @@ _require_cmd() {
 }
 
 _apt_ensure podman         podman
-_apt_ensure podman-compose podman-compose
+# podman-compose replaced by `lynx-compose` (Rust binary shipped with the release),
+# which removes the python3 / pip3 runtime dependency entirely.
 _apt_ensure openssl        openssl
 _apt_ensure nft            nftables
 _apt_ensure wg             wireguard-tools
 _apt_ensure curl           curl
 _apt_ensure python3        python3
+# python3-pip retained only for the Ed25519 signature-verification fallback when
+# the host python3-cryptography package is unavailable (Ubuntu Server has it,
+# minimal Debian may not).
 _apt_ensure pip3           python3-pip
-# netavark 1.x uses the iptables firewall driver for bridge networks.
-# On Ubuntu/Debian, the 'iptables' package installs the nft-compat shim —
-# not legacy iptables — so it passes Lynx's incompatibility check.
-_apt_ensure iptables       iptables
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 
 # Netavark + aardvark-dns: required for container-to-container DNS resolution.
 # Podman defaults to the older CNI backend which lacks DNS on Ubuntu 24.04.
 # These packages live under /usr/lib/podman/ — not in PATH, so _apt_ensure can't check by command.
-_netavark_ok=true
 for _pkg in netavark aardvark-dns; do
     if ! dpkg -l "$_pkg" 2>/dev/null | grep -q '^ii'; then
         log_info "Installing $_pkg..."
@@ -428,15 +429,68 @@ for _pkg in netavark aardvark-dns; do
     fi
 done
 
-# Configure Podman to use Netavark (enables container DNS via aardvark-dns)
-if ! grep -q 'network_backend.*netavark' /etc/containers/containers.conf 2>/dev/null; then
+# Netavark 1.10+ supports a native nftables firewall driver — older versions
+# fall back to iptables-nft. Lynx requires the nftables driver so the iptables
+# package can be dropped entirely (it remains in the incompatible-software list).
+# Upgrade netavark from upstream when the distro ships a version < 1.10.
+NETAVARK_REQUIRED="1.10.0"
+NETAVARK_UPSTREAM_VER="1.15.2"
+_netavark_bin=""
+for _candidate in /usr/lib/podman/netavark /usr/libexec/podman/netavark; do
+    if [[ -x "$_candidate" ]]; then
+        _netavark_bin="$_candidate"
+        break
+    fi
+done
+
+if [[ -z "$_netavark_bin" ]]; then
+    log_error "netavark binary not found in /usr/lib/podman or /usr/libexec/podman"
+    exit 1
+fi
+
+_netavark_ver="$("$_netavark_bin" --version 2>&1 | awk '/netavark/ {print $2; exit}')"
+log_info "netavark on disk: ${_netavark_ver}"
+
+_version_lt() {
+    # Returns 0 (true) when $1 < $2 in semver dotted-numeric order.
+    [[ "$1" = "$2" ]] && return 1
+    [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]]
+}
+
+if _version_lt "$_netavark_ver" "$NETAVARK_REQUIRED"; then
+    log_warn "netavark $_netavark_ver < $NETAVARK_REQUIRED — upgrading from upstream"
+    _uname_m="$(uname -m)"
+    case "$_uname_m" in
+        x86_64|amd64)   _na_asset="netavark.gz" ;;
+        aarch64|arm64)  _na_asset="netavark.aarch64.gz" ;;
+        *) log_error "Unsupported arch for netavark upgrade: $_uname_m"; exit 1 ;;
+    esac
+    NETAVARK_DL="https://github.com/containers/netavark/releases/download/v${NETAVARK_UPSTREAM_VER}/${_na_asset}"
+    NETAVARK_TMP="$(mktemp /tmp/lynx-netavark.XXXXXX.gz)"
+    if ! curl -fsSL --max-time 120 "$NETAVARK_DL" -o "$NETAVARK_TMP"; then
+        log_error "Failed to download netavark from $NETAVARK_DL"
+        rm -f "$NETAVARK_TMP"
+        exit 1
+    fi
+    gunzip -f "$NETAVARK_TMP"
+    NETAVARK_BIN_TMP="${NETAVARK_TMP%.gz}"
+    chmod 755 "$NETAVARK_BIN_TMP"
+    install -m 755 "$NETAVARK_BIN_TMP" "$_netavark_bin"
+    rm -f "$NETAVARK_BIN_TMP"
+    log_ok "netavark upgraded to upstream v${NETAVARK_UPSTREAM_VER}"
+fi
+unset _netavark_bin _netavark_ver _candidate _na_asset _uname_m
+
+# Configure Podman to use Netavark with the native nftables firewall driver
+# (instead of iptables-nft), removing the iptables-package dependency.
+if ! grep -q 'firewall_driver.*nftables' /etc/containers/containers.conf 2>/dev/null; then
     mkdir -p /etc/containers
     {
-        grep -v 'network_backend\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
-        printf '\n[network]\nnetwork_backend = "netavark"\n'
+        grep -v 'network_backend\|firewall_driver\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
+        printf '\n[network]\nnetwork_backend = "netavark"\nfirewall_driver = "nftables"\n'
     } > /tmp/lynx-containers.conf
     mv /tmp/lynx-containers.conf /etc/containers/containers.conf
-    log_ok "Podman configured to use Netavark network backend"
+    log_ok "Podman configured: netavark backend, nftables firewall driver"
 fi
 
 # --- NTP synchronization check ----------------------------------------------
@@ -688,6 +742,29 @@ chmod 755 "$BACKEND_TMP"
 mv "$BACKEND_TMP" "$BACKEND_FILE"
 log_ok "Backend installed: ${BACKEND_FILE}"
 
+# Download and verify lynx-compose (replaces podman-compose / python-pip dependency)
+log_info "Downloading lynx-compose binary..."
+COMPOSE_FILE_BIN="${BIN_DIR}/lynx-compose"
+COMPOSE_TMP="${BIN_DIR}/lynx-compose.new"
+
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}" \
+    -o "$COMPOSE_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}.sig" \
+    -o "${COMPOSE_TMP}.sig"
+
+log_info "Verifying lynx-compose signature..."
+if ! _verify_release_sig "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"; then
+    log_error "lynx-compose signature verification FAILED — aborting"
+    rm -f "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"
+    exit 1
+fi
+rm -f "${COMPOSE_TMP}.sig"
+chmod 755 "$COMPOSE_TMP"
+mv "$COMPOSE_TMP" "$COMPOSE_FILE_BIN"
+log_ok "lynx-compose installed: ${COMPOSE_FILE_BIN}"
+
 # Download and verify frontend binary + assets
 log_info "Downloading frontend binary..."
 FRONTEND_BIN_TMP="${FRONTEND_DIR}/lynx-dashboard-frontend.new"
@@ -756,7 +833,7 @@ log_ok "Init SQL copied to $LYNX_DB_INIT_DIR"
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
-podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
 
 log_info "Waiting for PostgreSQL to be healthy..."
 for i in $(seq 1 30); do
@@ -774,7 +851,7 @@ done
 
 # 2. Valkey
 log_info "Starting Valkey..."
-podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d valkey
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d valkey
 
 log_info "Waiting for Valkey to be healthy..."
 for i in $(seq 1 30); do
@@ -791,7 +868,7 @@ done
 
 # 3. Backend
 log_info "Starting backend..."
-podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d backend
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d backend
 
 log_info "Waiting for backend to be healthy..."
 for i in $(seq 1 40); do
@@ -831,7 +908,7 @@ unset _PG_PASS_SYNC
 
 # 4. Frontend
 log_info "Starting frontend..."
-podman-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend
+"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend
 
 log_info "Waiting for frontend to be healthy..."
 for i in $(seq 1 40); do
