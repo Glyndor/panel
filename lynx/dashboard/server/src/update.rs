@@ -445,16 +445,24 @@ mod tests {
         assert!(validate_github_url("http://github.com/foo/bar").is_err());
     }
 
+    // Test fixtures for SSRF rejection — these URLs are deliberately on
+    // non-allowed domains and must be rejected by validate_github_url.  Defined
+    // as constants so the inline `// audit-urls: ok` suppression lives on the
+    // same line as the literal, satisfying both the URL gate and rustfmt's
+    // line-width budget.
+    const URL_EXAMPLE_COM: &str = "https://example.com/file"; // audit-urls: ok — SSRF test fixture
+    const URL_RAW_GITHUBUSERCONTENT: &str = "https://raw.githubusercontent.com/foo/bar"; // audit-urls: ok — SSRF test fixture
+
     #[test]
     fn other_domain_rejected() {
-        assert!(validate_github_url("https://example.com/file").is_err()); // audit-urls: ok — test fixture for SSRF rejection
+        assert!(validate_github_url(URL_EXAMPLE_COM).is_err());
     }
 
     #[test]
     fn github_subdomain_rejected() {
         // raw.githubusercontent.com is NOT in the allowlist — only github.com and
         // objects.githubusercontent.com.  Subdomain typo-squat must be rejected.
-        assert!(validate_github_url("https://raw.githubusercontent.com/foo/bar").is_err()); // audit-urls: ok — test fixture for SSRF rejection
+        assert!(validate_github_url(URL_RAW_GITHUBUSERCONTENT).is_err());
     }
 
     #[test]
