@@ -217,10 +217,12 @@ jobs:
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release \
               --package lynx-dashboard-server \
+              --package lynx-compose \
               --target ${{ matrix.rust-target }}
           else
             cargo build --release \
               --package lynx-dashboard-server \
+              --package lynx-compose \
               --target ${{ matrix.rust-target }}
           fi
         env:
@@ -234,6 +236,16 @@ jobs:
           pip install --quiet cryptography
           BINARY="lynx/target/${{ matrix.rust-target }}/release/lynx-dashboard-server"
           ARTIFACT="lynx-dashboard-backend-linux-${{ matrix.arch }}"
+          cp "$BINARY" "$ARTIFACT"
+          python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ARTIFACT"
+
+      - name: Sign lynx-compose binary
+        working-directory: ${{ github.workspace }}
+        env:
+          RELEASE_SIGN_KEY: ${{ secrets.RELEASE_SIGN_KEY }}
+        run: |
+          BINARY="lynx/target/${{ matrix.rust-target }}/release/lynx-compose"
+          ARTIFACT="lynx-compose-linux-${{ matrix.arch }}"
           cp "$BINARY" "$ARTIFACT"
           python3 .github/scripts/sign.py "$RELEASE_SIGN_KEY" "$ARTIFACT"
 
@@ -326,6 +338,8 @@ jobs:
             lynx-dashboard-frontend-linux-${{ matrix.arch }}.sig
             lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz
             lynx-dashboard-frontend-assets-linux-${{ matrix.arch }}.tar.gz.sig
+            lynx-compose-linux-${{ matrix.arch }}
+            lynx-compose-linux-${{ matrix.arch }}.sig
           retention-days: 1
 
   release:
@@ -358,4 +372,8 @@ jobs:
             lynx-dashboard-frontend-linux-arm64 \
             lynx-dashboard-frontend-linux-arm64.sig \
             "lynx-dashboard-frontend-assets-linux-arm64.tar.gz" \
-            "lynx-dashboard-frontend-assets-linux-arm64.tar.gz.sig"
+            "lynx-dashboard-frontend-assets-linux-arm64.tar.gz.sig" \
+            lynx-compose-linux-x86_64 \
+            lynx-compose-linux-x86_64.sig \
+            lynx-compose-linux-arm64 \
+            lynx-compose-linux-arm64.sig

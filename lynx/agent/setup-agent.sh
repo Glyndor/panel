@@ -193,17 +193,20 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables — only block the legacy binary, not the nftables compat layer (iptables-nft)
-if command -v iptables &>/dev/null && ! iptables --version 2>/dev/null | grep -q 'nf_tables'; then
+# iptables — now ALWAYS incompatible (netavark 1.10+ uses the nftables firewall
+# driver). The iptables-nft shim was tolerated by earlier Lynx versions because
+# netavark needed it; we removed that requirement. Any iptables binary on the
+# host now signals an external firewall manager and is purged.
+if command -v iptables &>/dev/null; then
     _incompatible_found=true
-    log_warn "Removing incompatible: iptables (legacy binary, not nftables-compat)"
+    log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
     log_info "  Reason: ${_REASON_FW}"
     case "$DISTRO" in
         debian) apt-get purge -y iptables 2>/dev/null || true ;;
         rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
         *)      log_warn "Unknown distro — remove iptables manually" ;;
     esac
-    log_ok "Removed: iptables (legacy)"
+    log_ok "Removed: iptables"
 fi
 
 if $_incompatible_found; then
@@ -337,10 +340,6 @@ _apt_ensure pip3           python3-pip
 _apt_ensure newuidmap      uidmap
 # slirp4netns: required for rootless Podman networking (user-space TCP/IP stack)
 _apt_ensure slirp4netns    slirp4netns
-# netavark 1.x uses the iptables firewall driver for bridge networks.
-# On Ubuntu/Debian, the 'iptables' package installs the nft-compat shim —
-# not legacy iptables — so it passes Lynx's incompatibility check.
-_apt_ensure iptables       iptables
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 
@@ -359,14 +358,57 @@ for _pkg in netavark aardvark-dns; do
     fi
 done
 
-if ! grep -q 'network_backend.*netavark' /etc/containers/containers.conf 2>/dev/null; then
+# Netavark 1.10+ supports a native nftables firewall driver — older versions
+# require iptables-nft. Lynx upgrades from upstream so the iptables package can
+# be dropped entirely (it remains on the incompatible-software list).
+NETAVARK_REQUIRED="1.10.0"
+NETAVARK_UPSTREAM_VER="1.15.2"
+_netavark_bin=""
+for _candidate in /usr/lib/podman/netavark /usr/libexec/podman/netavark; do
+    [[ -x "$_candidate" ]] && _netavark_bin="$_candidate" && break
+done
+if [[ -z "$_netavark_bin" ]]; then
+    log_error "netavark binary not found in /usr/lib/podman or /usr/libexec/podman"
+    exit 1
+fi
+_netavark_ver="$("$_netavark_bin" --version 2>&1 | awk '/netavark/ {print $2; exit}')"
+log_info "netavark on disk: ${_netavark_ver}"
+
+_version_lt() {
+    [[ "$1" = "$2" ]] && return 1
+    [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]]
+}
+
+if _version_lt "$_netavark_ver" "$NETAVARK_REQUIRED"; then
+    log_warn "netavark $_netavark_ver < $NETAVARK_REQUIRED — upgrading from upstream"
+    _uname_m="$(uname -m)"
+    case "$_uname_m" in
+        x86_64|amd64)   _na_asset="netavark.gz" ;;
+        aarch64|arm64)  _na_asset="netavark.aarch64.gz" ;;
+        *) log_error "Unsupported arch for netavark upgrade: $_uname_m"; exit 1 ;;
+    esac
+    NETAVARK_DL="https://github.com/containers/netavark/releases/download/v${NETAVARK_UPSTREAM_VER}/${_na_asset}"
+    NETAVARK_TMP="$(mktemp /tmp/lynx-netavark.XXXXXX.gz)"
+    if ! curl -fsSL --max-time 120 "$NETAVARK_DL" -o "$NETAVARK_TMP"; then
+        log_error "Failed to download netavark from $NETAVARK_DL"
+        rm -f "$NETAVARK_TMP"
+        exit 1
+    fi
+    gunzip -f "$NETAVARK_TMP"
+    install -m 755 "${NETAVARK_TMP%.gz}" "$_netavark_bin"
+    rm -f "${NETAVARK_TMP%.gz}"
+    log_ok "netavark upgraded to upstream v${NETAVARK_UPSTREAM_VER}"
+fi
+unset _netavark_bin _netavark_ver _candidate _na_asset _uname_m
+
+if ! grep -q 'firewall_driver.*nftables' /etc/containers/containers.conf 2>/dev/null; then
     mkdir -p /etc/containers
     {
-        grep -v 'network_backend\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
-        printf '\n[network]\nnetwork_backend = "netavark"\n'
+        grep -v 'network_backend\|firewall_driver\|\[network\]' /etc/containers/containers.conf 2>/dev/null || true
+        printf '\n[network]\nnetwork_backend = "netavark"\nfirewall_driver = "nftables"\n'
     } > /tmp/lynx-containers.conf
     mv /tmp/lynx-containers.conf /etc/containers/containers.conf
-    log_ok "Podman configured to use Netavark network backend"
+    log_ok "Podman configured: netavark backend, nftables firewall driver"
 fi
 
 # --- NTP synchronization check ----------------------------------------------

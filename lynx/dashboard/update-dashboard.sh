@@ -182,6 +182,30 @@ rm -f "${BACKEND_TMP}.sig"
 chmod 755 "$BACKEND_TMP"
 log_ok "Backend verified"
 
+# --- Download lynx-compose --------------------------------------------------
+
+log_section "Downloading lynx-compose binary"
+
+COMPOSE_FILE_BIN="$BIN_DIR/lynx-compose"
+COMPOSE_TMP="$BIN_DIR/lynx-compose.new"
+
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}" \
+    -o "$COMPOSE_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}.sig" \
+    -o "${COMPOSE_TMP}.sig"
+
+log_info "Verifying lynx-compose signature..."
+if ! _verify_release_sig "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"; then
+    log_error "lynx-compose signature verification FAILED — aborting, current version intact"
+    rm -f "$BACKEND_TMP" "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"
+    exit 1
+fi
+rm -f "${COMPOSE_TMP}.sig"
+chmod 755 "$COMPOSE_TMP"
+log_ok "lynx-compose verified"
+
 # --- Download frontend ------------------------------------------------------
 
 log_section "Downloading frontend binary and assets"
@@ -232,6 +256,8 @@ log_section "Deploying backend"
 
 cp -f "$BACKEND_FILE" "${BACKEND_FILE}.prev" 2>/dev/null || true
 mv "$BACKEND_TMP" "$BACKEND_FILE"
+cp -f "$COMPOSE_FILE_BIN" "${COMPOSE_FILE_BIN}.prev" 2>/dev/null || true
+mv "$COMPOSE_TMP" "$COMPOSE_FILE_BIN"
 log_ok "Backend binary swapped — waiting for Podman to restart container..."
 
 for i in $(seq 1 40); do
@@ -269,7 +295,7 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_info "Starting frontend container..."
 if ! podman start lynx-dashboard-frontend 2>/dev/null; then
-    podman-compose -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
+    /etc/lynx/bin/lynx-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
         log_error "Failed to start frontend container"
         exit 1
     }
