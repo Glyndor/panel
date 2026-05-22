@@ -371,11 +371,12 @@ async fn logout_invalidates_access_token() {
 async fn me_returns_user_info() {
     let server = helpers::test_server().await;
     let (username, password) = register_user(&server).await;
-    let (access_token, _, _) = login_user(&server, &username, &password).await;
+    let (access_token, _, login_ip) = login_user(&server, &username, &password).await;
 
     let res = server
         .get("/auth/me")
         .add_header("authorization", format!("Bearer {}", access_token))
+        .add_header("x-real-ip", &login_ip)
         .await;
 
     res.assert_status_ok();
@@ -431,6 +432,7 @@ async fn force_password_change_blocks_protected_routes() {
     let me = server
         .get("/auth/me")
         .add_header("authorization", format!("Bearer {}", access_token))
+        .add_header("x-real-ip", &user_ip)
         .await;
     me.assert_status_ok();
     let user_id = me.json::<Value>()["id"].as_str().unwrap().to_string();
@@ -472,11 +474,12 @@ async fn force_password_change_blocks_protected_routes() {
 async fn force_password_change_allows_change_password_endpoint() {
     let server = helpers::test_server().await;
     let (username, password) = register_user(&server).await;
-    let (access_token, _, _) = login_user(&server, &username, &password).await;
+    let (access_token, _, user_ip) = login_user(&server, &username, &password).await;
 
     let me = server
         .get("/auth/me")
         .add_header("authorization", format!("Bearer {}", access_token))
+        .add_header("x-real-ip", &user_ip)
         .await;
     let user_id = me.json::<Value>()["id"].as_str().unwrap().to_string();
 
@@ -509,11 +512,12 @@ async fn force_password_change_allows_change_password_endpoint() {
 async fn force_password_change_cleared_after_change() {
     let server = helpers::test_server().await;
     let (username, password) = register_user(&server).await;
-    let (access_token, _, _) = login_user(&server, &username, &password).await;
+    let (access_token, _, user_ip) = login_user(&server, &username, &password).await;
 
     let me = server
         .get("/auth/me")
         .add_header("authorization", format!("Bearer {}", access_token))
+        .add_header("x-real-ip", &user_ip)
         .await;
     let user_id = me.json::<Value>()["id"].as_str().unwrap().to_string();
 
@@ -646,12 +650,14 @@ async fn single_session_second_login_invalidates_first() {
         .await;
 
     // Second login — should invalidate token_a
-    let (token_b, _, _) = login_user(&server, &username, &password).await;
+    let (token_b, _, ip_b) = login_user(&server, &username, &password).await;
 
-    // token_a must now be rejected
+    // token_a must now be rejected. We replay the IP it was bound to so the
+    // /auth/me handler reaches the session-revocation check rather than
+    // short-circuiting on `intercepted` for an IP mismatch.
     let res_a = server
         .get("/auth/me")
-        .add_header("x-real-ip", &unique_ip())
+        .add_header("x-real-ip", &ip_a)
         .add_header("authorization", format!("Bearer {}", token_a))
         .await;
     assert_eq!(
@@ -660,10 +666,10 @@ async fn single_session_second_login_invalidates_first() {
         "first session token must be revoked after second login with single_session=true"
     );
 
-    // token_b must still work
+    // token_b must still work — must use the IP it was bound to.
     let res_b = server
         .get("/auth/me")
-        .add_header("x-real-ip", &unique_ip())
+        .add_header("x-real-ip", &ip_b)
         .add_header("authorization", format!("Bearer {}", token_b))
         .await;
     assert_eq!(
@@ -792,6 +798,7 @@ async fn concurrent_refresh_winner_returns_valid_tokens() {
                     Some((
                         body["access_token"].as_str().unwrap_or("").to_string(),
                         body["refresh_token"].as_str().unwrap_or("").to_string(),
+                        ip,
                     ))
                 } else {
                     None
@@ -800,7 +807,7 @@ async fn concurrent_refresh_winner_returns_valid_tokens() {
         })
         .collect();
 
-    let results: Vec<Option<(String, String)>> = join_all(futures).await;
+    let results: Vec<Option<(String, String, String)>> = join_all(futures).await;
 
     let winners: Vec<_> = results.into_iter().flatten().collect();
     assert_eq!(
@@ -810,7 +817,7 @@ async fn concurrent_refresh_winner_returns_valid_tokens() {
         winners.len()
     );
 
-    let (new_access, new_refresh) = &winners[0];
+    let (new_access, new_refresh, winner_ip) = &winners[0];
     assert!(
         !new_access.is_empty(),
         "winner access_token must not be empty"
@@ -820,10 +827,11 @@ async fn concurrent_refresh_winner_returns_valid_tokens() {
         "winner refresh_token must not be empty"
     );
 
-    // The new access token must work for authenticated endpoints.
+    // The new access token must work — replay the IP that the winning refresh
+    // was bound to, otherwise /auth/me rejects on ip_hash mismatch.
     let me = server
         .get("/auth/me")
-        .add_header("x-real-ip", "192.0.2.99")
+        .add_header("x-real-ip", winner_ip)
         .add_header("authorization", format!("Bearer {new_access}"))
         .await;
     assert!(
