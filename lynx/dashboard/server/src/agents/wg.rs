@@ -49,6 +49,15 @@ pub fn read_psk_file(agent_id: Uuid) -> Option<Zeroizing<String>> {
         .map(|s| Zeroizing::new(s.trim().to_string()))
 }
 
+/// Load PSK with fallback to Podman socket API for secrets created after this
+/// container started (not mounted in /run/secrets yet).
+pub async fn read_psk(agent_id: Uuid) -> Option<Zeroizing<String>> {
+    if let Some(psk) = read_psk_file(agent_id) {
+        return Some(psk);
+    }
+    crate::podman::secret_read(&psk_secret_name(agent_id)).await
+}
+
 /// Load all PSKs from mounted secret files at startup.
 /// Scans SECRET_DIR for files matching the `lynx-dashboard-wg-psk-*` pattern.
 pub fn load_all_psks() -> std::collections::HashMap<Uuid, Zeroizing<String>> {
@@ -135,11 +144,16 @@ pub async fn remove_peer(state: &AppState, pubkey: &str) -> Result<()> {
     .await
 }
 
-/// Reconcile WireGuard kernel peers against DB at startup via the local agent.
-/// Any peer in the kernel without a DB row is removed.
+/// Reconcile WireGuard kernel peers against DB via the local agent.
+/// - Orphan peers (in kernel but not in DB): removed.
+/// - Missing peers (in DB but not in kernel): re-added with PSK from secret file.
+///
+/// Called when the local agent's WS connects — handles two cases:
+/// 1. Backend restart after VPS reboot: wg-quick brings up the interface empty,
+///    every DB agent is "missing" and gets re-added.
+/// 2. Manual cleanup: orphan peers from crashed registrations get removed.
 pub async fn reconcile_peers(state: &AppState) {
     let Some(local_id) = local_agent_id(&state.db).await else {
-        // No local agent yet — nothing to reconcile.
         return;
     };
 
@@ -162,13 +176,11 @@ pub async fn reconcile_peers(state: &AppState) {
         })
         .unwrap_or_default();
 
-    if kernel_peers.is_empty() {
-        return;
-    }
-
-    let db_pubkeys: Vec<String> = match sqlx::query_scalar!("SELECT wg_pubkey FROM agents")
-        .fetch_all(&state.db)
-        .await
+    let db_rows = match sqlx::query!(
+        "SELECT id, wg_pubkey, wg_ip::text AS \"wg_ip!\" FROM agents"
+    )
+    .fetch_all(&state.db)
+    .await
     {
         Ok(rows) => rows,
         Err(e) => {
@@ -176,6 +188,8 @@ pub async fn reconcile_peers(state: &AppState) {
             return;
         }
     };
+
+    let db_pubkeys: Vec<String> = db_rows.iter().map(|r| r.wg_pubkey.clone()).collect();
 
     for pubkey in &kernel_peers {
         if !db_pubkeys.contains(pubkey) {
@@ -186,9 +200,32 @@ pub async fn reconcile_peers(state: &AppState) {
         }
     }
 
+    let mut restored = 0;
+    for row in &db_rows {
+        if kernel_peers.contains(&row.wg_pubkey) {
+            continue;
+        }
+        let Ok(ip) = row.wg_ip.parse::<IpAddr>() else {
+            tracing::warn!(agent_id = %row.id, ip = %row.wg_ip, "wg reconcile: invalid IP, skipping restore");
+            continue;
+        };
+        let Some(psk) = read_psk(row.id).await else {
+            tracing::warn!(agent_id = %row.id, "wg reconcile: PSK secret unavailable, skipping restore");
+            continue;
+        };
+        match add_peer(state, &row.wg_pubkey, ip, psk.as_str()).await {
+            Ok(()) => {
+                restored += 1;
+                tracing::info!(agent_id = %row.id, "wg reconcile: peer restored");
+            }
+            Err(e) => tracing::warn!(agent_id = %row.id, "wg reconcile: add_peer failed: {e:#}"),
+        }
+    }
+
     tracing::info!(
-        total = kernel_peers.len(),
-        db_known = db_pubkeys.len(),
+        kernel = kernel_peers.len(),
+        db = db_rows.len(),
+        restored,
         "wg reconcile: complete"
     );
 }

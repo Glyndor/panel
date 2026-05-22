@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76269ec9536854980b4274646932c8dc6eb760fbcbe636596dbaa7e8963dbed3"
+}
