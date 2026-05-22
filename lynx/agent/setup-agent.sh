@@ -330,7 +330,7 @@ _require_cmd() {
 }
 
 _apt_ensure podman         podman
-_apt_ensure openssl        openssl
+# openssl replaced by `lynx-agent` subcommands for random/keypair ops.
 _apt_ensure nft            nftables
 _apt_ensure wg             wireguard-tools
 _apt_ensure curl           curl
@@ -473,6 +473,103 @@ mkdir -p "$LYNX_DIR"
 chmod 755 "$LYNX_DIR"
 log_ok "$LYNX_DIR"
 
+# --- Download core agent binary ---------------------------------------------
+#
+# The agent binary is needed BEFORE secret generation and UUID generation:
+# both rely on `lynx-agent gen-rand` / `lynx-agent gen-uuid-v7` so the host
+# does not need `openssl` or Python's uuid module on minimal systems.
+
+log_section "Downloading lynx-agent binary"
+
+GITHUB_REPO="Jaro-c/Lynx"
+RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+
+_ARCH=$(uname -m)
+case "$_ARCH" in
+    x86_64)  ARCH="x86_64" ;;
+    aarch64) ARCH="arm64" ;;
+    *)
+        log_error "Unsupported architecture: $_ARCH"
+        exit 1
+        ;;
+esac
+log_info "Architecture: $ARCH"
+
+if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
+    log_info "Installing Python cryptography library..."
+    if command -v pip3 &>/dev/null; then
+        pip3 install --quiet cryptography
+    else
+        python3 -m pip install --quiet cryptography
+    fi
+fi
+
+log_info "Fetching latest agent release..."
+LATEST_AGENT_TAG=$(curl -fsSL \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+    | python3 -c "
+import sys, json
+releases = json.load(sys.stdin)
+for r in releases:
+    tag = r.get('tag_name', '')
+    if tag.startswith('agent@') and not r.get('prerelease'):
+        print(tag)
+        break
+" 2>/dev/null)
+
+if [[ -z "$LATEST_AGENT_TAG" ]]; then
+    log_error "No agent release found in ${GITHUB_REPO}"
+    exit 1
+fi
+log_ok "Latest release: ${LATEST_AGENT_TAG}"
+
+# LYNX_RELEASE_BASE lets local-host testing point binary downloads at a private
+# HTTP server. Production installs use the canonical GitHub release URL.
+RELEASE_BASE="${LYNX_RELEASE_BASE:-https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}}"
+mkdir -p "$BIN_DIR"
+chmod 755 "$BIN_DIR"
+
+_verify_release_sig() {
+    local file="$1" sig_file="$2"
+    python3 - "$RELEASE_VERIFY_KEY_B64" "$file" "$sig_file" <<'PYEOF'
+import sys, base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(sys.argv[1] + "=="))
+
+with open(sys.argv[2], "rb") as f:
+    data = f.read()
+with open(sys.argv[3], "rb") as f:
+    sig = f.read()
+try:
+    pub_key.verify(sig, data)
+except Exception as e:
+    print(f"signature invalid: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+AGENT_TMP="${BIN_DIR}/lynx-agent.new"
+
+log_info "Downloading agent binary..."
+curl -fsSL --max-time 300 \
+    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}" \
+    -o "$AGENT_TMP"
+curl -fsSL --max-time 30 \
+    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}.sig" \
+    -o "${AGENT_TMP}.sig"
+
+log_info "Verifying agent signature..."
+if ! _verify_release_sig "$AGENT_TMP" "${AGENT_TMP}.sig"; then
+    log_error "Agent signature verification FAILED — aborting"
+    rm -f "$AGENT_TMP" "${AGENT_TMP}.sig"
+    exit 1
+fi
+rm -f "${AGENT_TMP}.sig"
+chmod 755 "$AGENT_TMP"
+mv "$AGENT_TMP" "$BINARY_PATH"
+log_ok "Agent binary installed: ${BINARY_PATH}"
+
 # --- Generate agent UUID ----------------------------------------------------
 
 log_section "Generating agent identity"
@@ -482,19 +579,7 @@ if [[ -n "${_SAVED_AGENT_ID:-}" ]]; then
     log_ok "Reusing existing Agent ID: $AGENT_ID"
     unset _SAVED_AGENT_ID
 else
-    # UUIDv7: time-ordered. Generate with Python or fall back to uuidgen.
-    if python3 -c "import uuid; print(uuid.uuid7())" &>/dev/null 2>&1; then
-        AGENT_ID=$(python3 -c "import uuid; print(uuid.uuid7())")
-    elif command -v uuidgen &>/dev/null && uuidgen --version 2>&1 | grep -q "2\.4[0-9]"; then
-        AGENT_ID=$(uuidgen --time)
-    else
-        # Construct a v7-like UUID using current time + random bytes
-        TS_MS=$(date +%s%3N)
-        TS_HEX=$(printf '%012x' "$TS_MS")
-        RAND=$(openssl rand -hex 10)
-        VARIANT=$(printf '%02x' $((0x80 | (0x$(openssl rand -hex 1) & 0x3f))))
-        AGENT_ID="${TS_HEX:0:8}-${TS_HEX:8:4}-7${RAND:0:3}-${VARIANT}${RAND:4:2}-${RAND:6:12}"
-    fi
+    AGENT_ID=$("$BINARY_PATH" gen-uuid-v7)
 fi
 # Always persist so successive reinstalls preserve the ID
 printf '%s' "$AGENT_ID" > "$LYNX_DIR/agent-id"
@@ -543,9 +628,9 @@ log_section "Generating agent secrets"
 
 log_info "PostgreSQL root password..."
 (
-    PG_ROOT=$(openssl rand -hex 32)
+    PG_ROOT=$("$BINARY_PATH" gen-rand 32)
     printf '%s' "$PG_ROOT" | podman secret create lynx-agent-pg-root - >/dev/null
-    PG_ROOT="$(openssl rand -hex 32)"
+    PG_ROOT="$("$BINARY_PATH" gen-rand 32)"
 )
 
 log_info "PostgreSQL app password..."
@@ -553,11 +638,11 @@ mkdir -p /etc/lynx/credentials
 chmod 700 /etc/lynx/credentials
 # PG_PASS stays in outer shell until DATABASE_URL can be written (needs container IP).
 # Zeroized after writing the credential file.
-PG_PASS=$(openssl rand -hex 32)
+PG_PASS=$("$BINARY_PATH" gen-rand 32)
 printf '%s' "$PG_PASS" | podman secret create lynx-agent-pg-pass - >/dev/null
 
 log_info "Internal bearer token..."
-INTERNAL_TOKEN=$(openssl rand -hex 32)
+INTERNAL_TOKEN=$("$BINARY_PATH" gen-rand 32)
 printf '%s' "$INTERNAL_TOKEN" | podman secret create lynx-agent-internal-token - >/dev/null
 
 log_ok "Agent secrets generated"
@@ -634,103 +719,13 @@ done
     DB_URL="postgresql://lynx_agent_app:${PG_PASS}@127.0.0.1:5434/${PG_DB}"
     printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
     chmod 600 /etc/lynx/credentials/database-url
-    DB_URL="$(openssl rand -hex 32)"
+    DB_URL="$("$BINARY_PATH" gen-rand 32)"
 )
-PG_PASS="$(openssl rand -hex 32)"
+PG_PASS="$("$BINARY_PATH" gen-rand 32)"
 
 # --- Download agent binary from GitHub Releases ----------------------------
 
-log_section "Downloading lynx-agent binary"
-
-GITHUB_REPO="Jaro-c/Lynx"
-RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
-
-_ARCH=$(uname -m)
-case "$_ARCH" in
-    x86_64)  ARCH="x86_64" ;;
-    aarch64) ARCH="arm64" ;;
-    *)
-        log_error "Unsupported architecture: $_ARCH"
-        exit 1
-        ;;
-esac
-log_info "Architecture: $ARCH"
-
-# Ensure Python cryptography library for signature verification
-if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
-    log_info "Installing Python cryptography library..."
-    if command -v pip3 &>/dev/null; then
-        pip3 install --quiet cryptography
-    else
-        python3 -m pip install --quiet cryptography
-    fi
-fi
-
-log_info "Fetching latest agent release..."
-LATEST_AGENT_TAG=$(curl -fsSL \
-    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
-    | python3 -c "
-import sys, json
-releases = json.load(sys.stdin)
-for r in releases:
-    tag = r.get('tag_name', '')
-    if tag.startswith('agent@') and not r.get('prerelease'):
-        print(tag)
-        break
-" 2>/dev/null)
-
-if [[ -z "$LATEST_AGENT_TAG" ]]; then
-    log_error "No agent release found in ${GITHUB_REPO}"
-    exit 1
-fi
-log_ok "Latest release: ${LATEST_AGENT_TAG}"
-
-RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}"
-mkdir -p "$BIN_DIR"
-chmod 755 "$BIN_DIR"
-
-_verify_release_sig() {
-    local file="$1" sig_file="$2"
-    python3 - "$RELEASE_VERIFY_KEY_B64" "$file" "$sig_file" <<'PYEOF'
-import sys, base64
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
-pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(sys.argv[1] + "=="))
-
-with open(sys.argv[2], "rb") as f:
-    data = f.read()
-with open(sys.argv[3], "rb") as f:
-    sig = f.read()
-try:
-    pub_key.verify(sig, data)
-except Exception as e:
-    print(f"signature invalid: {e}", file=sys.stderr)
-    sys.exit(1)
-PYEOF
-}
-
-AGENT_TMP="${BIN_DIR}/lynx-agent.new"
-
-log_info "Downloading agent binary..."
-curl -fsSL --max-time 300 \
-    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}" \
-    -o "$AGENT_TMP"
-curl -fsSL --max-time 30 \
-    "${RELEASE_BASE}/lynx-agent-linux-${ARCH}.sig" \
-    -o "${AGENT_TMP}.sig"
-
-log_info "Verifying agent signature..."
-if ! _verify_release_sig "$AGENT_TMP" "${AGENT_TMP}.sig"; then
-    log_error "Agent signature verification FAILED — aborting"
-    rm -f "$AGENT_TMP" "${AGENT_TMP}.sig"
-    exit 1
-fi
-rm -f "${AGENT_TMP}.sig"
-chmod 755 "$AGENT_TMP"
-mv "$AGENT_TMP" "$BINARY_PATH"
-log_ok "Agent binary installed: ${BINARY_PATH}"
-
-# Write version file
+# Agent binary already downloaded earlier — version file gets written below.
 printf '%s' "${LATEST_AGENT_TAG#agent@}" > "$BIN_DIR/lynx-agent-version"
 log_ok "Version: ${LATEST_AGENT_TAG#agent@}"
 
@@ -765,7 +760,7 @@ printf '%s' "$INTERNAL_TOKEN" > /etc/lynx/credentials/internal-token
 chmod 600 /etc/lynx/credentials/internal-token
 
 # Clear INTERNAL_TOKEN from memory
-INTERNAL_TOKEN="$(openssl rand -hex 32)"
+INTERNAL_TOKEN="$("$BINARY_PATH" gen-rand 32)"
 unset INTERNAL_TOKEN
 
 # --- Create systemd service -------------------------------------------------
@@ -886,8 +881,8 @@ chown lynx-agent:lynx-agent "$LYNX_WG_CONF"
 mkdir -p "$WG_DIR"
 ln -sf "$LYNX_WG_CONF" "$WG_CONF_LINK"
 
-AGENT_PRIV="$(openssl rand -hex 32)"  # overwrite
-PSK="$(openssl rand -hex 32)"
+AGENT_PRIV="$("$BINARY_PATH" gen-rand 32)"  # overwrite
+PSK="$("$BINARY_PATH" gen-rand 32)"
 unset AGENT_PRIV PSK
 
 # Bring up WireGuard

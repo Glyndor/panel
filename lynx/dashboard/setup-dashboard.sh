@@ -395,7 +395,7 @@ _require_cmd() {
 _apt_ensure podman         podman
 # podman-compose replaced by `lynx-compose` (Rust binary shipped with the release),
 # which removes the python3 / pip3 runtime dependency entirely.
-_apt_ensure openssl        openssl
+# openssl replaced by `lynx-dashboard-backend` subcommands for random/keypair/cert ops.
 _apt_ensure nft            nftables
 _apt_ensure wg             wireguard-tools
 _apt_ensure curl           curl
@@ -548,112 +548,19 @@ for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
     fi
 done
 
-# --- Generate secrets -------------------------------------------------------
+# --- Download core binaries -------------------------------------------------
 #
-# Secrets flow directly via pipe — never stored in files or shell history.
-# Subshells ensure vars don't leak to parent environment.
-# Passwords are overwritten in memory before the subshell exits.
+# The backend binary is needed BEFORE secret generation: every Lynx crypto
+# primitive (random tokens, Ed25519/X25519 keypairs, X.509 CA) is produced by
+# `lynx-dashboard-backend` subcommands so the host does not need `openssl`.
+# Binaries are signed with Ed25519; the public key is hardcoded below and the
+# private key lives only in GitHub Actions secrets.
 
-log_section "Generating secrets"
-
-log_info "Generating PostgreSQL root password..."
-(
-    PG_ROOT=$(openssl rand -hex 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root - >/dev/null
-    PG_ROOT="$(openssl rand -hex 32)"  # overwrite
-)
-
-log_info "Generating PostgreSQL app password and database URL..."
-(
-    PG_PASS=$(openssl rand -hex 32)
-    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass - >/dev/null
-    printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
-        | podman secret create lynx-dashboard-database-url - >/dev/null
-    PG_PASS="$(openssl rand -hex 32)"  # overwrite
-)
-
-log_info "Generating Valkey password and URL..."
-(
-    REDIS_PASS=$(openssl rand -hex 32)
-    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass - >/dev/null
-    printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
-        | podman secret create lynx-dashboard-redis-url - >/dev/null
-    REDIS_PASS="$(openssl rand -hex 32)"  # overwrite
-)
-
-log_info "Generating API token..."
-openssl rand -hex 32 | podman secret create lynx-dashboard-api-token - >/dev/null
-log_info "Generating KEK (Key Encryption Key)..."
-openssl rand -base64 32 | tr -d '\n' | podman secret create lynx-dashboard-kek - >/dev/null
-log_info "Generating pepper..."
-openssl rand -hex 32 | podman secret create lynx-dashboard-pepper - >/dev/null
-log_info "Generating JWT signing keypair (Ed25519)..."
-(
-    PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
-    PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
-)
-
-log_info "Generating JWT encryption keypair (X25519)..."
-(
-    PRIV_PEM=$(openssl genpkey -algorithm x25519 2>/dev/null)
-    PRIV_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public - >/dev/null
-)
-
-log_info "Generating CA keypair (Ed25519)..."
-(
-    PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
-    PRIV_SEED=$(printf '%s' "$PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    PUB_BYTES=$(printf '%s' "$PRIV_PEM" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
-)
-
-log_info "Generating X.509 CA certificate for mTLS (Ed25519, 100-year validity)..."
-(
-    # Generate Ed25519 CA key as PKCS8 DER, base64-encoded (format the backend expects).
-    CA_PRIV_PEM=$(openssl genpkey -algorithm ed25519 2>/dev/null)
-    CA_KEY_DER_B64=$(printf '%s' "$CA_PRIV_PEM" | openssl pkey -outform DER 2>/dev/null | base64 -w0)
-
-    # Self-signed CA cert: 36524 days ≈ 100 years; basicConstraints CA:true.
-    CA_CERT_PEM=$(printf '%s' "$CA_PRIV_PEM" | openssl req -new -x509 \
-        -key /dev/stdin \
-        -subj "/CN=Lynx Internal CA/O=Lynx" \
-        -days 36524 \
-        -addext "basicConstraints=critical,CA:true" 2>/dev/null)
-    CA_CERT_DER_B64=$(printf '%s' "$CA_CERT_PEM" | openssl x509 -inform PEM -outform DER 2>/dev/null | base64 -w0)
-
-    printf '%s' "$CA_CERT_DER_B64" | podman secret create lynx-dashboard-x509-ca-cert - >/dev/null
-    printf '%s' "$CA_KEY_DER_B64"  | podman secret create lynx-dashboard-x509-ca-key  - >/dev/null
-
-    # Overwrite secrets in memory before subshell exits.
-    CA_PRIV_PEM="$(openssl rand -hex 32)"
-    CA_KEY_DER_B64="$(openssl rand -hex 32)"
-    CA_CERT_DER_B64="$(openssl rand -hex 32)"
-)
-
-log_info "Generating setup token (one-time bootstrap)..."
-SETUP_TOKEN=$(openssl rand -hex 32)
-printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token - >/dev/null
-log_ok "All secrets generated — values purged from memory"
-
-# --- Download binaries from GitHub Releases ---------------------------------
-#
-# Binaries are signed with Ed25519. Public key is hardcoded in each binary
-# and verified here during install. The private key lives only in GitHub
-# Actions secrets — never in the repo.
-
-log_section "Downloading dashboard binaries"
+log_section "Downloading core binaries"
 
 GITHUB_REPO="Jaro-c/Lynx"
 RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
 
-# Detect architecture
 _ARCH=$(uname -m)
 case "$_ARCH" in
     x86_64)  ARCH="x86_64" ;;
@@ -665,7 +572,6 @@ case "$_ARCH" in
 esac
 log_info "Architecture: $ARCH"
 
-# Fetch latest dashboard release tag
 log_info "Fetching latest dashboard release..."
 LATEST_TAG=$(curl -fsSL \
     "https://api.github.com/repos/${GITHUB_REPO}/releases" \
@@ -685,7 +591,9 @@ if [[ -z "$LATEST_TAG" ]]; then
 fi
 log_ok "Latest release: ${LATEST_TAG}"
 
-RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_TAG}"
+# LYNX_RELEASE_BASE lets local-host testing point binary downloads at a private
+# HTTP server (e.g. `python3 -m http.server`) before a real release exists.
+RELEASE_BASE="${LYNX_RELEASE_BASE:-https://github.com/${GITHUB_REPO}/releases/download/${LATEST_TAG}}"
 BIN_DIR="/etc/lynx/bin"
 FRONTEND_DIR="/etc/lynx/frontend"
 
@@ -719,7 +627,6 @@ if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import E
     pip3 install --quiet cryptography
 fi
 
-# Download and verify backend binary
 log_info "Downloading backend binary..."
 BACKEND_FILE="${BIN_DIR}/lynx-dashboard-backend"
 BACKEND_TMP="${BIN_DIR}/lynx-dashboard-backend.new"
@@ -742,7 +649,6 @@ chmod 755 "$BACKEND_TMP"
 mv "$BACKEND_TMP" "$BACKEND_FILE"
 log_ok "Backend installed: ${BACKEND_FILE}"
 
-# Download and verify lynx-compose (replaces podman-compose / python-pip dependency)
 log_info "Downloading lynx-compose binary..."
 COMPOSE_FILE_BIN="${BIN_DIR}/lynx-compose"
 COMPOSE_TMP="${BIN_DIR}/lynx-compose.new"
@@ -764,6 +670,94 @@ rm -f "${COMPOSE_TMP}.sig"
 chmod 755 "$COMPOSE_TMP"
 mv "$COMPOSE_TMP" "$COMPOSE_FILE_BIN"
 log_ok "lynx-compose installed: ${COMPOSE_FILE_BIN}"
+
+# --- Generate secrets -------------------------------------------------------
+#
+# Secrets flow directly via pipe — never stored in files or shell history.
+# Subshells ensure vars don't leak to parent environment.
+# All cryptographic primitives are generated by the lynx-dashboard-backend
+# binary subcommands so the host does not need an `openssl` binary.
+
+log_section "Generating secrets"
+
+LB="$BACKEND_FILE"  # short alias for the rest of this section
+
+log_info "Generating PostgreSQL root password..."
+(
+    PG_ROOT=$("$LB" gen-rand 32)
+    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root - >/dev/null
+    PG_ROOT="$("$LB" gen-rand 32)"  # overwrite
+)
+
+log_info "Generating PostgreSQL app password and database URL..."
+(
+    PG_PASS=$("$LB" gen-rand 32)
+    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass - >/dev/null
+    printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
+        | podman secret create lynx-dashboard-database-url - >/dev/null
+    PG_PASS="$("$LB" gen-rand 32)"  # overwrite
+)
+
+log_info "Generating Valkey password and URL..."
+(
+    REDIS_PASS=$("$LB" gen-rand 32)
+    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass - >/dev/null
+    printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
+        | podman secret create lynx-dashboard-redis-url - >/dev/null
+    REDIS_PASS="$("$LB" gen-rand 32)"  # overwrite
+)
+
+log_info "Generating API token..."
+"$LB" gen-rand 32 | podman secret create lynx-dashboard-api-token - >/dev/null
+log_info "Generating KEK (Key Encryption Key)..."
+"$LB" gen-rand 32 --encoding base64 | podman secret create lynx-dashboard-kek - >/dev/null
+log_info "Generating pepper..."
+"$LB" gen-rand 32 | podman secret create lynx-dashboard-pepper - >/dev/null
+
+log_info "Generating JWT signing keypair (Ed25519)..."
+(
+    KEYPAIR=$("$LB" gen-ed25519)
+    PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
+    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
+)
+
+log_info "Generating JWT encryption keypair (X25519)..."
+(
+    KEYPAIR=$("$LB" gen-x25519)
+    PRIV_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '1p')
+    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public - >/dev/null
+)
+
+log_info "Generating CA keypair (Ed25519)..."
+(
+    KEYPAIR=$("$LB" gen-ed25519)
+    PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
+    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
+    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
+)
+
+log_info "Generating X.509 CA certificate for mTLS (Ed25519)..."
+(
+    CA_OUT=$("$LB" gen-x509-ca)
+    CA_CERT_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '1p')
+    CA_KEY_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '2p')
+    printf '%s' "$CA_CERT_DER_B64" | podman secret create lynx-dashboard-x509-ca-cert - >/dev/null
+    printf '%s' "$CA_KEY_DER_B64"  | podman secret create lynx-dashboard-x509-ca-key  - >/dev/null
+    CA_OUT="$("$LB" gen-rand 64)"
+    CA_CERT_DER_B64="$("$LB" gen-rand 64)"
+    CA_KEY_DER_B64="$("$LB" gen-rand 64)"
+)
+
+log_info "Generating setup token (one-time bootstrap)..."
+SETUP_TOKEN=$("$LB" gen-rand 32)
+printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token - >/dev/null
+log_ok "All secrets generated — values purged from memory"
+unset LB
 
 # Download and verify frontend binary + assets
 log_info "Downloading frontend binary..."
@@ -934,12 +928,11 @@ KEY="$CERTS_DIR/dashboard.key"
 _generate_cert() {
     local cn
     cn=$(hostname -f 2>/dev/null || hostname)
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-        -keyout "$KEY" -out "$CERT" \
-        -days 90 -nodes -sha256 \
-        -subj "/CN=${cn}/O=Lynx/OU=Dashboard" \
-        -addext "subjectAltName=DNS:${cn},IP:$(hostname -I | awk '{print $1}')" \
-        2>/dev/null
+    "$BACKEND_FILE" cert-self-signed \
+        --cn "$cn" \
+        --days 90 \
+        --cert-out "$CERT" \
+        --key-out "$KEY"
     chmod 600 "$KEY"
     chmod 644 "$CERT"
     log_ok "Certificate generated: $CERT (90 days, P-256)"
@@ -955,11 +948,11 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-    -keyout /etc/lynx/tls/dashboard.key -out /etc/lynx/tls/dashboard.crt \
-    -days 90 -nodes -sha256 \
-    -subj "/CN=$(hostname -f)/O=Lynx/OU=Dashboard" \
-    -addext "subjectAltName=DNS:$(hostname -f),IP:$(hostname -I | awk '"'"'{print $1}'"'"')" \
+ExecStart=/bin/bash -c '/etc/lynx/bin/lynx-dashboard-backend cert-self-signed \
+    --cn "$(hostname -f)" \
+    --days 90 \
+    --cert-out /etc/lynx/tls/dashboard.crt \
+    --key-out /etc/lynx/tls/dashboard.key \
     && chmod 600 /etc/lynx/tls/dashboard.key \
     && podman kill -s HUP lynx-dashboard-nginx'
 EOF
@@ -1108,7 +1101,7 @@ ListenPort = ${AGENT_WG_PORT}
 EOF
 
 chmod 600 "$WG_CONF"
-DASHBOARD_PRIV="$(openssl rand -hex 32)"  # overwrite in memory
+DASHBOARD_PRIV="$("$BACKEND_FILE" gen-rand 32)"  # overwrite in memory
 
 log_ok "WireGuard config written: $WG_CONF"
 log_ok "Dashboard WireGuard pubkey: ${DASHBOARD_PUB}"
@@ -1252,7 +1245,7 @@ log_ok "Container auto-start service enabled (lynx-dashboard-containers.service)
 log_section "Installation complete"
 
 HOST_IP=$(hostname -I | awk '{print $1}')
-CERT_EXPIRY=$(openssl x509 -in "$CERT" -noout -enddate | cut -d= -f2)
+CERT_EXPIRY=$("$BACKEND_FILE" cert-expiry "$CERT")
 
 echo ""
 echo -e "${GREEN}${BOLD}Lynx Dashboard is running!${RESET}"
@@ -1265,7 +1258,7 @@ echo -e "  Open this URL in your browser ${BOLD}(one-time use, expires in 24 hou
 echo -e "  ${CYAN}https://${HOST_IP}:${LISTEN_PORT}/register?setup_token=${SETUP_TOKEN}${RESET}"
 echo -e "${YELLOW}This is the only time the setup token is shown. Save the link now.${RESET}"
 echo ""
-SETUP_TOKEN="$(openssl rand -hex 32)"  # overwrite in memory
+SETUP_TOKEN="$("$BACKEND_FILE" gen-rand 32)"  # overwrite in memory
 unset SETUP_TOKEN
 echo ""
 echo -e "${BOLD}${YELLOW}=== WireGuard bootstrap data (copy for agent install) ===${RESET}"
@@ -1275,7 +1268,7 @@ echo -e "  ${BOLD}Preshared key:${RESET}       ${AGENT_PSK}"
 echo -e "${YELLOW}This is the only time the PSK is shown. Copy it now.${RESET}"
 echo ""
 # Clear PSK from memory after display
-AGENT_PSK="$(openssl rand -hex 32)"
+AGENT_PSK="$("$BACKEND_FILE" gen-rand 32)"
 unset AGENT_PSK DASHBOARD_PUB
 echo -e "${YELLOW}Next step:${RESET} Run the agent install script on this VPS to complete the local WireGuard tunnel."
 echo ""
