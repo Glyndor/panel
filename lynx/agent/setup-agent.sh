@@ -335,7 +335,8 @@ _apt_ensure nft            nftables
 _apt_ensure wg             wireguard-tools
 _apt_ensure curl           curl
 _apt_ensure python3        python3
-_apt_ensure pip3           python3-pip
+# python3-cryptography is the bootstrap Ed25519 verifier; installed below only
+# when missing. Drop python3-pip from the dependency set entirely.
 # newuidmap/newgidmap: required for rootless Podman user namespaces
 _apt_ensure newuidmap      uidmap
 # slirp4netns: required for rootless Podman networking (user-space TCP/IP stack)
@@ -496,12 +497,16 @@ esac
 log_info "Architecture: $ARCH"
 
 if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
-    log_info "Installing Python cryptography library..."
-    if command -v pip3 &>/dev/null; then
-        pip3 install --quiet cryptography
-    else
-        python3 -m pip install --quiet cryptography
-    fi
+    log_info "Installing python3-cryptography..."
+    case "$DISTRO" in
+        debian) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-cryptography -qq ;;
+        rhel)   { dnf install -y python3-cryptography 2>/dev/null || yum install -y python3-cryptography 2>/dev/null; } ;;
+        *)      log_error "Cannot install python3-cryptography on unknown distro"; exit 1 ;;
+    esac
+    python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" || {
+        log_error "python3-cryptography not importable after install"
+        exit 1
+    }
 fi
 
 log_info "Fetching latest agent release..."
