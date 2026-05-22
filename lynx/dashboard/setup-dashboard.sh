@@ -400,10 +400,10 @@ _apt_ensure nft            nftables
 _apt_ensure wg             wireguard-tools
 _apt_ensure curl           curl
 _apt_ensure python3        python3
-# python3-pip retained only for the Ed25519 signature-verification fallback when
-# the host python3-cryptography package is unavailable (Ubuntu Server has it,
-# minimal Debian may not).
-_apt_ensure pip3           python3-pip
+# python3-cryptography provides the Ed25519 signature verification needed for
+# binary downloads. Once binaries are installed all crypto runs in Rust; this is
+# only the bootstrap dependency. Use the apt-shipped package rather than pip3
+# so the host never needs python3-pip.
 _require_cmd systemctl "systemd required"
 _require_cmd free      "procps required"
 
@@ -621,10 +621,20 @@ except Exception as e:
 PYEOF
 }
 
-# Ensure cryptography lib is available for signature verification
+# Ensure cryptography lib is available for signature verification.
+# Prefer the distro-shipped python3-cryptography package over pip so the host
+# does not need python3-pip on minimal systems.
 if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null; then
-    log_info "Installing Python cryptography library..."
-    pip3 install --quiet cryptography
+    log_info "Installing python3-cryptography..."
+    case "$DISTRO" in
+        debian) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-cryptography -qq ;;
+        rhel)   { dnf install -y python3-cryptography 2>/dev/null || yum install -y python3-cryptography 2>/dev/null; } ;;
+        *)      log_error "Cannot install python3-cryptography on unknown distro"; exit 1 ;;
+    esac
+    python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" || {
+        log_error "python3-cryptography not importable after install"
+        exit 1
+    }
 fi
 
 log_info "Downloading backend binary..."
