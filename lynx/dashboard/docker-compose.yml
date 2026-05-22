@@ -51,8 +51,11 @@ services:
     container_name: lynx-dashboard-backend
     image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     command: ["/etc/lynx/bin/lynx-dashboard-backend"]
+    # Bind only to the WireGuard management interface — agents reach the backend
+    # via 10.100.0.1, never via the public IP. The frontend reaches it via the
+    # internal lynx-dashboard-app Podman network, not via the published port.
     ports:
-      - "8080:8080"
+      - "10.100.0.1:8080:8080"
     volumes:
       - /etc/lynx/bin:/etc/lynx/bin
       - /etc/lynx/frontend:/etc/lynx/frontend
