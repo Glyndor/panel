@@ -417,3 +417,139 @@ fn load_release_verify_key() -> Result<[u8; 32]> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("release verify key must be 32 bytes"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    // ---- validate_github_url (§12.8 — host allowlist) -----------------------
+
+    #[test]
+    fn github_https_allowed() {
+        assert!(
+            validate_github_url("https://github.com/foo/bar/releases/download/v1/file").is_ok()
+        );
+    }
+
+    #[test]
+    fn objects_githubusercontent_allowed() {
+        assert!(validate_github_url(
+            "https://objects.githubusercontent.com/github-production-release-asset/.../file"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn http_scheme_rejected() {
+        assert!(validate_github_url("http://github.com/foo/bar").is_err());
+    }
+
+    #[test]
+    fn other_domain_rejected() {
+        assert!(validate_github_url("https://example.com/file").is_err());
+    }
+
+    #[test]
+    fn github_subdomain_rejected() {
+        // raw.githubusercontent.com is NOT in the allowlist — only github.com and
+        // objects.githubusercontent.com.  Subdomain typo-squat must be rejected.
+        assert!(validate_github_url("https://raw.githubusercontent.com/foo/bar").is_err());
+    }
+
+    #[test]
+    fn lookalike_with_prefix_rejected() {
+        // A URL whose host CONTAINS "github.com" but doesn't START with the
+        // allowed prefix must be rejected (e.g. an attacker-controlled host
+        // "github.com.evil.example").
+        assert!(validate_github_url("https://github.com.evil.example/foo").is_err());
+    }
+
+    #[test]
+    fn empty_url_rejected() {
+        assert!(validate_github_url("").is_err());
+    }
+
+    // ---- is_blocked_ip (§12.8 — RFC1918 / loopback / link-local) ------------
+
+    fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(a, b, c, d))
+    }
+
+    #[test]
+    fn rfc1918_10_block() {
+        assert!(is_blocked_ip(&v4(10, 0, 0, 1)));
+        assert!(is_blocked_ip(&v4(10, 255, 255, 254)));
+    }
+
+    #[test]
+    fn rfc1918_172_block() {
+        assert!(is_blocked_ip(&v4(172, 16, 0, 1)));
+        assert!(is_blocked_ip(&v4(172, 31, 255, 254)));
+    }
+
+    #[test]
+    fn rfc1918_172_just_outside_passes() {
+        // 172.32.x.x is OUTSIDE RFC1918 (the block is 172.16/12 = 172.16.0.0–172.31.255.255).
+        assert!(!is_blocked_ip(&v4(172, 32, 0, 1)));
+        assert!(!is_blocked_ip(&v4(172, 15, 255, 254)));
+    }
+
+    #[test]
+    fn rfc1918_192_168_block() {
+        assert!(is_blocked_ip(&v4(192, 168, 0, 1)));
+        assert!(is_blocked_ip(&v4(192, 168, 255, 254)));
+    }
+
+    #[test]
+    fn loopback_v4_block() {
+        assert!(is_blocked_ip(&v4(127, 0, 0, 1)));
+        assert!(is_blocked_ip(&v4(127, 255, 255, 254)));
+    }
+
+    #[test]
+    fn link_local_v4_block() {
+        // 169.254.0.0/16 — metadata services on most clouds live here
+        assert!(is_blocked_ip(&v4(169, 254, 169, 254)));
+        assert!(is_blocked_ip(&v4(169, 254, 0, 1)));
+    }
+
+    #[test]
+    fn public_v4_allowed() {
+        assert!(!is_blocked_ip(&v4(8, 8, 8, 8)));
+        assert!(!is_blocked_ip(&v4(1, 1, 1, 1)));
+        assert!(!is_blocked_ip(&v4(140, 82, 121, 4))); // github.com sample
+    }
+
+    #[test]
+    fn loopback_v6_block() {
+        assert!(is_blocked_ip(&IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    }
+
+    #[test]
+    fn unique_local_v6_block() {
+        // fc00::/7 — IPv6 ULA (RFC4193), private network analogue of RFC1918
+        assert!(is_blocked_ip(&IpAddr::V6(Ipv6Addr::new(
+            0xfc00, 0, 0, 0, 0, 0, 0, 1
+        ))));
+        assert!(is_blocked_ip(&IpAddr::V6(Ipv6Addr::new(
+            0xfd00, 0, 0, 0, 0, 0, 0, 1
+        ))));
+    }
+
+    #[test]
+    fn link_local_v6_block() {
+        // fe80::/10 — IPv6 link-local
+        assert!(is_blocked_ip(&IpAddr::V6(Ipv6Addr::new(
+            0xfe80, 0, 0, 0, 0, 0, 0, 1
+        ))));
+    }
+
+    #[test]
+    fn public_v6_allowed() {
+        // 2606:4700:: is Cloudflare's public range (1.1.1.1)
+        assert!(!is_blocked_ip(&IpAddr::V6(Ipv6Addr::new(
+            0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111
+        ))));
+    }
+}
