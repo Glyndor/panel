@@ -490,10 +490,12 @@ async fn force_password_change_allows_change_password_endpoint() {
         .add_header("authorization", format!("Bearer {}", admin_token))
         .await;
 
-    // /auth/change-password must NOT be blocked — it's the only bypass
+    // /auth/change-password must NOT be blocked — it's the only bypass.
+    // It still does the IP check, so we replay the IP from login_user.
     let change_res = server
         .post("/auth/change-password")
         .add_header("authorization", format!("Bearer {}", access_token))
+        .add_header("x-real-ip", &user_ip)
         .json(&json!({
             "current_password": password,
             "new_password": "NewValidP@ss12!",
@@ -528,11 +530,13 @@ async fn force_password_change_cleared_after_change() {
         .add_header("authorization", format!("Bearer {}", admin_token))
         .await;
 
-    // Change password (clears flag + invalidates all sessions)
+    // Change password (clears flag + invalidates all sessions). Same IP check
+    // as /auth/me, so replay the login IP.
     let new_password = "NewValidP@ss12!";
     server
         .post("/auth/change-password")
         .add_header("authorization", format!("Bearer {}", access_token))
+        .add_header("x-real-ip", &user_ip)
         .json(&json!({
             "current_password": password,
             "new_password": new_password,
