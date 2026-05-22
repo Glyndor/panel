@@ -127,6 +127,17 @@ if [[ "$TOTAL_RAM_MB" -lt 512 ]]; then
 fi
 log_ok "RAM: ${TOTAL_RAM_MB} MB (minimum 512 MB satisfied)"
 
+# Disk pre-check (§1.4) — PostgreSQL image, agent binary, lynx-compose and
+# org/container data easily exceed 2 GB; bail out early instead of failing mid-
+# install when a `pull` or container start exhausts the volume.
+FREE_DISK_MB=$(df -BM --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
+    log_error "Insufficient disk: ${FREE_DISK_MB:-0} MB free on /, minimum 2048 MB required"
+    log_info  "Free up space (e.g. \`podman system prune -a\`) and re-run."
+    exit 1
+fi
+log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
+
 # --- Incompatible software --------------------------------------------------
 
 log_section "Checking for incompatible software"
@@ -459,8 +470,29 @@ echo ""
 read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
 echo ""
 
-if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" ]]; then
-    log_error "All four values are required."
+# Dashboard Ed25519 signing public key — required for the agent to verify
+# every dashboard-signed command (heartbeat ACK, container ops, nftables push,
+# update.self, ...).  Without it the agent rejects every command and enters
+# lockdown after the 5-minute heartbeat timeout.
+#
+# Local-agent path: if running on the same host as the dashboard, the install
+# script already wrote it to /etc/lynx/dashboard-sign-pubkey — auto-detect that
+# default to avoid an unnecessary prompt.
+DEFAULT_DASHBOARD_SIGN_PUBKEY=""
+if [[ -r /etc/lynx/dashboard-sign-pubkey ]]; then
+    DEFAULT_DASHBOARD_SIGN_PUBKEY=$(< /etc/lynx/dashboard-sign-pubkey)
+fi
+if [[ -n "$DEFAULT_DASHBOARD_SIGN_PUBKEY" ]]; then
+    read -rp "  Dashboard signing public key (Ed25519, base64) [default: detected]: " DASHBOARD_SIGN_PUBKEY
+    DASHBOARD_SIGN_PUBKEY="${DASHBOARD_SIGN_PUBKEY:-$DEFAULT_DASHBOARD_SIGN_PUBKEY}"
+else
+    read -rp "  Dashboard signing public key (Ed25519, base64): " DASHBOARD_SIGN_PUBKEY
+fi
+unset DEFAULT_DASHBOARD_SIGN_PUBKEY
+echo ""
+
+if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
+    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
     exit 1
 fi
 
@@ -751,6 +783,7 @@ cat > "$AGENT_CONF" << EOF
 AGENT_ID=${AGENT_ID}
 DATABASE_URL_FILE=/run/credentials/lynx-agent.service/database-url
 INTERNAL_TOKEN_FILE=/run/credentials/lynx-agent.service/internal-token
+DASHBOARD_VERIFY_KEY_FILE=/run/credentials/lynx-agent.service/lynx-dashboard-pubkey
 LISTEN_ADDR=127.0.0.1:${AGENT_PORT}
 RUST_LOG=info
 ${DASHBOARD_PORT_CONF}
@@ -767,6 +800,14 @@ chmod 600 /etc/lynx/credentials/internal-token
 # Clear INTERNAL_TOKEN from memory
 INTERNAL_TOKEN="$("$BINARY_PATH" gen-rand 32)"
 unset INTERNAL_TOKEN
+
+# Persist the dashboard's Ed25519 signing public key as a credential — every
+# command from the dashboard (heartbeat ACK, container ops, nftables push,
+# update.self, ...) is verified against this key.  Without it, the agent
+# rejects every command and enters lockdown after 5 minutes.
+printf '%s' "$DASHBOARD_SIGN_PUBKEY" > /etc/lynx/credentials/lynx-dashboard-pubkey
+chmod 600 /etc/lynx/credentials/lynx-dashboard-pubkey
+unset DASHBOARD_SIGN_PUBKEY
 
 # --- Create systemd service -------------------------------------------------
 
@@ -810,6 +851,7 @@ TimeoutStopSec=30s
 # Systemd credentials (tmpfs — never touches disk)
 LoadCredential=database-url:/etc/lynx/credentials/database-url
 LoadCredential=internal-token:/etc/lynx/credentials/internal-token
+LoadCredential=lynx-dashboard-pubkey:/etc/lynx/credentials/lynx-dashboard-pubkey
 
 # Minimal hardening — agent is a privileged system daemon (package management,
 # nftables, system user creation, binary self-update all require root).

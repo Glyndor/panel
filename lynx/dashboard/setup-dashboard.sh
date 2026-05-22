@@ -155,6 +155,17 @@ if [[ "$TOTAL_RAM_MB" -lt 512 ]]; then
 fi
 log_ok "RAM: ${TOTAL_RAM_MB} MB (minimum 512 MB satisfied)"
 
+# Disk pre-check (§1.4) — PostgreSQL container, Podman images and the agent
+# binaries together easily exceed 2 GB; bail out early instead of failing mid-
+# install when a `pull` or `cp` exhausts the volume.
+FREE_DISK_MB=$(df -BM --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
+    log_error "Insufficient disk: ${FREE_DISK_MB:-0} MB free on /, minimum 2048 MB required"
+    log_info  "Free up space (e.g. \`podman system prune -a\`) and re-run."
+    exit 1
+fi
+log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
+
 # --- Incompatible software --------------------------------------------------
 
 log_section "Checking for incompatible software"
@@ -725,13 +736,23 @@ log_info "Generating pepper..."
 "$LB" gen-rand 32 | podman secret create lynx-dashboard-pepper - >/dev/null
 
 log_info "Generating JWT signing keypair (Ed25519)..."
-(
+# The public half is also the agent's `DASHBOARD_VERIFY_KEY` — the agent verifies
+# every dashboard-signed command (including heartbeat ACK) against it.  Write it
+# to a well-known file (mode 644 — public material) so:
+#   - the agent install script on the same host can default to reading it
+#   - the operator can `cat` it to copy onto remote agents
+DASHBOARD_SIGN_PUBKEY_FILE="$LYNX_DIR/dashboard-sign-pubkey"
+DASHBOARD_SIGN_PUBKEY=""
+{
     KEYPAIR=$("$LB" gen-ed25519)
     PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
-    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
+    DASHBOARD_SIGN_PUBKEY=$(printf '%s' "$KEYPAIR" | sed -n '2p')
     printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
-)
+    printf '%s' "$DASHBOARD_SIGN_PUBKEY" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
+    printf '%s' "$DASHBOARD_SIGN_PUBKEY" > "$DASHBOARD_SIGN_PUBKEY_FILE"
+    chmod 644 "$DASHBOARD_SIGN_PUBKEY_FILE"
+    PRIV_SEED=$("$LB" gen-rand 32)  # overwrite in memory
+}
 
 log_info "Generating JWT encryption keypair (X25519)..."
 (
@@ -1272,14 +1293,16 @@ SETUP_TOKEN="$("$BACKEND_FILE" gen-rand 32)"  # overwrite in memory
 unset SETUP_TOKEN
 echo ""
 echo -e "${BOLD}${YELLOW}=== WireGuard bootstrap data (copy for agent install) ===${RESET}"
-echo -e "  ${BOLD}Dashboard endpoint:${RESET}  ${HOST_IP}:${AGENT_WG_PORT}"
-echo -e "  ${BOLD}Dashboard pubkey:${RESET}    ${DASHBOARD_PUB}"
-echo -e "  ${BOLD}Preshared key:${RESET}       ${AGENT_PSK}"
+echo -e "  ${BOLD}Dashboard endpoint:${RESET}      ${HOST_IP}:${AGENT_WG_PORT}"
+echo -e "  ${BOLD}Dashboard WG pubkey:${RESET}     ${DASHBOARD_PUB}"
+echo -e "  ${BOLD}Preshared key:${RESET}           ${AGENT_PSK}"
+echo -e "  ${BOLD}Dashboard signing key:${RESET}   ${DASHBOARD_SIGN_PUBKEY}"
 echo -e "${YELLOW}This is the only time the PSK is shown. Copy it now.${RESET}"
+echo -e "${YELLOW}The signing key is also at: ${DASHBOARD_SIGN_PUBKEY_FILE}${RESET}"
 echo ""
 # Clear PSK from memory after display
 AGENT_PSK="$("$BACKEND_FILE" gen-rand 32)"
-unset AGENT_PSK DASHBOARD_PUB
+unset AGENT_PSK DASHBOARD_PUB DASHBOARD_SIGN_PUBKEY
 echo -e "${YELLOW}Next step:${RESET} Run the agent install script on this VPS to complete the local WireGuard tunnel."
 echo ""
 echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Jaro-c/Lynx"

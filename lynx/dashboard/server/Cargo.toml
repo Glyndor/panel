@@ -55,6 +55,6 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
-axum-test = "20"
+axum-test = { version = "20", features = ["ws"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 futures-util = { workspace = true }
