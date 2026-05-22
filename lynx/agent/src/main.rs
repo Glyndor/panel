@@ -374,7 +374,12 @@ async fn main() -> anyhow::Result<()> {
         let mut ticker = interval(Duration::from_secs(30));
         loop {
             ticker.tick().await;
-            let elapsed = heartbeat_state.last_heartbeat.lock().unwrap().elapsed().as_secs();
+            let elapsed = heartbeat_state
+                .last_heartbeat
+                .lock()
+                .unwrap()
+                .elapsed()
+                .as_secs();
             if elapsed > HEARTBEAT_TIMEOUT_SECS && !lockdown_clone.load(Ordering::SeqCst) {
                 tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
                 lockdown_clone.store(true, Ordering::SeqCst);

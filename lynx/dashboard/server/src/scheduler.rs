@@ -101,7 +101,11 @@ fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
     let mut parts = v.splitn(3, '.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next().and_then(|p| p.split('-').next())?.parse().ok()?;
+    let patch = parts
+        .next()
+        .and_then(|p| p.split('-').next())?
+        .parse()
+        .ok()?;
     Some((major, minor, patch))
 }
 

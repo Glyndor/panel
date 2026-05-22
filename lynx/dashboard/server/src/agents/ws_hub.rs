@@ -97,15 +97,12 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
     // If this is the local agent reconnecting, reconcile WireGuard peers.
     // Covers the VPS-reboot case: wg-quick brings up the interface empty and the
     // backend needs to re-add every DB peer via the local agent.
-    let is_local = sqlx::query_scalar!(
-        "SELECT is_local_agent FROM agents WHERE id=$1",
-        agent_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(false);
+    let is_local = sqlx::query_scalar!("SELECT is_local_agent FROM agents WHERE id=$1", agent_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false);
     if is_local {
         let reconcile_state = state.clone();
         tokio::spawn(async move {
@@ -278,7 +275,9 @@ async fn handle_agent_message(
             let conn = state.agent_ws_conns.read().await.get(&agent_id).cloned();
             if let Some(conn) = conn {
                 let ack = serde_json::json!({"type": "agent.heartbeat_ack"});
-                if let Ok(signed) = crate::crypto::cmd::sign_command_system(&state.config, agent_id, "read", &ack) {
+                if let Ok(signed) =
+                    crate::crypto::cmd::sign_command_system(&state.config, agent_id, "read", &ack)
+                {
                     if let Ok(signed_val) = serde_json::to_value(&signed) {
                         let req_id = Uuid::now_v7();
                         let envelope = serde_json::json!({

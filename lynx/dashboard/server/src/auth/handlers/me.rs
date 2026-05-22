@@ -39,8 +39,16 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<imp
         .to_string();
     let expected_ip = hash::ip_hash(&client_ip);
     let expected_ua = hash::ua_hash(&client_ua);
-    let ip_ok: bool = claims.ip_hash.as_bytes().ct_eq(expected_ip.as_bytes()).into();
-    let ua_ok: bool = claims.ua_hash.as_bytes().ct_eq(expected_ua.as_bytes()).into();
+    let ip_ok: bool = claims
+        .ip_hash
+        .as_bytes()
+        .ct_eq(expected_ip.as_bytes())
+        .into();
+    let ua_ok: bool = claims
+        .ua_hash
+        .as_bytes()
+        .ct_eq(expected_ua.as_bytes())
+        .into();
     if !ip_ok | !ua_ok {
         let _ = session::revoke_access_jti(&mut redis, claims.jti).await;
         let _ = session::log_event(&state.db, claims.session_id, "intercepted").await;

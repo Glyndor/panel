@@ -230,5 +230,8 @@ async fn handle_message(state: &AppState, text: &str) -> Option<Value> {
 fn peek_inner_command_type(signed: &SignedCommand) -> Option<String> {
     let bytes = Base64UrlUnpadded::decode_vec(&signed.payload).ok()?;
     let val: Value = serde_json::from_slice(&bytes).ok()?;
-    val.get("command")?.get("type")?.as_str().map(|s| s.to_string())
+    val.get("command")?
+        .get("type")?
+        .as_str()
+        .map(|s| s.to_string())
 }
