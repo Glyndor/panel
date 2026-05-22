@@ -9,7 +9,7 @@ on:
       - "lynx/Cargo.lock"
       - ".github/workflows/dashboard-server.yml"
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "lynx/dashboard/server/**"
       - "lynx/Cargo.toml"
