@@ -60,14 +60,15 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
     });
 
     // Create broadcast channel for metric fan-out to frontend WS clients.
-    let (metric_tx, _) = broadcast::channel::<Arc<String>>(METRIC_BROADCAST_CAP);
+    // Wrapped in Arc so cleanup can use ptr_eq to avoid removing a newer session's entry.
+    let metric_tx = Arc::new(broadcast::channel::<Arc<String>>(METRIC_BROADCAST_CAP).0);
     {
         let mut map = state.agent_ws_conns.write().await;
-        map.insert(agent_id, conn);
+        map.insert(agent_id, conn.clone());
     }
     {
         let mut map = state.agent_metric_tx.write().await;
-        map.insert(agent_id, metric_tx);
+        map.insert(agent_id, metric_tx.clone());
     }
 
     let _ = sqlx::query!(
@@ -117,70 +118,92 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
         }
     }
 
-    {
-        let mut map = state.agent_ws_conns.write().await;
-        map.remove(&agent_id);
-    }
-    {
-        let mut map = state.agent_metric_tx.write().await;
-        map.remove(&agent_id);
+    // Guard cleanup with ptr_eq to prevent a stale handle_socket from clearing a newer
+    // session's state. Race: old socket closes → new socket connects + inserts its conn
+    // → old cleanup runs and unconditionally removes the new conn → heartbeat_acks and
+    // metric fan-out silently stop for the new session, causing lockdown after 5 min.
+    //
+    // Under the write lock: if the stored entry is a DIFFERENT Arc, a newer session has
+    // already taken ownership — skip all cleanup (DB status, events, heartbeat_lost).
+    // If the entry is ours or missing, run cleanup normally.
+    let is_current_session = {
+        let mut conns = state.agent_ws_conns.write().await;
+        match conns.get(&agent_id) {
+            Some(stored) if Arc::ptr_eq(stored, &conn) => {
+                conns.remove(&agent_id);
+                true
+            }
+            // A newer session replaced our entry — skip all cleanup for this session.
+            Some(_) => false,
+            // Entry already gone (e.g., shutdown_notify_all) — still clean up DB/events.
+            None => true,
+        }
+    };
+
+    if is_current_session {
+        {
+            let mut map = state.agent_metric_tx.write().await;
+            if let Some(stored) = map.get(&agent_id) {
+                if Arc::ptr_eq(stored, &metric_tx) {
+                    map.remove(&agent_id);
+                }
+            }
+        }
+
+        let _ = sqlx::query!("UPDATE agents SET status='offline' WHERE id=$1", agent_id)
+            .execute(&state.db)
+            .await;
+
+        let event_id = Uuid::now_v7();
+        let _ = sqlx::query!(
+            "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'disconnected', NULL)",
+            event_id, agent_id
+        )
+        .execute(&state.db)
+        .await;
+        broadcast_event(&state, agent_id, "disconnected", None);
+
+        let is_expected = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM agent_events
+                WHERE agent_id = $1
+                  AND event IN ('rebooting', 'updating')
+                  AND created_at > NOW() - INTERVAL '5 minutes'
+            ) AS "exists!"
+            "#,
+            agent_id
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+
+        if !is_expected {
+            let event_id = Uuid::now_v7();
+            let _ = sqlx::query!(
+                "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",
+                event_id,
+                agent_id
+            )
+            .execute(&state.db)
+            .await;
+            broadcast_event(&state, agent_id, "heartbeat_lost", None);
+            crate::alerts::fire(&state, "heartbeat_lost", None, agent_id).await;
+            tracing::warn!(agent_id = %agent_id, "heartbeat lost — agent WS disconnected unexpectedly");
+        }
+
+        tracing::info!(agent_id = %agent_id, "agent WS disconnected");
+    } else {
+        tracing::debug!(agent_id = %agent_id, "agent WS session ended — newer session already registered, skipping cleanup");
     }
 
-    // Cancel pending requests
+    // Always cancel this session's pending requests regardless of ownership.
     {
         let mut pending_map = pending.lock().await;
         for (_, tx) in pending_map.drain() {
             let _ = tx.send(json!({"ok": false, "error": "agent disconnected"}));
         }
     }
-
-    let _ = sqlx::query!("UPDATE agents SET status='offline' WHERE id=$1", agent_id)
-        .execute(&state.db)
-        .await;
-
-    // Record disconnect event + push to browser WS sessions.
-    let event_id = Uuid::now_v7();
-    let _ = sqlx::query!(
-        "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'disconnected', NULL)",
-        event_id, agent_id
-    )
-    .execute(&state.db)
-    .await;
-    broadcast_event(&state, agent_id, "disconnected", None);
-
-    // Fire heartbeat_lost alert for unexpected disconnects.
-    // Expected disconnects (reboot, update) insert a grace-period event first —
-    // skip the alert if one exists within the last 5 minutes.
-    let is_expected = sqlx::query_scalar!(
-        r#"
-        SELECT EXISTS(
-            SELECT 1 FROM agent_events
-            WHERE agent_id = $1
-              AND event IN ('rebooting', 'updating')
-              AND created_at > NOW() - INTERVAL '5 minutes'
-        ) AS "exists!"
-        "#,
-        agent_id
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
-
-    if !is_expected {
-        let event_id = Uuid::now_v7();
-        let _ = sqlx::query!(
-            "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",
-            event_id,
-            agent_id
-        )
-        .execute(&state.db)
-        .await;
-        broadcast_event(&state, agent_id, "heartbeat_lost", None);
-        crate::alerts::fire(&state, "heartbeat_lost", None, agent_id).await;
-        tracing::warn!(agent_id = %agent_id, "heartbeat lost — agent WS disconnected unexpectedly");
-    }
-
-    tracing::info!(agent_id = %agent_id, "agent WS disconnected");
 }
 
 #[derive(Deserialize)]
