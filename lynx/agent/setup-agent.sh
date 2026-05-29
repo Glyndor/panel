@@ -940,6 +940,26 @@ chown lynx-agent:lynx-agent "$LYNX_WG_CONF"
 mkdir -p "$WG_DIR"
 ln -sf "$LYNX_WG_CONF" "$WG_CONF_LINK"
 
+# For local agent (same VPS as dashboard): add this agent as a peer in the
+# dashboard's WireGuard config so the tunnel is fully bi-directional immediately.
+# PSK and AGENT_PUB are available here; PSK is zeroized after this block.
+_DASH_WG_CONF="/etc/wireguard/wg-lynx-dash.conf"
+if [[ -f "$_DASH_WG_CONF" ]]; then
+    # Remove old placeholder comment + any existing [Peer] blocks for this agent
+    sed -i '/^# Peer block added by agent/,/^# AllowedIPs.*$/d' "$_DASH_WG_CONF" 2>/dev/null || true
+    sed -i '/^\[Peer\]/,/^[[:space:]]*$/{/PublicKey.*'"$AGENT_PUB"'/,/^[[:space:]]*$/d}' "$_DASH_WG_CONF" 2>/dev/null || true
+    # Append real peer block
+    printf '\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
+        "$AGENT_PUB" "$PSK" "$AGENT_WG_IP" >> "$_DASH_WG_CONF"
+    # Live-update the running WireGuard interface (no restart needed)
+    if wg set wg-lynx-dash peer "$AGENT_PUB" preshared-key <(printf '%s' "$PSK") allowed-ips "$AGENT_WG_IP/32" 2>/dev/null; then
+        log_ok "Agent added as peer to dashboard WireGuard (wg-lynx-dash)"
+    else
+        log_warn "Could not live-add peer to wg-lynx-dash — add agent pubkey to dashboard manually"
+    fi
+fi
+unset _DASH_WG_CONF
+
 AGENT_PRIV="$("$BINARY_PATH" gen-rand 32)"  # overwrite
 PSK="$("$BINARY_PATH" gen-rand 32)"
 unset AGENT_PRIV PSK
