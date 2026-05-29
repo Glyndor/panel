@@ -952,9 +952,11 @@ if [[ -f "$_DASH_WG_CONF" ]]; then
     printf '\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
         "$AGENT_PUB" "$PSK" "$AGENT_WG_IP" >> "$_DASH_WG_CONF"
     # Live-update the running WireGuard interface (no restart needed)
-    wg set wg-lynx-dash peer "$AGENT_PUB" preshared-key <(printf '%s' "$PSK") allowed-ips "$AGENT_WG_IP/32" 2>/dev/null && \
-        log_ok "Agent added as peer to dashboard WireGuard (wg-lynx-dash)" || \
+    if wg set wg-lynx-dash peer "$AGENT_PUB" preshared-key <(printf '%s' "$PSK") allowed-ips "$AGENT_WG_IP/32" 2>/dev/null; then
+        log_ok "Agent added as peer to dashboard WireGuard (wg-lynx-dash)"
+    else
         log_warn "Could not live-add peer to wg-lynx-dash — add agent pubkey to dashboard manually"
+    fi
 fi
 unset _DASH_WG_CONF
 
