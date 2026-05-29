@@ -103,9 +103,12 @@ _cleanup_existing() {
         | grep -E 'postgres_data|frontend_next_cache' \
         | xargs -r podman volume rm 2>/dev/null || true
 
-    # Remove networks
+    # Remove networks. Also purge stale aardvark-dns config files so the
+    # next network create starts with clean DNS state (stale files cause the
+    # DNS gateway to reference the old subnet, breaking hostname resolution).
     for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
         podman network rm "$net" 2>/dev/null || true
+        rm -f "/run/containers/networks/aardvark-dns/$net" 2>/dev/null || true
     done
 
     # Remove known secrets then sweep any remaining lynx-* secrets
@@ -136,9 +139,10 @@ _cleanup_existing() {
     rm -f /etc/systemd/system/lynx-dashboard-rotate-certs.{service,timer}
     systemctl daemon-reload
 
-    # Flush nftables table so container DNS queries are not blocked during reinstall
+    # Flush nftables tables managed by the dashboard install
     nft delete table inet lynx-dashboard 2>/dev/null || true
     rm -f /etc/nftables-lynx-dashboard.conf
+    nft delete table inet lynx-agent 2>/dev/null || true
 
     rm -rf "$LYNX_DIR"
     log_ok "Cleanup complete"
@@ -152,6 +156,13 @@ for _ctr in lynx-dashboard-postgres lynx-dashboard-valkey lynx-dashboard-backend
     podman stop --time 5 "$_ctr" 2>/dev/null || true
     podman rm -f "$_ctr" 2>/dev/null || true
 done
+# Purge stale aardvark-dns config files for dashboard networks. When containers
+# are force-removed, aardvark-dns sometimes retains phantom entries that cause
+# the next network create to use a stale gateway IP, breaking DNS resolution.
+for _net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
+    rm -f "/run/containers/networks/aardvark-dns/$_net" 2>/dev/null || true
+done
+unset _net
 
 # --- RAM check --------------------------------------------------------------
 
@@ -1111,6 +1122,31 @@ wg-quick up wg-lynx-dash
 systemctl enable "wg-quick@wg-lynx-dash"
 log_ok "WireGuard interface up: wg-lynx-dash (10.100.0.1/16)"
 
+# Ensure DNS from dashboard containers is accepted.
+# The agent binary (if already running from a prior install) regenerates
+# table inet lynx-agent on startup and omits the DNS accept rules from the
+# input chain — blocking aardvark-dns from dashboard containers.
+# Insert the rules BEFORE the trailing drop so they survive any dynamic
+# chain updates the agent makes during normal operation.
+_nft_ensure_container_dns() {
+    # No-op if table/chain doesn't exist yet (first install, bootstrap applies it below)
+    nft list chain inet lynx-agent lynx-base &>/dev/null || return 0
+    # If rules already present, skip
+    nft list chain inet lynx-agent lynx-base 2>/dev/null | grep -q 'iifname.*podman.*dport 53.*accept' && return 0
+    # Insert just before the terminal drop rule — find its handle
+    local drop_handle
+    drop_handle=$(nft -a list chain inet lynx-agent lynx-base 2>/dev/null | grep '^\s*drop' | grep -o 'handle [0-9]*' | head -1 | awk '{print $2}')
+    if [[ -n "$drop_handle" ]]; then
+        nft insert rule inet lynx-agent lynx-base handle "$drop_handle" iifname "podman*" udp dport 53 accept 2>/dev/null || true
+        nft insert rule inet lynx-agent lynx-base handle "$drop_handle" iifname "podman*" tcp dport 53 accept 2>/dev/null || true
+    else
+        nft add rule inet lynx-agent lynx-base iifname "podman*" udp dport 53 accept 2>/dev/null || true
+        nft add rule inet lynx-agent lynx-base iifname "podman*" tcp dport 53 accept 2>/dev/null || true
+    fi
+    log_ok "DNS rules injected into lynx-agent.lynx-base for container aardvark-dns"
+}
+_nft_ensure_container_dns
+
 # 3. Backend
 log_info "Starting backend..."
 "$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d backend
@@ -1381,11 +1417,33 @@ EOF
 nft -f /etc/nftables-lynx-agent.conf
 log_ok "nftables rules applied (ports: 22 rate-limited, 19443, 51820 UDP)"
 
+# Dashboard-specific nftables table — separate from table inet lynx-agent so the
+# agent binary never overwrites these rules. The agent manages only lynx-agent;
+# this table persists across agent nftables reloads.
+# Without this, aardvark-dns (on podman* bridges) is unreachable from containers
+# after the agent binary starts and re-renders its ruleset without DNS accept rules.
+cat > /etc/nftables-lynx-dashboard.conf << 'NFT_DASH'
+destroy table inet lynx-dashboard
+table inet lynx-dashboard {
+    chain allow-container-dns {
+        type filter hook input priority filter - 1; policy accept;
+        iifname "podman*" udp dport 53 accept
+        iifname "podman*" tcp dport 53 accept
+    }
+}
+NFT_DASH
+
+nft -f /etc/nftables-lynx-dashboard.conf
+log_ok "Dashboard nftables (container DNS) applied"
+
 # Persist across reboots — migrate away from old lynx-dashboard include
 if [[ -f /etc/nftables.conf ]]; then
     sed -i '/nftables-lynx-dashboard/d' /etc/nftables.conf
     if ! grep -q "nftables-lynx-agent" /etc/nftables.conf; then
         echo 'include "/etc/nftables-lynx-agent.conf"' >> /etc/nftables.conf
+    fi
+    if ! grep -q "nftables-lynx-dashboard" /etc/nftables.conf; then
+        echo 'include "/etc/nftables-lynx-dashboard.conf"' >> /etc/nftables.conf
     fi
 fi
 systemctl enable nftables 2>/dev/null || true
