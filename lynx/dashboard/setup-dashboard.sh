@@ -116,7 +116,8 @@ _cleanup_existing() {
                   lynx-dashboard-jwt-enc-private lynx-dashboard-jwt-enc-public \
                   lynx-dashboard-ca-private lynx-dashboard-ca-public \
                   lynx-dashboard-x509-ca-cert lynx-dashboard-x509-ca-key \
-                  lynx-dashboard-setup-token; do
+                  lynx-dashboard-setup-token \
+                  lynx-dashboard-local-agent-psk; do
         podman secret rm "$secret" 2>/dev/null || true
     done
     podman secret ls --format '{{.Name}}' 2>/dev/null | grep '^lynx-' | xargs -r podman secret rm 2>/dev/null || true
@@ -241,9 +242,20 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables package must NOT be removed — netavark requires the iptables binary
-# even when configured with firewall_driver = nftables. What is incompatible is
-# software that manages iptables rules (Docker, ufw, firewalld), not the package.
+# iptables — incompatible with Lynx when netavark 1.10+ uses the nftables driver.
+# Any iptables binary on the host signals an external firewall manager or a stale
+# package. Remove it; netavark 1.15.2 + firewall_driver=nftables does not call it.
+if command -v iptables &>/dev/null; then
+    _incompatible_found=true
+    log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
+    log_info "  Reason: ${_REASON_FW}"
+    case "$DISTRO" in
+        debian) apt-get purge -y iptables 2>/dev/null || true ;;
+        rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
+        *)      log_warn "Unknown distro — remove iptables manually" ;;
+    esac
+    log_ok "Removed: iptables"
+fi
 
 if $_incompatible_found; then
     # Flush residual kernel rules left behind by Docker / ufw / iptables.
