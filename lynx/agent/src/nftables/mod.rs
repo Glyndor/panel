@@ -123,6 +123,16 @@ fn render_ruleset(r: &Ruleset) -> String {
         None => String::new(),
     };
 
+    // Management plane rules — dashboard VPS only.
+    // Agents (10.100.0.x) need to reach the backend on port 8080; agent-to-agent
+    // traffic within the management subnet must be blocked; and the dashboard itself
+    // (10.100.0.1) is allowed unconditionally on its own WireGuard interface.
+    let management_plane_rules = if r.dashboard_port.is_some() {
+        "\n        # Allow agents -> dashboard backend (management plane)\n        ip saddr 10.100.0.0/16 ip daddr 10.100.0.1 tcp dport 8080 ct state new accept\n\n        # Block agent-to-agent traffic within management subnet\n        ip saddr 10.100.0.0/16 ip daddr 10.100.0.0/16 drop\n\n        # Dashboard WireGuard interface can reach itself\n        ip saddr 10.100.0.1 accept\n".to_string()
+    } else {
+        String::new()
+    };
+
     // Container DNS (aardvark-dns on Netavark bridges) — dashboard VPS only.
     // Rootless org containers on remote agents use user-namespace networking
     // that doesn't hit the host INPUT chain for DNS.
@@ -172,7 +182,7 @@ table inet {TABLE} {{
         udp dport {wg} accept
 
         # Dashboard backend (management plane — WireGuard only)
-        ip saddr 10.100.0.1 accept
+{management_plane}
 {dashboard_port}
 {dashboard_dns}
         # Run global and local rule chains
@@ -201,6 +211,7 @@ table inet {TABLE} {{
 "#,
         TABLE = TABLE,
         wg = r.wireguard_port,
+        management_plane = management_plane_rules,
         dashboard_port = dashboard_port_rule,
         dashboard_dns = dashboard_dns_rules,
         container_forward = container_forward_rules,
