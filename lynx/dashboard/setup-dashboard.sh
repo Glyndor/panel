@@ -950,7 +950,6 @@ services:
       - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ${LYNX_DB_INIT_DIR}:/docker-entrypoint-initdb.d:ro
       - /etc/lynx/secrets/lynx-dashboard-pg-root:/run/secrets/lynx-dashboard-pg-root:ro
       - /etc/lynx/secrets/lynx-dashboard-pg-pass:/run/secrets/lynx-dashboard-pg-pass:ro
     healthcheck:
@@ -998,36 +997,6 @@ COMPOSE_EOF
 chmod 644 "$COMPOSE_FILE"
 log_ok "docker-compose.yml written: ${COMPOSE_FILE}"
 
-# --- Write init SQL (embedded in script) ------------------------------------
-
-LYNX_DB_INIT_DIR="/etc/lynx/db/init"
-mkdir -p "$LYNX_DB_INIT_DIR"
-chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
-
-# Embed the password directly — the postgres user inside the container cannot
-# read root:root 600 files via \set backtick, so we inline the value here.
-_PG_PASS=$(cat "$SECRETS_DIR/lynx-dashboard-pg-pass")
-
-cat > "$LYNX_DB_INIT_DIR/01-init.sql" << SQL_EOF
--- Creates isolated app user with minimal privileges.
--- Runs once on first PostgreSQL container startup via /docker-entrypoint-initdb.d/.
-CREATE USER lynx_dashboard_app WITH PASSWORD '${_PG_PASS}' NOSUPERUSER NOCREATEDB NOCREATEROLE;
-
-GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
-
-\connect lynx_dashboard
-
-GRANT USAGE, CREATE ON SCHEMA public TO lynx_dashboard_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_dashboard_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO lynx_dashboard_app;
-SQL_EOF
-
-unset _PG_PASS
-chmod 600 "$LYNX_DB_INIT_DIR/01-init.sql"
-log_ok "Init SQL written: ${LYNX_DB_INIT_DIR}/01-init.sql"
-export LYNX_DB_INIT_DIR
 printf '%s' "${LATEST_TAG#dashboard@}" > "$BIN_DIR/lynx-dashboard-version"
 log_ok "Version: ${LATEST_TAG#dashboard@}"
 
@@ -1063,6 +1032,28 @@ for i in $(seq 1 30); do
     fi
     sleep 2
 done
+
+# Initialize app user and privileges. Runs every install — idempotent.
+# Direct psql avoids the docker-entrypoint-initdb.d mechanism which only runs
+# on a completely empty PGDATA directory and silently skips on reinstalls.
+log_info "Initializing PostgreSQL app user..."
+_PG_PASS=$(cat "$SECRETS_DIR/lynx-dashboard-pg-pass")
+podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard << SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'lynx_dashboard_app') THEN
+    CREATE USER lynx_dashboard_app WITH NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+END
+\$\$;
+ALTER USER lynx_dashboard_app PASSWORD '${_PG_PASS}';
+GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
+GRANT USAGE, CREATE ON SCHEMA public TO lynx_dashboard_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_dashboard_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO lynx_dashboard_app;
+SQL
+unset _PG_PASS
+log_ok "PostgreSQL app user initialized"
 
 # 2. Valkey
 log_info "Starting Valkey..."
@@ -1135,27 +1126,6 @@ for i in $(seq 1 40); do
     sleep 3
 done
 
-# Resync PostgreSQL app user password to match the Podman secret.
-# The backend may run a 90-day scheduled rotation on first startup (no prior
-# rotation record in a fresh DB) and partially update the PostgreSQL password
-# without updating the Podman secret (the `podman` binary is not available
-# inside the Alpine container). The rotation runs ~30s after startup; we wait
-# 15s after "healthy" to ensure the rotation has finished before we re-anchor
-# PostgreSQL to the value in the Podman secret.
-log_info "Waiting for any startup key rotation to settle..."
-sleep 15
-log_info "Synchronizing PostgreSQL app user password..."
-_PG_PASS_SYNC=$(podman secret inspect lynx-dashboard-pg-pass --showsecret --format '{{.SecretData}}' 2>/dev/null)
-if [[ -n "$_PG_PASS_SYNC" ]]; then
-    if printf "ALTER USER lynx_dashboard_app PASSWORD '%s';\n" "$_PG_PASS_SYNC" \
-        | podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard \
-        >/dev/null 2>&1; then
-        log_ok "PostgreSQL app user password synchronized"
-    else
-        log_warn "Could not sync PostgreSQL password (non-critical — backend may reconnect)"
-    fi
-fi
-unset _PG_PASS_SYNC
 
 # 4. Frontend
 log_info "Starting frontend..."
