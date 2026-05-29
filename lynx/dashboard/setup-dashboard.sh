@@ -692,91 +692,90 @@ log_section "Generating secrets"
 
 LB="$BACKEND_FILE"  # short alias for the rest of this section
 
+# Secrets are stored as files in /etc/lynx/secrets/ (root:root, 600).
+# Containers access them via bind mounts at /run/secrets/<name>.
+# This is equivalent security to Podman secret store (both are files on disk,
+# both root-only). Using files avoids Bollard's lack of external secret support.
+SECRETS_DIR="/etc/lynx/secrets"
+mkdir -p "$SECRETS_DIR"
+chmod 700 "$SECRETS_DIR"
+
+_write_secret() {
+    local name="$1" value="$2"
+    printf '%s' "$value" > "$SECRETS_DIR/$name"
+    chmod 600 "$SECRETS_DIR/$name"
+}
+
 log_info "Generating PostgreSQL root password..."
 (
     PG_ROOT=$("$LB" gen-rand 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root - >/dev/null
-    PG_ROOT="$("$LB" gen-rand 32)"  # overwrite
+    _write_secret lynx-dashboard-pg-root "$PG_ROOT"
+    PG_ROOT="$("$LB" gen-rand 32)"
 )
 
 log_info "Generating PostgreSQL app password and database URL..."
 (
     PG_PASS=$("$LB" gen-rand 32)
-    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass - >/dev/null
-    printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
-        | podman secret create lynx-dashboard-database-url - >/dev/null
-    PG_PASS="$("$LB" gen-rand 32)"  # overwrite
+    _write_secret lynx-dashboard-pg-pass "$PG_PASS"
+    _write_secret lynx-dashboard-database-url \
+        "postgresql://lynx_dashboard_app:${PG_PASS}@lynx-dashboard-postgres:5432/lynx_dashboard"
+    PG_PASS="$("$LB" gen-rand 32)"
 )
 
 log_info "Generating Valkey password and URL..."
 (
     REDIS_PASS=$("$LB" gen-rand 32)
-    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass - >/dev/null
-    printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
-        | podman secret create lynx-dashboard-redis-url - >/dev/null
-    REDIS_PASS="$("$LB" gen-rand 32)"  # overwrite
+    _write_secret lynx-dashboard-redis-pass "$REDIS_PASS"
+    _write_secret lynx-dashboard-redis-url "redis://:${REDIS_PASS}@lynx-dashboard-valkey:6379"
+    REDIS_PASS="$("$LB" gen-rand 32)"
 )
 
 log_info "Generating API token..."
-"$LB" gen-rand 32 | podman secret create lynx-dashboard-api-token - >/dev/null
+_write_secret lynx-dashboard-api-token "$("$LB" gen-rand 32)"
 log_info "Generating KEK (Key Encryption Key)..."
-"$LB" gen-rand 32 --encoding base64 | podman secret create lynx-dashboard-kek - >/dev/null
+_write_secret lynx-dashboard-kek "$("$LB" gen-rand 32 --encoding base64)"
 log_info "Generating pepper..."
-"$LB" gen-rand 32 | podman secret create lynx-dashboard-pepper - >/dev/null
+_write_secret lynx-dashboard-pepper "$("$LB" gen-rand 32)"
 
 log_info "Generating JWT signing keypair (Ed25519)..."
-# The public half is also the agent's `DASHBOARD_VERIFY_KEY` — the agent verifies
-# every dashboard-signed command (including heartbeat ACK) against it.  Write it
-# to a well-known file (mode 644 — public material) so:
-#   - the agent install script on the same host can default to reading it
-#   - the operator can `cat` it to copy onto remote agents
 DASHBOARD_SIGN_PUBKEY_FILE="$LYNX_DIR/dashboard-sign-pubkey"
 DASHBOARD_SIGN_PUBKEY=""
 {
     KEYPAIR=$("$LB" gen-ed25519)
     PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
     DASHBOARD_SIGN_PUBKEY=$(printf '%s' "$KEYPAIR" | sed -n '2p')
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
-    printf '%s' "$DASHBOARD_SIGN_PUBKEY" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
+    _write_secret lynx-dashboard-jwt-sign-private "$PRIV_SEED"
+    _write_secret lynx-dashboard-jwt-sign-public "$DASHBOARD_SIGN_PUBKEY"
     printf '%s' "$DASHBOARD_SIGN_PUBKEY" > "$DASHBOARD_SIGN_PUBKEY_FILE"
     chmod 644 "$DASHBOARD_SIGN_PUBKEY_FILE"
-    PRIV_SEED=$("$LB" gen-rand 32)  # overwrite in memory
+    PRIV_SEED=$("$LB" gen-rand 32)
 }
 
 log_info "Generating JWT encryption keypair (X25519)..."
 (
     KEYPAIR=$("$LB" gen-x25519)
-    PRIV_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '1p')
-    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
-    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public - >/dev/null
+    _write_secret lynx-dashboard-jwt-enc-private "$(printf '%s' "$KEYPAIR" | sed -n '1p')"
+    _write_secret lynx-dashboard-jwt-enc-public  "$(printf '%s' "$KEYPAIR" | sed -n '2p')"
 )
 
 log_info "Generating CA keypair (Ed25519)..."
 (
     KEYPAIR=$("$LB" gen-ed25519)
-    PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
-    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
+    _write_secret lynx-dashboard-ca-private "$(printf '%s' "$KEYPAIR" | sed -n '1p')"
+    _write_secret lynx-dashboard-ca-public  "$(printf '%s' "$KEYPAIR" | sed -n '2p')"
 )
 
 log_info "Generating X.509 CA certificate for mTLS (Ed25519)..."
 (
     CA_OUT=$("$LB" gen-x509-ca)
-    CA_CERT_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '1p')
-    CA_KEY_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '2p')
-    printf '%s' "$CA_CERT_DER_B64" | podman secret create lynx-dashboard-x509-ca-cert - >/dev/null
-    printf '%s' "$CA_KEY_DER_B64"  | podman secret create lynx-dashboard-x509-ca-key  - >/dev/null
-    CA_OUT="$("$LB" gen-rand 64)"
-    CA_CERT_DER_B64="$("$LB" gen-rand 64)"
-    CA_KEY_DER_B64="$("$LB" gen-rand 64)"
+    _write_secret lynx-dashboard-x509-ca-cert "$(printf '%s' "$CA_OUT" | sed -n '1p')"
+    _write_secret lynx-dashboard-x509-ca-key  "$(printf '%s' "$CA_OUT" | sed -n '2p')"
 )
 
 log_info "Generating setup token (one-time bootstrap)..."
 SETUP_TOKEN=$("$LB" gen-rand 32)
-printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token - >/dev/null
-log_ok "All secrets generated — values purged from memory"
+_write_secret lynx-dashboard-setup-token "$SETUP_TOKEN"
+log_ok "All secrets generated"
 unset LB
 
 # Download and verify frontend binary + assets
@@ -882,10 +881,6 @@ services:
     command: ["/etc/lynx/bin/lynx-dashboard-backend"]
     ports:
       - "10.100.0.1:8080:8080"
-    volumes:
-      - /etc/lynx/bin:/etc/lynx/bin
-      - /etc/lynx/frontend:/etc/lynx/frontend
-      - /run/podman/podman.sock:/run/podman/podman.sock
     environment:
       - DATABASE_URL_FILE=/run/secrets/lynx-dashboard-database-url
       - REDIS_URL_FILE=/run/secrets/lynx-dashboard-redis-url
@@ -902,21 +897,24 @@ services:
       - X509_CA_KEY_FILE=/run/secrets/lynx-dashboard-x509-ca-key
       - SETUP_TOKEN_FILE=/run/secrets/lynx-dashboard-setup-token
       - RUST_LOG=${RUST_LOG:-info}
-    secrets:
-      - lynx-dashboard-database-url
-      - lynx-dashboard-redis-url
-      - lynx-dashboard-api-token
-      - lynx-dashboard-kek
-      - lynx-dashboard-pepper
-      - lynx-dashboard-jwt-sign-private
-      - lynx-dashboard-jwt-sign-public
-      - lynx-dashboard-jwt-enc-private
-      - lynx-dashboard-jwt-enc-public
-      - lynx-dashboard-ca-private
-      - lynx-dashboard-ca-public
-      - lynx-dashboard-x509-ca-cert
-      - lynx-dashboard-x509-ca-key
-      - lynx-dashboard-setup-token
+    volumes:
+      - /etc/lynx/bin:/etc/lynx/bin
+      - /etc/lynx/frontend:/etc/lynx/frontend
+      - /run/podman/podman.sock:/run/podman/podman.sock
+      - /etc/lynx/secrets/lynx-dashboard-database-url:/run/secrets/lynx-dashboard-database-url:ro
+      - /etc/lynx/secrets/lynx-dashboard-redis-url:/run/secrets/lynx-dashboard-redis-url:ro
+      - /etc/lynx/secrets/lynx-dashboard-api-token:/run/secrets/lynx-dashboard-api-token:ro
+      - /etc/lynx/secrets/lynx-dashboard-kek:/run/secrets/lynx-dashboard-kek:ro
+      - /etc/lynx/secrets/lynx-dashboard-pepper:/run/secrets/lynx-dashboard-pepper:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-sign-private:/run/secrets/lynx-dashboard-jwt-sign-private:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-sign-public:/run/secrets/lynx-dashboard-jwt-sign-public:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-enc-private:/run/secrets/lynx-dashboard-jwt-enc-private:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-enc-public:/run/secrets/lynx-dashboard-jwt-enc-public:ro
+      - /etc/lynx/secrets/lynx-dashboard-ca-private:/run/secrets/lynx-dashboard-ca-private:ro
+      - /etc/lynx/secrets/lynx-dashboard-ca-public:/run/secrets/lynx-dashboard-ca-public:ro
+      - /etc/lynx/secrets/lynx-dashboard-x509-ca-cert:/run/secrets/lynx-dashboard-x509-ca-cert:ro
+      - /etc/lynx/secrets/lynx-dashboard-x509-ca-key:/run/secrets/lynx-dashboard-x509-ca-key:ro
+      - /etc/lynx/secrets/lynx-dashboard-setup-token:/run/secrets/lynx-dashboard-setup-token:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -941,12 +939,11 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=lynx_dashboard
       - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
-    secrets:
-      - lynx-dashboard-pg-root
-      - lynx-dashboard-pg-pass
     volumes:
       - postgres_data:/var/lib/postgresql
       - ${LYNX_DB_INIT_DIR}:/docker-entrypoint-initdb.d:ro
+      - /etc/lynx/secrets/lynx-dashboard-pg-root:/run/secrets/lynx-dashboard-pg-root:ro
+      - /etc/lynx/secrets/lynx-dashboard-pg-pass:/run/secrets/lynx-dashboard-pg-pass:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
       interval: 5s
@@ -963,8 +960,8 @@ services:
       - sh
       - -c
       - 'valkey-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
-    secrets:
-      - lynx-dashboard-redis-pass
+    volumes:
+      - /etc/lynx/secrets/lynx-dashboard-redis-pass:/run/secrets/lynx-dashboard-redis-pass:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -987,41 +984,6 @@ networks:
   lynx-dashboard-app:
     external: true
 
-secrets:
-  lynx-dashboard-pg-root:
-    external: true
-  lynx-dashboard-pg-pass:
-    external: true
-  lynx-dashboard-redis-pass:
-    external: true
-  lynx-dashboard-database-url:
-    external: true
-  lynx-dashboard-redis-url:
-    external: true
-  lynx-dashboard-api-token:
-    external: true
-  lynx-dashboard-kek:
-    external: true
-  lynx-dashboard-pepper:
-    external: true
-  lynx-dashboard-jwt-sign-private:
-    external: true
-  lynx-dashboard-jwt-sign-public:
-    external: true
-  lynx-dashboard-jwt-enc-private:
-    external: true
-  lynx-dashboard-jwt-enc-public:
-    external: true
-  lynx-dashboard-ca-private:
-    external: true
-  lynx-dashboard-ca-public:
-    external: true
-  lynx-dashboard-x509-ca-cert:
-    external: true
-  lynx-dashboard-x509-ca-key:
-    external: true
-  lynx-dashboard-setup-token:
-    external: true
 COMPOSE_EOF
 
 chmod 644 "$COMPOSE_FILE"
