@@ -1004,12 +1004,14 @@ LYNX_DB_INIT_DIR="/etc/lynx/db/init"
 mkdir -p "$LYNX_DB_INIT_DIR"
 chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
 
-cat > "$LYNX_DB_INIT_DIR/01-init.sql" << 'SQL_EOF'
+# Embed the password directly — the postgres user inside the container cannot
+# read root:root 600 files via \set backtick, so we inline the value here.
+_PG_PASS=$(cat "$SECRETS_DIR/lynx-dashboard-pg-pass")
+
+cat > "$LYNX_DB_INIT_DIR/01-init.sql" << SQL_EOF
 -- Creates isolated app user with minimal privileges.
 -- Runs once on first PostgreSQL container startup via /docker-entrypoint-initdb.d/.
-\set app_pass `cat /run/secrets/lynx-dashboard-pg-pass`
-
-CREATE USER lynx_dashboard_app WITH PASSWORD :'app_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+CREATE USER lynx_dashboard_app WITH PASSWORD '${_PG_PASS}' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 
 GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
 
@@ -1022,7 +1024,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO lynx_dashboard_app;
 SQL_EOF
 
-chmod 644 "$LYNX_DB_INIT_DIR/01-init.sql"
+unset _PG_PASS
+chmod 600 "$LYNX_DB_INIT_DIR/01-init.sql"
 log_ok "Init SQL written: ${LYNX_DB_INIT_DIR}/01-init.sql"
 export LYNX_DB_INIT_DIR
 printf '%s' "${LATEST_TAG#dashboard@}" > "$BIN_DIR/lynx-dashboard-version"
