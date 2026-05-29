@@ -48,7 +48,7 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 LYNX_DIR="/etc/lynx"
 CERTS_DIR="/etc/lynx/tls"
 WG_DIR="/etc/wireguard"
-COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)/docker-compose.yml"
+COMPOSE_FILE="/etc/lynx/docker-compose.yml"
 LISTEN_PORT=19443
 AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
@@ -835,26 +835,242 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_ok "Frontend installed: ${FRONTEND_DIR}/"
 
-# Write version file
+# --- Write docker-compose.yml (embedded in script) --------------------------
+
+cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
+services:
+  nginx:
+    container_name: lynx-dashboard-nginx
+    image: docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    ports:
+      - "19443:19443"
+    volumes:
+      - /etc/lynx/tls:/etc/lynx/tls:ro
+      - /etc/lynx/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/lynx/nginx/updating.html:/etc/lynx/nginx/updating.html:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep nginx > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-app
+
+  frontend:
+    container_name: lynx-dashboard-frontend
+    image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    working_dir: /etc/lynx/frontend
+    command: ["/bin/sh", "-c", "apk add --no-cache libgcc libstdc++ && exec /etc/lynx/frontend/lynx-dashboard-frontend"]
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - BACKEND_URL=http://lynx-dashboard-backend:8080
+      - NEXT_TELEMETRY_DISABLED=1
+    volumes:
+      - /etc/lynx/frontend:/etc/lynx/frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000"]
+      interval: 15s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-app
+
+  backend:
+    container_name: lynx-dashboard-backend
+    image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    command: ["/etc/lynx/bin/lynx-dashboard-backend"]
+    ports:
+      - "10.100.0.1:8080:8080"
+    volumes:
+      - /etc/lynx/bin:/etc/lynx/bin
+      - /etc/lynx/frontend:/etc/lynx/frontend
+      - /run/podman/podman.sock:/run/podman/podman.sock
+    environment:
+      - DATABASE_URL_FILE=/run/secrets/lynx-dashboard-database-url
+      - REDIS_URL_FILE=/run/secrets/lynx-dashboard-redis-url
+      - INTERNAL_API_TOKEN_FILE=/run/secrets/lynx-dashboard-api-token
+      - KEK_FILE=/run/secrets/lynx-dashboard-kek
+      - PEPPER_FILE=/run/secrets/lynx-dashboard-pepper
+      - JWT_SIGN_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-private
+      - JWT_SIGN_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-public
+      - JWT_ENC_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-private
+      - JWT_ENC_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-public
+      - CA_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-ca-private
+      - CA_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-ca-public
+      - X509_CA_CERT_FILE=/run/secrets/lynx-dashboard-x509-ca-cert
+      - X509_CA_KEY_FILE=/run/secrets/lynx-dashboard-x509-ca-key
+      - SETUP_TOKEN_FILE=/run/secrets/lynx-dashboard-setup-token
+      - RUST_LOG=${RUST_LOG:-info}
+    secrets:
+      - lynx-dashboard-database-url
+      - lynx-dashboard-redis-url
+      - lynx-dashboard-api-token
+      - lynx-dashboard-kek
+      - lynx-dashboard-pepper
+      - lynx-dashboard-jwt-sign-private
+      - lynx-dashboard-jwt-sign-public
+      - lynx-dashboard-jwt-enc-private
+      - lynx-dashboard-jwt-enc-public
+      - lynx-dashboard-ca-private
+      - lynx-dashboard-ca-public
+      - lynx-dashboard-x509-ca-cert
+      - lynx-dashboard-x509-ca-key
+      - lynx-dashboard-setup-token
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-db
+      - lynx-dashboard-cache
+      - lynx-dashboard-app
+
+  postgres:
+    container_name: lynx-dashboard-postgres
+    image: docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=lynx_dashboard
+      - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
+    secrets:
+      - lynx-dashboard-pg-root
+      - lynx-dashboard-pg-pass
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ${LYNX_DB_INIT_DIR}:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-db
+
+  valkey:
+    container_name: lynx-dashboard-valkey
+    image: docker.io/valkey/valkey@sha256:b027235326507cfdade9b6684056ec1d0b0c0757412e628245129b5d7b788618
+    command:
+      - sh
+      - -c
+      - 'valkey-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
+    secrets:
+      - lynx-dashboard-redis-pass
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'valkey-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-cache
+
+volumes:
+  postgres_data:
+
+networks:
+  lynx-dashboard-db:
+    external: true
+  lynx-dashboard-cache:
+    external: true
+  lynx-dashboard-app:
+    external: true
+
+secrets:
+  lynx-dashboard-pg-root:
+    external: true
+  lynx-dashboard-pg-pass:
+    external: true
+  lynx-dashboard-redis-pass:
+    external: true
+  lynx-dashboard-database-url:
+    external: true
+  lynx-dashboard-redis-url:
+    external: true
+  lynx-dashboard-api-token:
+    external: true
+  lynx-dashboard-kek:
+    external: true
+  lynx-dashboard-pepper:
+    external: true
+  lynx-dashboard-jwt-sign-private:
+    external: true
+  lynx-dashboard-jwt-sign-public:
+    external: true
+  lynx-dashboard-jwt-enc-private:
+    external: true
+  lynx-dashboard-jwt-enc-public:
+    external: true
+  lynx-dashboard-ca-private:
+    external: true
+  lynx-dashboard-ca-public:
+    external: true
+  lynx-dashboard-x509-ca-cert:
+    external: true
+  lynx-dashboard-x509-ca-key:
+    external: true
+  lynx-dashboard-setup-token:
+    external: true
+COMPOSE_EOF
+
+chmod 644 "$COMPOSE_FILE"
+log_ok "docker-compose.yml written: ${COMPOSE_FILE}"
+
+# --- Write init SQL (embedded in script) ------------------------------------
+
+LYNX_DB_INIT_DIR="/etc/lynx/db/init"
+mkdir -p "$LYNX_DB_INIT_DIR"
+chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
+
+cat > "$LYNX_DB_INIT_DIR/01-init.sql" << 'SQL_EOF'
+-- Creates isolated app user with minimal privileges.
+-- Runs once on first PostgreSQL container startup via /docker-entrypoint-initdb.d/.
+\set app_pass `cat /run/secrets/lynx-dashboard-pg-pass`
+
+CREATE USER lynx_dashboard_app WITH PASSWORD :'app_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+
+GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
+
+\connect lynx_dashboard
+
+GRANT USAGE, CREATE ON SCHEMA public TO lynx_dashboard_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_dashboard_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO lynx_dashboard_app;
+SQL_EOF
+
+chmod 644 "$LYNX_DB_INIT_DIR/01-init.sql"
+log_ok "Init SQL written: ${LYNX_DB_INIT_DIR}/01-init.sql"
+export LYNX_DB_INIT_DIR
 printf '%s' "${LATEST_TAG#dashboard@}" > "$BIN_DIR/lynx-dashboard-version"
 log_ok "Version: ${LATEST_TAG#dashboard@}"
 
 # --- Start services ---------------------------------------------------------
 
 log_section "Starting services"
-
-COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
-
-# Copy init SQL to a persistent location so the bind mount survives reboots.
-# docker-compose.yml uses ${LYNX_DB_INIT_DIR:-./server/db/init} — this sets
-# the production path; local dev falls back to the relative repo path.
-LYNX_DB_INIT_DIR="/etc/lynx/db/init"
-mkdir -p "$LYNX_DB_INIT_DIR"
-chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
-cp "$COMPOSE_DIR/server/db/init/"*.sql "$LYNX_DB_INIT_DIR/"
-chmod 644 "$LYNX_DB_INIT_DIR/"*.sql
-export LYNX_DB_INIT_DIR
-log_ok "Init SQL copied to $LYNX_DB_INIT_DIR"
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
