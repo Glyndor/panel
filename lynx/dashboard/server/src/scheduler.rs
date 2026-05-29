@@ -286,7 +286,7 @@ pub(crate) async fn needs_scheduled_rotation(db: &sqlx::PgPool) -> bool {
     )
     .fetch_one(db)
     .await
-    .unwrap_or(None);
+    .unwrap_or(Some(chrono::Utc::now()));
 
     match last {
         None => true,
