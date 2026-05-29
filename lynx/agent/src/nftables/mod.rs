@@ -345,12 +345,24 @@ mod tests {
 
     #[test]
     fn render_contains_dashboard_management_ip() {
-        let r = minimal_ruleset();
+        // Management plane rules only render when dashboard_port is set (dashboard VPS).
+        let mut r = minimal_ruleset();
+        r.dashboard_port = Some(19443);
         let out = render_ruleset(&r);
-        // The dashboard backend is always at 10.100.0.1
         assert!(
             out.contains("10.100.0.1"),
-            "dashboard management IP missing"
+            "dashboard management IP missing when dashboard_port set"
+        );
+        assert!(
+            out.contains("10.100.0.0/16"),
+            "agent subnet missing from management plane rules"
+        );
+        // Without dashboard_port, management plane rules must not appear.
+        let r_agent = minimal_ruleset();
+        let out_agent = render_ruleset(&r_agent);
+        assert!(
+            !out_agent.contains("10.100.0.0/16"),
+            "management plane rules must not render on remote agent"
         );
     }
 
