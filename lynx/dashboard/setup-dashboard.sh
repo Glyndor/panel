@@ -1039,7 +1039,12 @@ log_section "Starting services"
 # lynx-compose does not prefix named volumes with the project name so the
 # volume is always called 'postgres_data'. Stale data causes postgres to skip
 # init on the next clean install, leaving lynx_dashboard_app with no password.
-podman volume rm postgres_data 2>/dev/null || true
+# Use --force and a direct directory removal as belt-and-suspenders: Podman
+# sometimes keeps a ghost reference that makes 'volume rm' fail silently.
+podman stop lynx-dashboard-postgres 2>/dev/null || true
+podman rm -f lynx-dashboard-postgres 2>/dev/null || true
+podman volume rm --force postgres_data 2>/dev/null || true
+rm -rf /var/lib/containers/storage/volumes/postgres_data 2>/dev/null || true
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
