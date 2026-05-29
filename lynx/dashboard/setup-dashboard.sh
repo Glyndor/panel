@@ -1232,7 +1232,7 @@ server {
     resolver ${NGINX_RESOLVER} valid=5s ipv6=off;
 
     location / {
-        set \$upstream http://frontend:3000;
+        set \$upstream http://lynx-dashboard-frontend:3000;
         proxy_pass         \$upstream;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade \$http_upgrade;
