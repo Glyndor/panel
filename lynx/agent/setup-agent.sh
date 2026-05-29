@@ -111,7 +111,25 @@ _cleanup_existing() {
     nft delete table inet lynx-agent 2>/dev/null || true
     rm -f /etc/nftables-lynx-agent.conf
 
-    rm -rf "$LYNX_DIR"
+    # /etc/lynx is shared with the dashboard on co-located VPSes.
+    # Preserve files that belong to the dashboard so the dashboard containers
+    # are not disrupted by an agent reinstall. The agent-specific content is
+    # removed explicitly; the shared directory is removed only if empty.
+    _SAVED_DASH_SIGN_PUBKEY=""
+    [[ -r "$LYNX_DIR/dashboard-sign-pubkey" ]] && _SAVED_DASH_SIGN_PUBKEY=$(< "$LYNX_DIR/dashboard-sign-pubkey")
+
+    rm -rf "$LYNX_WG_DIR" "$LYNX_DIR/credentials"
+    rm -f  "$AGENT_CONF" "$LYNX_DIR/agent-id"
+    rm -f  "$BIN_DIR/lynx-agent" "$BIN_DIR/lynx-agent.prev" "$BIN_DIR/lynx-agent-version"
+    rmdir  "$BIN_DIR" "$LYNX_DIR" 2>/dev/null || true
+
+    if [[ -n "$_SAVED_DASH_SIGN_PUBKEY" ]]; then
+        mkdir -p "$LYNX_DIR"
+        printf '%s' "$_SAVED_DASH_SIGN_PUBKEY" > "$LYNX_DIR/dashboard-sign-pubkey"
+        chmod 644 "$LYNX_DIR/dashboard-sign-pubkey"
+    fi
+    unset _SAVED_DASH_SIGN_PUBKEY
+
     log_ok "Cleanup complete"
 }
 
