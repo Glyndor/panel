@@ -277,6 +277,51 @@ if $existing; then
     esac
 fi
 
+# --- Collect dashboard bootstrap data ---------------------------------------
+# Prompt before any apt-get installs: debconf (Teletype mode) consumes stdin
+# lines from a pipe, silently corrupting the responses for later prompts.
+
+log_section "Dashboard connection setup"
+
+echo ""
+echo -e "${YELLOW}You need the values shown when you registered this VPS in the dashboard.${RESET}"
+echo ""
+
+read -rp "  Dashboard WireGuard endpoint (IP:PORT, e.g. 1.2.3.4:51820): " DASHBOARD_ENDPOINT
+read -rp "  Dashboard WireGuard public key: " DASHBOARD_PUBKEY
+read -rsp "  Preshared key (PSK): " PSK
+echo ""
+read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
+echo ""
+
+# Dashboard Ed25519 signing public key — required for the agent to verify
+# every dashboard-signed command (heartbeat ACK, container ops, nftables push,
+# update.self, ...).  Without it the agent rejects every command and enters
+# lockdown after the 5-minute heartbeat timeout.
+#
+# Local-agent path: if running on the same host as the dashboard, the install
+# script already wrote it to /etc/lynx/dashboard-sign-pubkey — auto-detect that
+# default to avoid an unnecessary prompt.
+DEFAULT_DASHBOARD_SIGN_PUBKEY=""
+if [[ -r /etc/lynx/dashboard-sign-pubkey ]]; then
+    DEFAULT_DASHBOARD_SIGN_PUBKEY=$(< /etc/lynx/dashboard-sign-pubkey)
+fi
+if [[ -n "$DEFAULT_DASHBOARD_SIGN_PUBKEY" ]]; then
+    read -rp "  Dashboard signing public key (Ed25519, base64) [default: detected]: " DASHBOARD_SIGN_PUBKEY
+    DASHBOARD_SIGN_PUBKEY="${DASHBOARD_SIGN_PUBKEY:-$DEFAULT_DASHBOARD_SIGN_PUBKEY}"
+else
+    read -rp "  Dashboard signing public key (Ed25519, base64): " DASHBOARD_SIGN_PUBKEY
+fi
+unset DEFAULT_DASHBOARD_SIGN_PUBKEY
+echo ""
+
+if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
+    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
+    exit 1
+fi
+
+AGENT_WG_IP="$AGENT_WG_IP_INPUT"
+
 # --- DNS preflight check ----------------------------------------------------
 
 log_section "Checking network connectivity"
@@ -444,49 +489,6 @@ if ! $_ntp_active; then
 fi
 
 unset _ntp_active
-
-# --- Collect dashboard bootstrap data ---------------------------------------
-
-log_section "Dashboard connection setup"
-
-echo ""
-echo -e "${YELLOW}You need the values shown when you registered this VPS in the dashboard.${RESET}"
-echo ""
-
-read -rp "  Dashboard WireGuard endpoint (IP:PORT, e.g. 1.2.3.4:51820): " DASHBOARD_ENDPOINT
-read -rp "  Dashboard WireGuard public key: " DASHBOARD_PUBKEY
-read -rsp "  Preshared key (PSK): " PSK
-echo ""
-read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
-echo ""
-
-# Dashboard Ed25519 signing public key — required for the agent to verify
-# every dashboard-signed command (heartbeat ACK, container ops, nftables push,
-# update.self, ...).  Without it the agent rejects every command and enters
-# lockdown after the 5-minute heartbeat timeout.
-#
-# Local-agent path: if running on the same host as the dashboard, the install
-# script already wrote it to /etc/lynx/dashboard-sign-pubkey — auto-detect that
-# default to avoid an unnecessary prompt.
-DEFAULT_DASHBOARD_SIGN_PUBKEY=""
-if [[ -r /etc/lynx/dashboard-sign-pubkey ]]; then
-    DEFAULT_DASHBOARD_SIGN_PUBKEY=$(< /etc/lynx/dashboard-sign-pubkey)
-fi
-if [[ -n "$DEFAULT_DASHBOARD_SIGN_PUBKEY" ]]; then
-    read -rp "  Dashboard signing public key (Ed25519, base64) [default: detected]: " DASHBOARD_SIGN_PUBKEY
-    DASHBOARD_SIGN_PUBKEY="${DASHBOARD_SIGN_PUBKEY:-$DEFAULT_DASHBOARD_SIGN_PUBKEY}"
-else
-    read -rp "  Dashboard signing public key (Ed25519, base64): " DASHBOARD_SIGN_PUBKEY
-fi
-unset DEFAULT_DASHBOARD_SIGN_PUBKEY
-echo ""
-
-if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
-    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
-    exit 1
-fi
-
-AGENT_WG_IP="$AGENT_WG_IP_INPUT"
 
 # --- Create directories -----------------------------------------------------
 
