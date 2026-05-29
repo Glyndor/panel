@@ -316,9 +316,10 @@ pub async fn rotate_pg_app_password(state: &AppState) -> Result<(), AppError> {
         tracing::info!("PostgreSQL app password rotated and Podman secrets updated");
     }
 
-    if let Err(e) =
-        std::fs::write("/etc/lynx/secrets/lynx-dashboard-database-url", new_db_url.as_bytes())
-    {
+    if let Err(e) = std::fs::write(
+        "/etc/lynx/secrets/lynx-dashboard-database-url",
+        new_db_url.as_bytes(),
+    ) {
         tracing::warn!("host file write for database-url failed: {e}");
     }
 
@@ -372,9 +373,10 @@ pub async fn rotate_redis_password(state: &AppState) -> Result<(), AppError> {
         tracing::info!("Redis password rotated and Podman secrets updated");
     }
 
-    if let Err(e) =
-        std::fs::write("/etc/lynx/secrets/lynx-dashboard-redis-url", new_redis_url.as_bytes())
-    {
+    if let Err(e) = std::fs::write(
+        "/etc/lynx/secrets/lynx-dashboard-redis-url",
+        new_redis_url.as_bytes(),
+    ) {
         tracing::warn!("host file write for redis-url failed: {e}");
     }
 

@@ -54,18 +54,14 @@ AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
 DASHBOARD_WG_IP="10.100.0.1"
 
-# Podman network subnets — fixed to prevent stale DNAT when containers restart
+# Podman network subnets — fixed to prevent stale DNAT when containers restart.
+# Container static IPs are hardcoded in the compose YAML below (.1 = gateway, .2+ = containers):
+#   lynx-dashboard-db    10.89.0.0/24  postgres=10.89.0.2  backend=10.89.0.3
+#   lynx-dashboard-cache 10.89.1.0/24  valkey=10.89.1.2    backend=10.89.1.3
+#   lynx-dashboard-app   10.89.2.0/24  backend=10.89.2.2   frontend=10.89.2.3  nginx=10.89.2.4
 DASHBOARD_DB_SUBNET="10.89.0.0/24"
 DASHBOARD_CACHE_SUBNET="10.89.1.0/24"
 DASHBOARD_APP_SUBNET="10.89.2.0/24"
-# Container static IPs within their respective subnets (.1 = gateway, .2+ = containers)
-PG_IP="10.89.0.2"
-VALKEY_IP="10.89.1.2"
-BACKEND_DB_IP="10.89.0.3"
-BACKEND_CACHE_IP="10.89.1.3"
-BACKEND_APP_IP="10.89.2.2"
-FRONTEND_IP="10.89.2.3"
-NGINX_IP="10.89.2.4"
 
 # --- Root check -------------------------------------------------------------
 
