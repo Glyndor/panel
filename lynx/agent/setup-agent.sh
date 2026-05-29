@@ -204,21 +204,9 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables — now ALWAYS incompatible (netavark 1.10+ uses the nftables firewall
-# driver). The iptables-nft shim was tolerated by earlier Lynx versions because
-# netavark needed it; we removed that requirement. Any iptables binary on the
-# host now signals an external firewall manager and is purged.
-if command -v iptables &>/dev/null; then
-    _incompatible_found=true
-    log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
-    log_info "  Reason: ${_REASON_FW}"
-    case "$DISTRO" in
-        debian) apt-get purge -y iptables 2>/dev/null || true ;;
-        rhel)   { dnf remove -y iptables 2>/dev/null || yum remove -y iptables 2>/dev/null; } || true ;;
-        *)      log_warn "Unknown distro — remove iptables manually" ;;
-    esac
-    log_ok "Removed: iptables"
-fi
+# iptables package must NOT be removed — netavark requires the iptables binary
+# even when configured with firewall_driver = nftables. What is incompatible is
+# software that manages iptables rules (Docker, ufw, firewalld), not the package.
 
 if $_incompatible_found; then
     if command -v iptables-legacy &>/dev/null; then
