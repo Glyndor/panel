@@ -1129,20 +1129,19 @@ log_ok "WireGuard interface up: wg-lynx-dash (10.100.0.1/16)"
 # Insert the rules BEFORE the trailing drop so they survive any dynamic
 # chain updates the agent makes during normal operation.
 _nft_ensure_container_dns() {
-    local chain="inet lynx-agent lynx-base"
     # No-op if table/chain doesn't exist yet (first install, bootstrap applies it below)
-    nft list chain $chain &>/dev/null || return 0
+    nft list chain inet lynx-agent lynx-base &>/dev/null || return 0
     # If rules already present, skip
-    nft list chain $chain 2>/dev/null | grep -q 'iifname.*podman.*dport 53.*accept' && return 0
+    nft list chain inet lynx-agent lynx-base 2>/dev/null | grep -q 'iifname.*podman.*dport 53.*accept' && return 0
     # Insert just before the terminal drop rule — find its handle
     local drop_handle
-    drop_handle=$(nft -a list chain $chain 2>/dev/null | grep '^\s*drop' | grep -o 'handle [0-9]*' | head -1 | awk '{print $2}')
+    drop_handle=$(nft -a list chain inet lynx-agent lynx-base 2>/dev/null | grep '^\s*drop' | grep -o 'handle [0-9]*' | head -1 | awk '{print $2}')
     if [[ -n "$drop_handle" ]]; then
-        nft insert rule $chain handle "$drop_handle" iifname "podman*" udp dport 53 accept 2>/dev/null || true
-        nft insert rule $chain handle "$drop_handle" iifname "podman*" tcp dport 53 accept 2>/dev/null || true
+        nft insert rule inet lynx-agent lynx-base handle "$drop_handle" iifname "podman*" udp dport 53 accept 2>/dev/null || true
+        nft insert rule inet lynx-agent lynx-base handle "$drop_handle" iifname "podman*" tcp dport 53 accept 2>/dev/null || true
     else
-        nft add rule $chain iifname "podman*" udp dport 53 accept 2>/dev/null || true
-        nft add rule $chain iifname "podman*" tcp dport 53 accept 2>/dev/null || true
+        nft add rule inet lynx-agent lynx-base iifname "podman*" udp dport 53 accept 2>/dev/null || true
+        nft add rule inet lynx-agent lynx-base iifname "podman*" tcp dport 53 accept 2>/dev/null || true
     fi
     log_ok "DNS rules injected into lynx-agent.lynx-base for container aardvark-dns"
 }
