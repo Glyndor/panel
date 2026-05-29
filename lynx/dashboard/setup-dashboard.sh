@@ -48,7 +48,7 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 LYNX_DIR="/etc/lynx"
 CERTS_DIR="/etc/lynx/tls"
 WG_DIR="/etc/wireguard"
-COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)/docker-compose.yml"
+COMPOSE_FILE="/etc/lynx/docker-compose.yml"
 LISTEN_PORT=19443
 AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
@@ -121,6 +121,7 @@ _cleanup_existing() {
         podman secret rm "$secret" 2>/dev/null || true
     done
     podman secret ls --format '{{.Name}}' 2>/dev/null | grep '^lynx-' | xargs -r podman secret rm 2>/dev/null || true
+    rm -rf /etc/lynx/secrets
 
     # Remove WireGuard interface
     if ip link show wg-lynx-dash &>/dev/null; then
@@ -142,6 +143,15 @@ _cleanup_existing() {
     rm -rf "$LYNX_DIR"
     log_ok "Cleanup complete"
 }
+
+# --- Stop stray containers from partial installs ----------------------------
+# Run unconditionally so a manually-cleaned /etc/lynx does not leave containers
+# running that would hold volumes open and block removal.
+for _ctr in lynx-dashboard-postgres lynx-dashboard-valkey lynx-dashboard-backend \
+             lynx-dashboard-frontend lynx-dashboard-nginx; do
+    podman stop --time 5 "$_ctr" 2>/dev/null || true
+    podman rm -f "$_ctr" 2>/dev/null || true
+done
 
 # --- RAM check --------------------------------------------------------------
 
@@ -232,9 +242,9 @@ done
 _check_remove firewalld "$_REASON_FW"
 _check_remove ufw       "$_REASON_FW"
 
-# iptables — now ALWAYS incompatible. Netavark 1.10+ uses the nftables firewall
-# driver natively; the iptables-nft shim that earlier Lynx versions tolerated is
-# no longer needed. Any iptables binary signals an external firewall manager.
+# iptables — incompatible with Lynx when netavark 1.10+ uses the nftables driver.
+# Any iptables binary on the host signals an external firewall manager or a stale
+# package. Remove it; netavark 1.15.2 + firewall_driver=nftables does not call it.
 if command -v iptables &>/dev/null; then
     _incompatible_found=true
     log_warn "Removing incompatible: iptables (netavark now uses nftables driver)"
@@ -703,91 +713,90 @@ log_section "Generating secrets"
 
 LB="$BACKEND_FILE"  # short alias for the rest of this section
 
+# Secrets are stored as files in /etc/lynx/secrets/ (root:root, 600).
+# Containers access them via bind mounts at /run/secrets/<name>.
+# This is equivalent security to Podman secret store (both are files on disk,
+# both root-only). Using files avoids Bollard's lack of external secret support.
+SECRETS_DIR="/etc/lynx/secrets"
+mkdir -p "$SECRETS_DIR"
+chmod 700 "$SECRETS_DIR"
+
+_write_secret() {
+    local name="$1" value="$2"
+    printf '%s' "$value" > "$SECRETS_DIR/$name"
+    chmod 600 "$SECRETS_DIR/$name"
+}
+
 log_info "Generating PostgreSQL root password..."
 (
     PG_ROOT=$("$LB" gen-rand 32)
-    printf '%s' "$PG_ROOT" | podman secret create lynx-dashboard-pg-root - >/dev/null
-    PG_ROOT="$("$LB" gen-rand 32)"  # overwrite
+    _write_secret lynx-dashboard-pg-root "$PG_ROOT"
+    PG_ROOT="$("$LB" gen-rand 32)"
 )
 
 log_info "Generating PostgreSQL app password and database URL..."
 (
     PG_PASS=$("$LB" gen-rand 32)
-    printf '%s' "$PG_PASS" | podman secret create lynx-dashboard-pg-pass - >/dev/null
-    printf 'postgresql://lynx_dashboard_app:%s@lynx-dashboard-postgres:5432/lynx_dashboard' "$PG_PASS" \
-        | podman secret create lynx-dashboard-database-url - >/dev/null
-    PG_PASS="$("$LB" gen-rand 32)"  # overwrite
+    _write_secret lynx-dashboard-pg-pass "$PG_PASS"
+    _write_secret lynx-dashboard-database-url \
+        "postgresql://lynx_dashboard_app:${PG_PASS}@lynx-dashboard-postgres:5432/lynx_dashboard"
+    PG_PASS="$("$LB" gen-rand 32)"
 )
 
 log_info "Generating Valkey password and URL..."
 (
     REDIS_PASS=$("$LB" gen-rand 32)
-    printf '%s' "$REDIS_PASS" | podman secret create lynx-dashboard-redis-pass - >/dev/null
-    printf 'redis://:%s@lynx-dashboard-valkey:6379' "$REDIS_PASS" \
-        | podman secret create lynx-dashboard-redis-url - >/dev/null
-    REDIS_PASS="$("$LB" gen-rand 32)"  # overwrite
+    _write_secret lynx-dashboard-redis-pass "$REDIS_PASS"
+    _write_secret lynx-dashboard-redis-url "redis://:${REDIS_PASS}@lynx-dashboard-valkey:6379"
+    REDIS_PASS="$("$LB" gen-rand 32)"
 )
 
 log_info "Generating API token..."
-"$LB" gen-rand 32 | podman secret create lynx-dashboard-api-token - >/dev/null
+_write_secret lynx-dashboard-api-token "$("$LB" gen-rand 32)"
 log_info "Generating KEK (Key Encryption Key)..."
-"$LB" gen-rand 32 --encoding base64 | podman secret create lynx-dashboard-kek - >/dev/null
+_write_secret lynx-dashboard-kek "$("$LB" gen-rand 32 --encoding base64)"
 log_info "Generating pepper..."
-"$LB" gen-rand 32 | podman secret create lynx-dashboard-pepper - >/dev/null
+_write_secret lynx-dashboard-pepper "$("$LB" gen-rand 32)"
 
 log_info "Generating JWT signing keypair (Ed25519)..."
-# The public half is also the agent's `DASHBOARD_VERIFY_KEY` — the agent verifies
-# every dashboard-signed command (including heartbeat ACK) against it.  Write it
-# to a well-known file (mode 644 — public material) so:
-#   - the agent install script on the same host can default to reading it
-#   - the operator can `cat` it to copy onto remote agents
 DASHBOARD_SIGN_PUBKEY_FILE="$LYNX_DIR/dashboard-sign-pubkey"
 DASHBOARD_SIGN_PUBKEY=""
 {
     KEYPAIR=$("$LB" gen-ed25519)
     PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
     DASHBOARD_SIGN_PUBKEY=$(printf '%s' "$KEYPAIR" | sed -n '2p')
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-jwt-sign-private - >/dev/null
-    printf '%s' "$DASHBOARD_SIGN_PUBKEY" | podman secret create lynx-dashboard-jwt-sign-public - >/dev/null
+    _write_secret lynx-dashboard-jwt-sign-private "$PRIV_SEED"
+    _write_secret lynx-dashboard-jwt-sign-public "$DASHBOARD_SIGN_PUBKEY"
     printf '%s' "$DASHBOARD_SIGN_PUBKEY" > "$DASHBOARD_SIGN_PUBKEY_FILE"
     chmod 644 "$DASHBOARD_SIGN_PUBKEY_FILE"
-    PRIV_SEED=$("$LB" gen-rand 32)  # overwrite in memory
+    PRIV_SEED=$("$LB" gen-rand 32)
 }
 
 log_info "Generating JWT encryption keypair (X25519)..."
 (
     KEYPAIR=$("$LB" gen-x25519)
-    PRIV_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '1p')
-    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
-    printf '%s' "$PRIV_BYTES" | podman secret create lynx-dashboard-jwt-enc-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-jwt-enc-public - >/dev/null
+    _write_secret lynx-dashboard-jwt-enc-private "$(printf '%s' "$KEYPAIR" | sed -n '1p')"
+    _write_secret lynx-dashboard-jwt-enc-public  "$(printf '%s' "$KEYPAIR" | sed -n '2p')"
 )
 
 log_info "Generating CA keypair (Ed25519)..."
 (
     KEYPAIR=$("$LB" gen-ed25519)
-    PRIV_SEED=$(printf '%s' "$KEYPAIR" | sed -n '1p')
-    PUB_BYTES=$(printf '%s' "$KEYPAIR" | sed -n '2p')
-    printf '%s' "$PRIV_SEED" | podman secret create lynx-dashboard-ca-private - >/dev/null
-    printf '%s' "$PUB_BYTES" | podman secret create lynx-dashboard-ca-public - >/dev/null
+    _write_secret lynx-dashboard-ca-private "$(printf '%s' "$KEYPAIR" | sed -n '1p')"
+    _write_secret lynx-dashboard-ca-public  "$(printf '%s' "$KEYPAIR" | sed -n '2p')"
 )
 
 log_info "Generating X.509 CA certificate for mTLS (Ed25519)..."
 (
     CA_OUT=$("$LB" gen-x509-ca)
-    CA_CERT_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '1p')
-    CA_KEY_DER_B64=$(printf '%s' "$CA_OUT" | sed -n '2p')
-    printf '%s' "$CA_CERT_DER_B64" | podman secret create lynx-dashboard-x509-ca-cert - >/dev/null
-    printf '%s' "$CA_KEY_DER_B64"  | podman secret create lynx-dashboard-x509-ca-key  - >/dev/null
-    CA_OUT="$("$LB" gen-rand 64)"
-    CA_CERT_DER_B64="$("$LB" gen-rand 64)"
-    CA_KEY_DER_B64="$("$LB" gen-rand 64)"
+    _write_secret lynx-dashboard-x509-ca-cert "$(printf '%s' "$CA_OUT" | sed -n '1p')"
+    _write_secret lynx-dashboard-x509-ca-key  "$(printf '%s' "$CA_OUT" | sed -n '2p')"
 )
 
 log_info "Generating setup token (one-time bootstrap)..."
 SETUP_TOKEN=$("$LB" gen-rand 32)
-printf '%s' "$SETUP_TOKEN" | podman secret create lynx-dashboard-setup-token - >/dev/null
-log_ok "All secrets generated — values purged from memory"
+_write_secret lynx-dashboard-setup-token "$SETUP_TOKEN"
+log_ok "All secrets generated"
 unset LB
 
 # Download and verify frontend binary + assets
@@ -835,7 +844,171 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_ok "Frontend installed: ${FRONTEND_DIR}/"
 
-# Write version file
+# --- Write docker-compose.yml (embedded in script) --------------------------
+
+cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
+services:
+  nginx:
+    container_name: lynx-dashboard-nginx
+    image: docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    ports:
+      - "19443:19443"
+    volumes:
+      - /etc/lynx/tls:/etc/lynx/tls:ro
+      - /etc/lynx/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/lynx/nginx/updating.html:/etc/lynx/nginx/updating.html:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep nginx > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-app
+
+  frontend:
+    container_name: lynx-dashboard-frontend
+    image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    working_dir: /etc/lynx/frontend
+    command: ["/bin/sh", "-c", "apk add --no-cache libgcc libstdc++ && exec /etc/lynx/frontend/lynx-dashboard-frontend"]
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - BACKEND_URL=http://lynx-dashboard-backend:8080
+      - NEXT_TELEMETRY_DISABLED=1
+    volumes:
+      - /etc/lynx/frontend:/etc/lynx/frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000"]
+      interval: 15s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-app
+
+  backend:
+    container_name: lynx-dashboard-backend
+    image: docker.io/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    command: ["/etc/lynx/bin/lynx-dashboard-backend"]
+    ports:
+      - "10.100.0.1:8080:8080"
+    environment:
+      - DATABASE_URL_FILE=/run/secrets/lynx-dashboard-database-url
+      - REDIS_URL_FILE=/run/secrets/lynx-dashboard-redis-url
+      - INTERNAL_API_TOKEN_FILE=/run/secrets/lynx-dashboard-api-token
+      - KEK_FILE=/run/secrets/lynx-dashboard-kek
+      - PEPPER_FILE=/run/secrets/lynx-dashboard-pepper
+      - JWT_SIGN_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-private
+      - JWT_SIGN_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-sign-public
+      - JWT_ENC_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-private
+      - JWT_ENC_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-jwt-enc-public
+      - CA_PRIVATE_KEY_FILE=/run/secrets/lynx-dashboard-ca-private
+      - CA_PUBLIC_KEY_FILE=/run/secrets/lynx-dashboard-ca-public
+      - X509_CA_CERT_FILE=/run/secrets/lynx-dashboard-x509-ca-cert
+      - X509_CA_KEY_FILE=/run/secrets/lynx-dashboard-x509-ca-key
+      - SETUP_TOKEN_FILE=/run/secrets/lynx-dashboard-setup-token
+      - RUST_LOG=${RUST_LOG:-info}
+    volumes:
+      - /etc/lynx/bin:/etc/lynx/bin
+      - /etc/lynx/frontend:/etc/lynx/frontend
+      - /run/podman/podman.sock:/run/podman/podman.sock
+      - /etc/lynx/secrets/lynx-dashboard-database-url:/run/secrets/lynx-dashboard-database-url:ro
+      - /etc/lynx/secrets/lynx-dashboard-redis-url:/run/secrets/lynx-dashboard-redis-url:ro
+      - /etc/lynx/secrets/lynx-dashboard-api-token:/run/secrets/lynx-dashboard-api-token:ro
+      - /etc/lynx/secrets/lynx-dashboard-kek:/run/secrets/lynx-dashboard-kek:ro
+      - /etc/lynx/secrets/lynx-dashboard-pepper:/run/secrets/lynx-dashboard-pepper:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-sign-private:/run/secrets/lynx-dashboard-jwt-sign-private:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-sign-public:/run/secrets/lynx-dashboard-jwt-sign-public:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-enc-private:/run/secrets/lynx-dashboard-jwt-enc-private:ro
+      - /etc/lynx/secrets/lynx-dashboard-jwt-enc-public:/run/secrets/lynx-dashboard-jwt-enc-public:ro
+      - /etc/lynx/secrets/lynx-dashboard-ca-private:/run/secrets/lynx-dashboard-ca-private:ro
+      - /etc/lynx/secrets/lynx-dashboard-ca-public:/run/secrets/lynx-dashboard-ca-public:ro
+      - /etc/lynx/secrets/lynx-dashboard-x509-ca-cert:/run/secrets/lynx-dashboard-x509-ca-cert:ro
+      - /etc/lynx/secrets/lynx-dashboard-x509-ca-key:/run/secrets/lynx-dashboard-x509-ca-key:ro
+      - /etc/lynx/secrets/lynx-dashboard-setup-token:/run/secrets/lynx-dashboard-setup-token:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-db
+      - lynx-dashboard-cache
+      - lynx-dashboard-app
+
+  postgres:
+    container_name: lynx-dashboard-postgres
+    image: docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=lynx_dashboard
+      - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - /etc/lynx/secrets/lynx-dashboard-pg-root:/run/secrets/lynx-dashboard-pg-root:ro
+      - /etc/lynx/secrets/lynx-dashboard-pg-pass:/run/secrets/lynx-dashboard-pg-pass:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-db
+
+  valkey:
+    container_name: lynx-dashboard-valkey
+    image: docker.io/valkey/valkey@sha256:b027235326507cfdade9b6684056ec1d0b0c0757412e628245129b5d7b788618
+    command:
+      - sh
+      - -c
+      - 'valkey-server --save "" --appendonly no --requirepass "$(cat /run/secrets/lynx-dashboard-redis-pass)"'
+    volumes:
+      - /etc/lynx/secrets/lynx-dashboard-redis-pass:/run/secrets/lynx-dashboard-redis-pass:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'valkey-cli -a "$(cat /run/secrets/lynx-dashboard-redis-pass)" ping'
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - lynx-dashboard-cache
+
+volumes:
+  postgres_data:
+
+networks:
+  lynx-dashboard-db:
+    external: true
+  lynx-dashboard-cache:
+    external: true
+  lynx-dashboard-app:
+    external: true
+
+COMPOSE_EOF
+
+chmod 644 "$COMPOSE_FILE"
+log_ok "docker-compose.yml written: ${COMPOSE_FILE}"
+
 printf '%s' "${LATEST_TAG#dashboard@}" > "$BIN_DIR/lynx-dashboard-version"
 log_ok "Version: ${LATEST_TAG#dashboard@}"
 
@@ -843,18 +1016,16 @@ log_ok "Version: ${LATEST_TAG#dashboard@}"
 
 log_section "Starting services"
 
-COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
-
-# Copy init SQL to a persistent location so the bind mount survives reboots.
-# docker-compose.yml uses ${LYNX_DB_INIT_DIR:-./server/db/init} — this sets
-# the production path; local dev falls back to the relative repo path.
-LYNX_DB_INIT_DIR="/etc/lynx/db/init"
-mkdir -p "$LYNX_DB_INIT_DIR"
-chmod 755 "/etc/lynx/db" "$LYNX_DB_INIT_DIR"
-cp "$COMPOSE_DIR/server/db/init/"*.sql "$LYNX_DB_INIT_DIR/"
-chmod 644 "$LYNX_DB_INIT_DIR/"*.sql
-export LYNX_DB_INIT_DIR
-log_ok "Init SQL copied to $LYNX_DB_INIT_DIR"
+# Remove any stale postgres_data volume from a partial previous install.
+# lynx-compose does not prefix named volumes with the project name so the
+# volume is always called 'postgres_data'. Stale data causes postgres to skip
+# init on the next clean install, leaving lynx_dashboard_app with no password.
+# Use --force and a direct directory removal as belt-and-suspenders: Podman
+# sometimes keeps a ghost reference that makes 'volume rm' fail silently.
+podman stop lynx-dashboard-postgres 2>/dev/null || true
+podman rm -f lynx-dashboard-postgres 2>/dev/null || true
+podman volume rm --force postgres_data 2>/dev/null || true
+rm -rf /var/lib/containers/storage/volumes/postgres_data 2>/dev/null || true
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
@@ -874,6 +1045,28 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
+# Initialize app user and privileges. Runs every install — idempotent.
+# Direct psql avoids the docker-entrypoint-initdb.d mechanism which only runs
+# on a completely empty PGDATA directory and silently skips on reinstalls.
+log_info "Initializing PostgreSQL app user..."
+_PG_PASS=$(cat "$SECRETS_DIR/lynx-dashboard-pg-pass")
+podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard << SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'lynx_dashboard_app') THEN
+    CREATE USER lynx_dashboard_app WITH NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+END
+\$\$;
+ALTER USER lynx_dashboard_app PASSWORD '${_PG_PASS}';
+GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
+GRANT USAGE, CREATE ON SCHEMA public TO lynx_dashboard_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_dashboard_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO lynx_dashboard_app;
+SQL
+unset _PG_PASS
+log_ok "PostgreSQL app user initialized"
+
 # 2. Valkey
 log_info "Starting Valkey..."
 "$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d valkey
@@ -890,6 +1083,42 @@ for i in $(seq 1 30); do
     fi
     sleep 2
 done
+
+# --- WireGuard interface must be up before backend binds to 10.100.0.1 ------
+
+log_section "Setting up WireGuard tunnel (dashboard ↔ local agent)"
+
+WG_CONF="$WG_DIR/wg-lynx-dash.conf"
+
+DASHBOARD_PRIV=$(wg genkey)
+DASHBOARD_PUB=$(printf '%s' "$DASHBOARD_PRIV" | wg pubkey)
+AGENT_PSK=$(wg genpsk)
+# Save PSK to a secret file for the backend to use when managing peers.
+_write_secret lynx-dashboard-local-agent-psk "$AGENT_PSK"
+
+cat > "$WG_CONF" << EOF
+[Interface]
+PrivateKey = ${DASHBOARD_PRIV}
+Address = ${DASHBOARD_WG_IP}/16
+ListenPort = ${AGENT_WG_PORT}
+
+# Peer block added by agent install script after bootstrap:
+# [Peer]
+# PublicKey = <agent pubkey>
+# PresharedKey = ${AGENT_PSK}
+# AllowedIPs = ${AGENT_WG_IP}/32
+EOF
+
+chmod 600 "$WG_CONF"
+DASHBOARD_PRIV="$("$BACKEND_FILE" gen-rand 32)"
+
+log_ok "WireGuard config written: ${WG_CONF}"
+log_ok "Dashboard WireGuard pubkey: ${DASHBOARD_PUB}"
+printf '%s' "$DASHBOARD_PUB" > "$LYNX_DIR/dashboard-wg-pubkey"
+
+wg-quick up wg-lynx-dash
+systemctl enable "wg-quick@wg-lynx-dash"
+log_ok "WireGuard interface up: wg-lynx-dash (10.100.0.1/16)"
 
 # 3. Backend
 log_info "Starting backend..."
@@ -909,27 +1138,6 @@ for i in $(seq 1 40); do
     sleep 3
 done
 
-# Resync PostgreSQL app user password to match the Podman secret.
-# The backend may run a 90-day scheduled rotation on first startup (no prior
-# rotation record in a fresh DB) and partially update the PostgreSQL password
-# without updating the Podman secret (the `podman` binary is not available
-# inside the Alpine container). The rotation runs ~30s after startup; we wait
-# 15s after "healthy" to ensure the rotation has finished before we re-anchor
-# PostgreSQL to the value in the Podman secret.
-log_info "Waiting for any startup key rotation to settle..."
-sleep 15
-log_info "Synchronizing PostgreSQL app user password..."
-_PG_PASS_SYNC=$(podman secret inspect lynx-dashboard-pg-pass --showsecret --format '{{.SecretData}}' 2>/dev/null)
-if [[ -n "$_PG_PASS_SYNC" ]]; then
-    if printf "ALTER USER lynx_dashboard_app PASSWORD '%s';\n" "$_PG_PASS_SYNC" \
-        | podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard \
-        >/dev/null 2>&1; then
-        log_ok "PostgreSQL app user password synchronized"
-    else
-        log_warn "Could not sync PostgreSQL password (non-critical — backend may reconnect)"
-    fi
-fi
-unset _PG_PASS_SYNC
 
 # 4. Frontend
 log_info "Starting frontend..."
@@ -1101,49 +1309,6 @@ for i in $(seq 1 20); do
     fi
     sleep 3
 done
-
-# --- WireGuard — local agent tunnel -----------------------------------------
-
-log_section "Setting up WireGuard tunnel (dashboard ↔ local agent)"
-
-WG_CONF="$WG_DIR/wg-lynx-dash.conf"
-
-# Generate dashboard keypair + PSK
-DASHBOARD_PRIV=$(wg genkey)
-DASHBOARD_PUB=$(printf '%s' "$DASHBOARD_PRIV" | wg pubkey)
-# PSK is kept in scope until final output so admin can copy it for the agent install script.
-# It is also stored as a Podman secret for the dashboard backend (peer management).
-AGENT_PSK=$(wg genpsk)
-podman secret rm lynx-dashboard-local-agent-psk 2>/dev/null || true
-printf '%s' "$AGENT_PSK" | podman secret create lynx-dashboard-local-agent-psk - >/dev/null
-# The local agent keypair is generated by the agent install script.
-# Peer block is written by the agent install script after bootstrap.
-cat > "$WG_CONF" << EOF
-[Interface]
-PrivateKey = ${DASHBOARD_PRIV}
-Address = ${DASHBOARD_WG_IP}/16
-ListenPort = ${AGENT_WG_PORT}
-
-# Peer block added by agent install script after bootstrap:
-# [Peer]
-# PublicKey = <agent pubkey>
-# PresharedKey = ${AGENT_PSK}
-# AllowedIPs = ${AGENT_WG_IP}/32
-EOF
-
-chmod 600 "$WG_CONF"
-DASHBOARD_PRIV="$("$BACKEND_FILE" gen-rand 32)"  # overwrite in memory
-
-log_ok "WireGuard config written: $WG_CONF"
-log_ok "Dashboard WireGuard pubkey: ${DASHBOARD_PUB}"
-printf '%s' "$DASHBOARD_PUB" > "$LYNX_DIR/dashboard-wg-pubkey"
-
-# Bring up the dashboard WireGuard interface now so it exists when the backend
-# starts. Peers are added dynamically by the backend via `wg set` as agents
-# register. The interface must be up before any agent can connect.
-wg-quick up wg-lynx-dash
-systemctl enable "wg-quick@wg-lynx-dash"
-log_ok "WireGuard interface up: wg-lynx-dash (10.100.0.1/16)"
 
 # --- nftables ---------------------------------------------------------------
 
