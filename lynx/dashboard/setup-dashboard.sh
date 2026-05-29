@@ -1023,6 +1023,12 @@ log_ok "Version: ${LATEST_TAG#dashboard@}"
 
 log_section "Starting services"
 
+# Remove any stale postgres_data volume from a partial previous install.
+# lynx-compose does not prefix named volumes with the project name so the
+# volume is always called 'postgres_data'. Stale data causes postgres to skip
+# init on the next clean install, leaving lynx_dashboard_app with no password.
+podman volume rm postgres_data 2>/dev/null || true
+
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
 "$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
