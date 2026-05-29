@@ -58,6 +58,7 @@ PG_CONTAINER="lynx-agent-postgres"
 PG_IMAGE="docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359"
 PG_DB="lynx_agent"
 PG_SUBNET="172.20.100.0/24"
+PG_STATIC_IP="172.20.100.2"  # Fixed IP — agent binary (root) connects directly, no host port mapping
 # Agent UUID v7 — generated on first install, persists across updates
 AGENT_ID=""
 
@@ -174,6 +175,8 @@ read -rsp "  Preshared key (PSK): " PSK
 echo ""
 read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
 echo ""
+read -rsp "  Sync token (shown once when registering this VPS in the dashboard): " SYNC_TOKEN
+echo ""
 
 # Dashboard Ed25519 signing public key — required for the agent to verify
 # every dashboard-signed command (heartbeat ACK, container ops, nftables push,
@@ -196,8 +199,8 @@ fi
 unset DEFAULT_DASHBOARD_SIGN_PUBKEY
 echo ""
 
-if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
-    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
+if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" || -z "$SYNC_TOKEN" ]]; then
+    log_error "All six values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey, sync token)."
     exit 1
 fi
 
@@ -395,6 +398,10 @@ _require_cmd() {
     log_ok "$1 found"
 }
 
+# Podman: use Ubuntu 24.04 noble-updates package (4.9.3+). The kubic/libcontainers
+# upstream repo does not publish packages for Ubuntu 24.04 yet. When an official
+# upstream repo with a verifiable GPG fingerprint becomes available for noble,
+# replace this with repo-pinned install + fingerprint check.
 _apt_ensure podman         podman
 # openssl replaced by `lynx-agent` subcommands for random/keypair ops.
 _apt_ensure nft            nftables
@@ -429,7 +436,6 @@ done
 # require iptables-nft. Lynx upgrades from upstream so the iptables package can
 # be dropped entirely (it remains on the incompatible-software list).
 NETAVARK_REQUIRED="1.10.0"
-NETAVARK_UPSTREAM_VER="1.15.2"
 _netavark_bin=""
 for _candidate in /usr/lib/podman/netavark /usr/libexec/podman/netavark; do
     [[ -x "$_candidate" ]] && _netavark_bin="$_candidate" && break
@@ -448,6 +454,17 @@ _version_lt() {
 
 if _version_lt "$_netavark_ver" "$NETAVARK_REQUIRED"; then
     log_warn "netavark $_netavark_ver < $NETAVARK_REQUIRED — upgrading from upstream"
+
+    log_info "Fetching latest netavark release from GitHub..."
+    NETAVARK_UPSTREAM_VER=$(curl -fsSL --max-time 15 \
+        "https://api.github.com/repos/containers/netavark/releases/latest" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))" 2>/dev/null)
+    if [[ -z "$NETAVARK_UPSTREAM_VER" ]]; then
+        log_error "Could not fetch latest netavark version from GitHub API"
+        exit 1
+    fi
+    log_info "Latest netavark: v${NETAVARK_UPSTREAM_VER}"
+
     _uname_m="$(uname -m)"
     case "$_uname_m" in
         x86_64|amd64)   _na_asset="netavark.gz" ;;
@@ -461,6 +478,27 @@ if _version_lt "$_netavark_ver" "$NETAVARK_REQUIRED"; then
         rm -f "$NETAVARK_TMP"
         exit 1
     fi
+
+    # Verify sha256 against the checksum published in the release.
+    # netavark does not publish GPG signatures — sha256sum protects against
+    # corruption and MITM in transit (over HTTPS to github.com).
+    log_info "Verifying netavark sha256..."
+    _sha256_url="https://github.com/containers/netavark/releases/download/v${NETAVARK_UPSTREAM_VER}/sha256sum"
+    _expected_sha=$(curl -fsSL --max-time 15 "$_sha256_url" 2>/dev/null \
+        | grep "[[:space:]]${_na_asset}$" | awk '{print $1}')
+    if [[ -z "$_expected_sha" ]]; then
+        log_error "Could not fetch sha256 for ${_na_asset} from ${_sha256_url}"
+        rm -f "$NETAVARK_TMP"
+        exit 1
+    fi
+    _actual_sha=$(sha256sum "$NETAVARK_TMP" | awk '{print $1}')
+    if [[ "$_actual_sha" != "$_expected_sha" ]]; then
+        log_error "netavark sha256 mismatch — expected ${_expected_sha}, got ${_actual_sha}"
+        rm -f "$NETAVARK_TMP"
+        exit 1
+    fi
+    log_ok "netavark sha256 verified"
+
     gunzip -f "$NETAVARK_TMP"
     install -m 755 "${NETAVARK_TMP%.gz}" "$_netavark_bin"
     rm -f "${NETAVARK_TMP%.gz}"
@@ -737,7 +775,7 @@ log_section "Starting PostgreSQL for agent"
 podman run -d \
     --name "$PG_CONTAINER" \
     --network "$PG_NETWORK" \
-    --publish 127.0.0.1:5434:5432 \
+    --ip "$PG_STATIC_IP" \
     --secret lynx-agent-pg-root,target=lynx-agent-pg-root \
     --secret lynx-agent-pg-pass,target=lynx-agent-pg-pass \
     -e POSTGRES_USER=postgres \
@@ -762,10 +800,11 @@ for i in $(seq 1 40); do
     sleep 2
 done
 
-# Write DATABASE_URL using the host-mapped port — stable across container restarts
-# regardless of which IP the container is assigned inside the Podman network.
+# Write DATABASE_URL using the container's static IP on the internal Podman network.
+# The agent binary runs as root and can reach the container network directly — no host
+# port mapping needed (which would create iptables DNAT rules that survive reinstalls).
 (
-    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@127.0.0.1:5434/${PG_DB}"
+    DB_URL="postgresql://lynx_agent_app:${PG_PASS}@${PG_STATIC_IP}:5432/${PG_DB}"
     printf '%s' "$DB_URL" > /etc/lynx/credentials/database-url
     chmod 600 /etc/lynx/credentials/database-url
     DB_URL="$("$BINARY_PATH" gen-rand 32)"
@@ -796,7 +835,9 @@ AGENT_ID=${AGENT_ID}
 DATABASE_URL_FILE=/run/credentials/lynx-agent.service/database-url
 INTERNAL_TOKEN_FILE=/run/credentials/lynx-agent.service/internal-token
 DASHBOARD_VERIFY_KEY_FILE=/run/credentials/lynx-agent.service/lynx-dashboard-pubkey
+SYNC_TOKEN_FILE=/run/credentials/lynx-agent.service/sync-token
 LISTEN_ADDR=127.0.0.1:${AGENT_PORT}
+DASHBOARD_URL=http://${DASHBOARD_WG_IP}:8080
 RUST_LOG=info
 ${DASHBOARD_PORT_CONF}
 EOF
@@ -820,6 +861,13 @@ unset INTERNAL_TOKEN
 printf '%s' "$DASHBOARD_SIGN_PUBKEY" > /etc/lynx/credentials/lynx-dashboard-pubkey
 chmod 600 /etc/lynx/credentials/lynx-dashboard-pubkey
 unset DASHBOARD_SIGN_PUBKEY
+
+# Persist the sync token — used to authenticate the agent→dashboard WebSocket
+# connection and audit log sync.  Shown once when registering the VPS.
+printf '%s' "$SYNC_TOKEN" > /etc/lynx/credentials/sync-token
+chmod 600 /etc/lynx/credentials/sync-token
+SYNC_TOKEN="$("$BINARY_PATH" gen-rand 32)"
+unset SYNC_TOKEN
 
 # --- Create systemd service -------------------------------------------------
 
@@ -864,6 +912,7 @@ TimeoutStopSec=30s
 LoadCredential=database-url:/etc/lynx/credentials/database-url
 LoadCredential=internal-token:/etc/lynx/credentials/internal-token
 LoadCredential=lynx-dashboard-pubkey:/etc/lynx/credentials/lynx-dashboard-pubkey
+LoadCredential=sync-token:/etc/lynx/credentials/sync-token
 
 # Minimal hardening — agent is a privileged system daemon (package management,
 # nftables, system user creation, binary self-update all require root).
@@ -885,6 +934,9 @@ log_section "Configuring WireGuard tunnel (agent ↔ dashboard)"
 # Generate agent keypair
 AGENT_PRIV=$(wg genkey)
 AGENT_PUB=$(printf '%s' "$AGENT_PRIV" | wg pubkey)
+log_info "Agent WireGuard public key: ${AGENT_PUB}"
+log_info "    Register this VPS in the dashboard with the above public key"
+log_info "    The dashboard will provide the PSK, WG IP, and sync token"
 
 # --- NAT detection ---
 # Extract the dashboard host (strip port if present)
@@ -894,8 +946,12 @@ DASHBOARD_HOST="${DASHBOARD_ENDPOINT%%:*}"
 LOCAL_IFACE_IP=$(ip route get "$DASHBOARD_HOST" 2>/dev/null | grep -oP 'src \K\S+' | head -1)
 
 # Public IP as seen from the internet
-PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || \
-            curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+PUBLIC_IP=$(curl -4 -sf --max-time 5 https://ifconfig.me 2>/dev/null || \
+            curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+if [[ -z "$PUBLIC_IP" ]]; then
+    PUBLIC_IP=$(curl -6 -sf --max-time 5 https://ifconfig.me 2>/dev/null || \
+                curl -6 -sf --max-time 5 https://api6.ipify.org 2>/dev/null || true)
+fi
 
 KEEPALIVE_LINE=""
 
