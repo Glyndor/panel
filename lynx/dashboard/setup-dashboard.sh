@@ -54,6 +54,19 @@ AGENT_WG_PORT=51820
 AGENT_WG_IP="10.100.0.2"
 DASHBOARD_WG_IP="10.100.0.1"
 
+# Podman network subnets — fixed to prevent stale DNAT when containers restart
+DASHBOARD_DB_SUBNET="10.89.0.0/24"
+DASHBOARD_CACHE_SUBNET="10.89.1.0/24"
+DASHBOARD_APP_SUBNET="10.89.2.0/24"
+# Container static IPs within their respective subnets (.1 = gateway, .2+ = containers)
+PG_IP="10.89.0.2"
+VALKEY_IP="10.89.1.2"
+BACKEND_DB_IP="10.89.0.3"
+BACKEND_CACHE_IP="10.89.1.3"
+BACKEND_APP_IP="10.89.2.2"
+FRONTEND_IP="10.89.2.3"
+NGINX_IP="10.89.2.4"
+
 # --- Root check -------------------------------------------------------------
 
 if [[ $EUID -ne 0 ]]; then
@@ -562,12 +575,17 @@ log_ok "Directories created"
 
 log_section "Creating Podman networks"
 
-for net in lynx-dashboard-db lynx-dashboard-cache lynx-dashboard-app; do
+for spec in \
+    "lynx-dashboard-db:${DASHBOARD_DB_SUBNET}" \
+    "lynx-dashboard-cache:${DASHBOARD_CACHE_SUBNET}" \
+    "lynx-dashboard-app:${DASHBOARD_APP_SUBNET}"; do
+    net="${spec%%:*}"
+    subnet="${spec##*:}"
     if podman network exists "$net" 2>/dev/null; then
         log_warn "Network $net already exists — skipping"
     else
-        podman network create "$net"
-        log_ok "Network created: $net"
+        podman network create "$net" --subnet "$subnet"
+        log_ok "Network created: $net ($subnet)"
     fi
 done
 
@@ -870,7 +888,8 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - lynx-dashboard-app
+      lynx-dashboard-app:
+        ipv4_address: 10.89.2.4
 
   frontend:
     container_name: lynx-dashboard-frontend
@@ -896,7 +915,8 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks:
-      - lynx-dashboard-app
+      lynx-dashboard-app:
+        ipv4_address: 10.89.2.3
 
   backend:
     container_name: lynx-dashboard-backend
@@ -951,9 +971,12 @@ services:
       start_period: 15s
     restart: unless-stopped
     networks:
-      - lynx-dashboard-db
-      - lynx-dashboard-cache
-      - lynx-dashboard-app
+      lynx-dashboard-db:
+        ipv4_address: 10.89.0.3
+      lynx-dashboard-cache:
+        ipv4_address: 10.89.1.3
+      lynx-dashboard-app:
+        ipv4_address: 10.89.2.2
 
   postgres:
     container_name: lynx-dashboard-postgres
@@ -973,7 +996,8 @@ services:
       retries: 10
     restart: unless-stopped
     networks:
-      - lynx-dashboard-db
+      lynx-dashboard-db:
+        ipv4_address: 10.89.0.2
 
   valkey:
     container_name: lynx-dashboard-valkey
@@ -993,7 +1017,8 @@ services:
       retries: 10
     restart: unless-stopped
     networks:
-      - lynx-dashboard-cache
+      lynx-dashboard-cache:
+        ipv4_address: 10.89.1.2
 
 volumes:
   postgres_data:
@@ -1253,7 +1278,7 @@ log_section "Configuring nginx TLS reverse proxy"
 # every request so it picks up the new container IP after an auto-update restart.
 NGINX_RESOLVER=$(podman network inspect lynx-dashboard-app \
     --format '{{range .Subnets}}{{.Gateway}}{{end}}' 2>/dev/null \
-    || echo "10.89.0.1")
+    || echo "10.89.2.1")
 cat > "$NGINX_DIR/default.conf" << NGINXEOF
 server {
     listen 19443 ssl;
@@ -1378,7 +1403,13 @@ table inet lynx-agent {
         # WireGuard (agent tunnels)
         udp dport 51820 accept
 
-        # Dashboard backend accessible from WireGuard management plane only
+        # Allow agents -> dashboard backend (management plane)
+        ip saddr 10.100.0.0/16 ip daddr 10.100.0.1 tcp dport 8080 ct state new accept
+
+        # Block agent-to-agent traffic within management subnet
+        ip saddr 10.100.0.0/16 ip daddr 10.100.0.0/16 drop
+
+        # Dashboard WireGuard interface can reach itself
         ip saddr 10.100.0.1 accept
 
         jump lynx-global

@@ -934,6 +934,9 @@ log_section "Configuring WireGuard tunnel (agent ↔ dashboard)"
 # Generate agent keypair
 AGENT_PRIV=$(wg genkey)
 AGENT_PUB=$(printf '%s' "$AGENT_PRIV" | wg pubkey)
+log_info "Agent WireGuard public key: ${AGENT_PUB}"
+log_info "    Register this VPS in the dashboard with the above public key"
+log_info "    The dashboard will provide the PSK, WG IP, and sync token"
 
 # --- NAT detection ---
 # Extract the dashboard host (strip port if present)
