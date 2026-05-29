@@ -143,6 +143,15 @@ _cleanup_existing() {
     log_ok "Cleanup complete"
 }
 
+# --- Stop stray containers from partial installs ----------------------------
+# Run unconditionally so a manually-cleaned /etc/lynx does not leave containers
+# running that would hold volumes open and block removal.
+for _ctr in lynx-dashboard-postgres lynx-dashboard-valkey lynx-dashboard-backend \
+             lynx-dashboard-frontend lynx-dashboard-nginx; do
+    podman stop --time 5 "$_ctr" 2>/dev/null || true
+    podman rm -f "$_ctr" 2>/dev/null || true
+done
+
 # --- RAM check --------------------------------------------------------------
 
 log_section "Checking system resources"
