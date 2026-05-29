@@ -111,7 +111,25 @@ _cleanup_existing() {
     nft delete table inet lynx-agent 2>/dev/null || true
     rm -f /etc/nftables-lynx-agent.conf
 
-    rm -rf "$LYNX_DIR"
+    # /etc/lynx is shared with the dashboard on co-located VPSes.
+    # Preserve files that belong to the dashboard so the dashboard containers
+    # are not disrupted by an agent reinstall. The agent-specific content is
+    # removed explicitly; the shared directory is removed only if empty.
+    _SAVED_DASH_SIGN_PUBKEY=""
+    [[ -r "$LYNX_DIR/dashboard-sign-pubkey" ]] && _SAVED_DASH_SIGN_PUBKEY=$(< "$LYNX_DIR/dashboard-sign-pubkey")
+
+    rm -rf "$LYNX_WG_DIR" "$LYNX_DIR/credentials"
+    rm -f  "$AGENT_CONF" "$LYNX_DIR/agent-id"
+    rm -f  "$BIN_DIR/lynx-agent" "$BIN_DIR/lynx-agent.prev" "$BIN_DIR/lynx-agent-version"
+    rmdir  "$BIN_DIR" "$LYNX_DIR" 2>/dev/null || true
+
+    if [[ -n "$_SAVED_DASH_SIGN_PUBKEY" ]]; then
+        mkdir -p "$LYNX_DIR"
+        printf '%s' "$_SAVED_DASH_SIGN_PUBKEY" > "$LYNX_DIR/dashboard-sign-pubkey"
+        chmod 644 "$LYNX_DIR/dashboard-sign-pubkey"
+    fi
+    unset _SAVED_DASH_SIGN_PUBKEY
+
     log_ok "Cleanup complete"
 }
 
@@ -137,6 +155,53 @@ if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
     exit 1
 fi
 log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
+
+# --- Collect dashboard bootstrap data ---------------------------------------
+# Prompt FIRST — before anything that may consume stdin (systemctl, userdel,
+# package installs with debconf Teletype fallback, podman, wg-quick, etc.).
+# Dashboard-sign-pubkey is auto-detected here; it is preserved across agent
+# reinstall by _cleanup_existing so the local-agent default still works.
+
+log_section "Dashboard connection setup"
+
+echo ""
+echo -e "${YELLOW}You need the values shown when you registered this VPS in the dashboard.${RESET}"
+echo ""
+
+read -rp "  Dashboard WireGuard endpoint (IP:PORT, e.g. 1.2.3.4:51820): " DASHBOARD_ENDPOINT
+read -rp "  Dashboard WireGuard public key: " DASHBOARD_PUBKEY
+read -rsp "  Preshared key (PSK): " PSK
+echo ""
+read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
+echo ""
+
+# Dashboard Ed25519 signing public key — required for the agent to verify
+# every dashboard-signed command (heartbeat ACK, container ops, nftables push,
+# update.self, ...).  Without it the agent rejects every command and enters
+# lockdown after the 5-minute heartbeat timeout.
+#
+# Local-agent path: if running on the same host as the dashboard, the install
+# script already wrote it to /etc/lynx/dashboard-sign-pubkey — auto-detect that
+# default to avoid an unnecessary prompt.
+DEFAULT_DASHBOARD_SIGN_PUBKEY=""
+if [[ -r /etc/lynx/dashboard-sign-pubkey ]]; then
+    DEFAULT_DASHBOARD_SIGN_PUBKEY=$(< /etc/lynx/dashboard-sign-pubkey)
+fi
+if [[ -n "$DEFAULT_DASHBOARD_SIGN_PUBKEY" ]]; then
+    read -rp "  Dashboard signing public key (Ed25519, base64) [default: detected]: " DASHBOARD_SIGN_PUBKEY
+    DASHBOARD_SIGN_PUBKEY="${DASHBOARD_SIGN_PUBKEY:-$DEFAULT_DASHBOARD_SIGN_PUBKEY}"
+else
+    read -rp "  Dashboard signing public key (Ed25519, base64): " DASHBOARD_SIGN_PUBKEY
+fi
+unset DEFAULT_DASHBOARD_SIGN_PUBKEY
+echo ""
+
+if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
+    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
+    exit 1
+fi
+
+AGENT_WG_IP="$AGENT_WG_IP_INPUT"
 
 # --- Incompatible software --------------------------------------------------
 
@@ -444,49 +509,6 @@ if ! $_ntp_active; then
 fi
 
 unset _ntp_active
-
-# --- Collect dashboard bootstrap data ---------------------------------------
-
-log_section "Dashboard connection setup"
-
-echo ""
-echo -e "${YELLOW}You need the values shown when you registered this VPS in the dashboard.${RESET}"
-echo ""
-
-read -rp "  Dashboard WireGuard endpoint (IP:PORT, e.g. 1.2.3.4:51820): " DASHBOARD_ENDPOINT
-read -rp "  Dashboard WireGuard public key: " DASHBOARD_PUBKEY
-read -rsp "  Preshared key (PSK): " PSK
-echo ""
-read -rp "  Agent WireGuard IP assigned by dashboard (e.g. 10.100.0.3): " AGENT_WG_IP_INPUT
-echo ""
-
-# Dashboard Ed25519 signing public key — required for the agent to verify
-# every dashboard-signed command (heartbeat ACK, container ops, nftables push,
-# update.self, ...).  Without it the agent rejects every command and enters
-# lockdown after the 5-minute heartbeat timeout.
-#
-# Local-agent path: if running on the same host as the dashboard, the install
-# script already wrote it to /etc/lynx/dashboard-sign-pubkey — auto-detect that
-# default to avoid an unnecessary prompt.
-DEFAULT_DASHBOARD_SIGN_PUBKEY=""
-if [[ -r /etc/lynx/dashboard-sign-pubkey ]]; then
-    DEFAULT_DASHBOARD_SIGN_PUBKEY=$(< /etc/lynx/dashboard-sign-pubkey)
-fi
-if [[ -n "$DEFAULT_DASHBOARD_SIGN_PUBKEY" ]]; then
-    read -rp "  Dashboard signing public key (Ed25519, base64) [default: detected]: " DASHBOARD_SIGN_PUBKEY
-    DASHBOARD_SIGN_PUBKEY="${DASHBOARD_SIGN_PUBKEY:-$DEFAULT_DASHBOARD_SIGN_PUBKEY}"
-else
-    read -rp "  Dashboard signing public key (Ed25519, base64): " DASHBOARD_SIGN_PUBKEY
-fi
-unset DEFAULT_DASHBOARD_SIGN_PUBKEY
-echo ""
-
-if [[ -z "$DASHBOARD_ENDPOINT" || -z "$DASHBOARD_PUBKEY" || -z "$PSK" || -z "$AGENT_WG_IP_INPUT" || -z "$DASHBOARD_SIGN_PUBKEY" ]]; then
-    log_error "All five values are required (endpoint, WG pubkey, PSK, agent WG IP, dashboard signing pubkey)."
-    exit 1
-fi
-
-AGENT_WG_IP="$AGENT_WG_IP_INPUT"
 
 # --- Create directories -----------------------------------------------------
 
