@@ -8,7 +8,6 @@ const BINARY_PATH: &str = "/etc/lynx/bin/lynx-dashboard-backend";
 const FRONTEND_BINARY: &str = "/etc/lynx/frontend/lynx-dashboard-frontend";
 const FRONTEND_DIR: &str = "/etc/lynx/frontend";
 const FRONTEND_CONTAINER: &str = "lynx-dashboard-frontend";
-const PODMAN_SOCKET: &str = "/run/podman/podman.sock";
 pub const VERSION_FILE: &str = "/etc/lynx/bin/dashboard-version";
 const MAX_DOWNLOAD_BYTES: usize = 200 * 1024 * 1024;
 
@@ -113,7 +112,7 @@ async fn download_and_verify(url: &str, sig_url: &str, label: &str) -> Result<Ve
 
 async fn swap_frontend(binary: &[u8], assets: &[u8]) -> Result<()> {
     // Stop container so the binary file is not in use during swap.
-    podman_request(&format!("/containers/{FRONTEND_CONTAINER}/stop"))
+    crate::podman::container_stop(FRONTEND_CONTAINER)
         .await
         .context("stop frontend container")?;
 
@@ -142,7 +141,7 @@ async fn swap_frontend(binary: &[u8], assets: &[u8]) -> Result<()> {
         .context("spawn_blocking extract assets")??;
 
     // Start container with the new binary.
-    podman_request(&format!("/containers/{FRONTEND_CONTAINER}/start"))
+    crate::podman::container_start(FRONTEND_CONTAINER)
         .await
         .context("start frontend container")?;
 
@@ -199,32 +198,6 @@ fn extract_assets(data: &[u8], dest: &str) -> Result<()> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("tar extraction failed: {stderr}");
     }
-    Ok(())
-}
-
-async fn podman_request(path: &str) -> Result<()> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::UnixStream;
-
-    let mut stream = UnixStream::connect(PODMAN_SOCKET)
-        .await
-        .context("connect to Podman socket")?;
-
-    let req = format!("POST {path} HTTP/1.0\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
-    stream.write_all(req.as_bytes()).await?;
-    stream.shutdown().await?;
-
-    let mut buf = Vec::with_capacity(1024);
-    stream.read_to_end(&mut buf).await?;
-
-    let resp = std::str::from_utf8(&buf).unwrap_or("");
-    let status_line = resp.lines().next().unwrap_or("");
-
-    // 2xx = success; 304 = already in target state (container already stopped/started)
-    if !status_line.contains(" 2") && !status_line.contains(" 304") {
-        anyhow::bail!("Podman API {path}: {status_line}");
-    }
-
     Ok(())
 }
 

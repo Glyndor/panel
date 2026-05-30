@@ -64,19 +64,25 @@ async fn check_releases(state: &AppState) {
 
     let latest_agent = releases
         .iter()
+        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
+        .filter(|r| r.get("draft").and_then(|v| v.as_bool()) != Some(true))
         .filter_map(|r| r["tag_name"].as_str())
         .filter(|t| t.starts_with("agent@"))
         .map(|t| t.trim_start_matches("agent@"))
-        .next()
-        .map(|s| s.to_string());
+        .filter_map(|s| parse_semver(s).map(|v| (s, v)))
+        .max_by_key(|(_, v)| *v)
+        .map(|(s, _)| s.to_string());
 
     let latest_dashboard = releases
         .iter()
+        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
+        .filter(|r| r.get("draft").and_then(|v| v.as_bool()) != Some(true))
         .filter_map(|r| r["tag_name"].as_str())
         .filter(|t| t.starts_with("dashboard@"))
         .map(|t| t.trim_start_matches("dashboard@"))
-        .next()
-        .map(|s| s.to_string());
+        .filter_map(|s| parse_semver(s).map(|v| (s, v)))
+        .max_by_key(|(_, v)| *v)
+        .map(|(s, _)| s.to_string());
 
     if let Some(ref ver) = latest_agent {
         tracing::info!(version = %ver, "scheduler: latest agent release detected");
@@ -289,7 +295,17 @@ pub(crate) async fn needs_scheduled_rotation(db: &sqlx::PgPool) -> bool {
     .unwrap_or(Some(chrono::Utc::now()));
 
     match last {
-        None => true,
+        // Fresh install: no rotation history. Seed the clock so the 90-day
+        // window starts from today rather than triggering an immediate rotation.
+        None => {
+            let _ = sqlx::query!(
+                "INSERT INTO rotation_log (id, reason, scope) VALUES ($1, 'scheduled', 'all')",
+                uuid::Uuid::now_v7(),
+            )
+            .execute(db)
+            .await;
+            false
+        }
         Some(ts) => (chrono::Utc::now() - ts).num_days() >= ROTATION_INTERVAL_DAYS,
     }
 }
