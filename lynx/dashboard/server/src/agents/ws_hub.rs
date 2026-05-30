@@ -317,8 +317,9 @@ async fn handle_agent_message(
                 if let Ok(req_id) = Uuid::parse_str(id_str) {
                     let mut map = pending.lock().await;
                     if let Some(tx) = map.remove(&req_id) {
-                        let body = msg.data.get("body").cloned().unwrap_or(json!({}));
-                        let _ = tx.send(body);
+                        // Pass the full response data (ok + error + body) so callers
+                        // can inspect ok/error when the command fails, not just body.
+                        let _ = tx.send(msg.data.clone());
                     }
                 }
             }
