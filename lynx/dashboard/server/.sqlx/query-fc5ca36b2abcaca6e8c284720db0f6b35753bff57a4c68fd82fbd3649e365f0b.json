@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        SELECT EXISTS(\n                            SELECT 1 FROM agent_events\n                            WHERE agent_id = $1\n                              AND event = 'heartbeat_lost'\n                              AND created_at > COALESCE(\n                                  (SELECT created_at FROM agent_events\n                                   WHERE agent_id = $1\n                                     AND event IN ('rebooting', 'updating')\n                                   ORDER BY created_at DESC LIMIT 1),\n                                  '1970-01-01'::timestamptz\n                              )\n                        ) AS \"exists!\"\n                        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fc5ca36b2abcaca6e8c284720db0f6b35753bff57a4c68fd82fbd3649e365f0b"
+}
