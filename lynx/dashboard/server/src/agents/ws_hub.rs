@@ -110,14 +110,30 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
         });
     }
 
+    // If no message arrives for 90 s (3× heartbeat interval), the underlying TCP
+    // connection is silently dead (e.g. iptables DROP on the agent side). Without this
+    // timer, is_connected() stays true indefinitely and the heartbeat scheduler skips
+    // the HTTP poll, so heartbeat_lost never fires.
+    const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+    let idle_deadline = tokio::time::sleep(WS_IDLE_TIMEOUT);
+    tokio::pin!(idle_deadline);
+
+    // Send timeout: if socket.send() blocks longer than WS_IDLE_TIMEOUT (e.g. TCP send
+    // buffer full because the agent's WG interface is gone), we must not block the select
+    // loop — the idle_deadline arm would never fire. Apply the same timeout to sends.
+    const WS_SEND_TIMEOUT: Duration = Duration::from_secs(30);
+
     loop {
         tokio::select! {
             Some(msg) = rx.recv() => {
-                if socket.send(msg).await.is_err() {
-                    break;
+                match tokio::time::timeout(WS_SEND_TIMEOUT, socket.send(msg)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) | Err(_) => break, // send error or timeout → dead connection
                 }
             }
             msg = socket.recv() => {
+                // Any inbound message resets the idle timer.
+                idle_deadline.as_mut().reset(tokio::time::Instant::now() + WS_IDLE_TIMEOUT);
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Err(e) = handle_agent_message(&state, agent_id, &pending, text.as_str()).await {
@@ -130,6 +146,10 @@ async fn handle_socket(state: AppState, agent_id: Uuid, mut socket: WebSocket) {
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
                 }
+            }
+            _ = &mut idle_deadline => {
+                tracing::warn!(agent_id = %agent_id, "WS idle timeout — no message in 90 s, closing connection");
+                break;
             }
         }
     }
