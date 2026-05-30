@@ -121,8 +121,67 @@ async fn poll_agents(state: &AppState) {
 
         tracing::debug!(agent_id = %id, status = new_status, version = ?reported_version, "heartbeat polled");
 
-        // Fire heartbeat_lost event when a previously-online agent becomes unreachable.
-        if new_status == "offline" && agent.status == "online" {
+        // Fire heartbeat_lost when an agent becomes unreachable OR when it
+        // remains offline after a grace-period disconnect (rebooting/updating).
+        // Without the second condition, an agent that goes offline via an
+        // expected disconnect and never returns is silently ignored forever.
+        let should_fire_heartbeat_lost = if new_status == "offline" {
+            if agent.status == "online" {
+                // Transition online → offline: fire immediately.
+                true
+            } else if agent.status == "offline" {
+                // Already offline: only fire if the most-recent grace-period
+                // event (rebooting/updating) is now older than 5 minutes.
+                let past_grace: bool = sqlx::query_scalar!(
+                    r#"
+                    SELECT NOT EXISTS(
+                        SELECT 1 FROM agent_events
+                        WHERE agent_id = $1
+                          AND event IN ('rebooting', 'updating')
+                          AND created_at > NOW() - INTERVAL '5 minutes'
+                    ) AS "not_in_grace!"
+                    "#,
+                    id
+                )
+                .fetch_one(&state.db)
+                .await
+                .unwrap_or(false);
+
+                if past_grace {
+                    // Only fire once — skip if a heartbeat_lost was already
+                    // recorded more recently than the last grace-period event.
+                    let already_fired: bool = sqlx::query_scalar!(
+                        r#"
+                        SELECT EXISTS(
+                            SELECT 1 FROM agent_events
+                            WHERE agent_id = $1
+                              AND event = 'heartbeat_lost'
+                              AND created_at > COALESCE(
+                                  (SELECT created_at FROM agent_events
+                                   WHERE agent_id = $1
+                                     AND event IN ('rebooting', 'updating')
+                                   ORDER BY created_at DESC LIMIT 1),
+                                  '1970-01-01'::timestamptz
+                              )
+                        ) AS "exists!"
+                        "#,
+                        id
+                    )
+                    .fetch_one(&state.db)
+                    .await
+                    .unwrap_or(false);
+                    !already_fired
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if should_fire_heartbeat_lost {
             let event_id = uuid::Uuid::now_v7();
             let _ = sqlx::query!(
                 "INSERT INTO agent_events (id, agent_id, event, detail) VALUES ($1, $2, 'heartbeat_lost', NULL)",

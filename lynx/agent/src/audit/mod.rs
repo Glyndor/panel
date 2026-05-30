@@ -17,6 +17,7 @@ pub struct AuditEntry<'a> {
 pub enum AuditResult {
     Success,
     Rejected,
+    RejectedRateLimit,
     Failed,
 }
 
@@ -25,6 +26,7 @@ impl AuditResult {
         match self {
             AuditResult::Success => "success",
             AuditResult::Rejected => "rejected",
+            AuditResult::RejectedRateLimit => "rejected_rate_limit",
             AuditResult::Failed => "failed",
         }
     }
