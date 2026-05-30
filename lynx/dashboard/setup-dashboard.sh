@@ -953,6 +953,7 @@ services:
       - /etc/lynx/bin:/etc/lynx/bin
       - /etc/lynx/frontend:/etc/lynx/frontend
       - /run/podman/podman.sock:/run/podman/podman.sock
+      - /etc/lynx/secrets:/etc/lynx/secrets:rw
       - /etc/lynx/secrets/lynx-dashboard-database-url:/run/secrets/lynx-dashboard-database-url:ro
       - /etc/lynx/secrets/lynx-dashboard-redis-url:/run/secrets/lynx-dashboard-redis-url:ro
       - /etc/lynx/secrets/lynx-dashboard-api-token:/run/secrets/lynx-dashboard-api-token:ro
