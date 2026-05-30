@@ -55,7 +55,7 @@ AGENT_PORT=9090
 LYNX_AGENT_USER="lynx-agent"
 PG_NETWORK="lynx-agent-db"
 PG_CONTAINER="lynx-agent-postgres"
-PG_IMAGE="docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359"
+PG_IMAGE="docker.io/percona/percona-distribution-postgresql@sha256:71cce6ed329d4108461eeaa40fb0c1517bee2e0f78051cee40a4b010eed448c3"
 PG_DB="lynx_agent"
 PG_SUBNET="172.20.100.0/24"
 PG_STATIC_IP="172.20.100.2"  # Fixed IP — agent binary (root) connects directly, no host port mapping
@@ -732,7 +732,25 @@ log_info "Internal bearer token..."
 INTERNAL_TOKEN=$("$BINARY_PATH" gen-rand 32)
 printf '%s' "$INTERNAL_TOKEN" | podman secret create lynx-agent-internal-token - >/dev/null
 
+log_info "KEK (Key Encryption Key)..."
+mkdir -p /etc/lynx/credentials
+chmod 700 /etc/lynx/credentials
+(
+    KEK=$("$BINARY_PATH" gen-rand 32)
+    printf '%s' "$KEK" > /etc/lynx/credentials/lynx-kek
+    chmod 600 /etc/lynx/credentials/lynx-kek
+    KEK="$("$BINARY_PATH" gen-rand 32)"
+)
+
 log_ok "Agent secrets generated"
+
+log_info "Creating pg_tde keyring directory..."
+# pg_tde manages its own keyring file — we just provide the directory.
+# Owned by UID 26 (postgres user inside the Percona container) for rootful Podman.
+mkdir -p /etc/lynx/pg-keyring
+chown 26:26 /etc/lynx/pg-keyring
+chmod 700 /etc/lynx/pg-keyring
+log_ok "pg_tde keyring dir: /etc/lynx/pg-keyring"
 
 # --- Podman network for agent DB -------------------------------------------
 
@@ -763,6 +781,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_agent_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO lynx_agent_app;
+
+-- Enable transparent storage encryption via pg_tde (AES-256).
+-- The keyring file is created and managed by pg_tde at /var/pg-keyring/lynx.keyring.
+-- All future tables in lynx_agent will be transparently encrypted (tde_heap).
+CREATE EXTENSION IF NOT EXISTS pg_tde;
+SELECT pg_tde_add_database_key_provider_file('lynx-keyring', '/var/pg-keyring/lynx.keyring');
+SELECT pg_tde_create_key_using_database_key_provider('lynx-agent-key', 'lynx-keyring');
+SELECT pg_tde_set_key_using_database_key_provider('lynx-agent-key', 'lynx-keyring');
+ALTER DATABASE lynx_agent SET default_table_access_method = tde_heap;
 PGSQL
 
 chmod 644 "$PG_INIT_DIR/01-init.sql"
@@ -771,6 +798,15 @@ log_ok "Init script: $PG_INIT_DIR/01-init.sql"
 # --- Start PostgreSQL container ---------------------------------------------
 
 log_section "Starting PostgreSQL for agent"
+
+# Remove any stale data volume from a partial previous install.
+# The init SQL (docker-entrypoint-initdb.d) only runs on an empty data dir —
+# a leftover volume causes init to be silently skipped, leaving the app user
+# without the correct password and pg_tde without a keyring.
+if podman volume exists lynx-agent-pg-data 2>/dev/null; then
+    log_info "Removing stale PostgreSQL data volume from previous install..."
+    podman volume rm --force lynx-agent-pg-data 2>/dev/null || true
+fi
 
 podman run -d \
     --name "$PG_CONTAINER" \
@@ -781,8 +817,10 @@ podman run -d \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_DB="$PG_DB" \
     -e POSTGRES_PASSWORD_FILE=/run/secrets/lynx-agent-pg-root \
-    -v lynx-agent-pg-data:/var/lib/postgresql \
+    -e 'POSTGRES_INITDB_ARGS=-c shared_preload_libraries=pg_tde' \
+    -v lynx-agent-pg-data:/data/db \
     -v "$PG_INIT_DIR:/docker-entrypoint-initdb.d:ro" \
+    -v /etc/lynx/pg-keyring:/var/pg-keyring \
     --restart unless-stopped \
     "$PG_IMAGE"
 
@@ -836,6 +874,7 @@ DATABASE_URL_FILE=/run/credentials/lynx-agent.service/database-url
 INTERNAL_TOKEN_FILE=/run/credentials/lynx-agent.service/internal-token
 DASHBOARD_VERIFY_KEY_FILE=/run/credentials/lynx-agent.service/lynx-dashboard-pubkey
 SYNC_TOKEN_FILE=/run/credentials/lynx-agent.service/sync-token
+KEK_FILE=/run/credentials/lynx-agent.service/lynx-kek
 LISTEN_ADDR=127.0.0.1:${AGENT_PORT}
 DASHBOARD_URL=http://${DASHBOARD_WG_IP}:8080
 RUST_LOG=info
@@ -913,6 +952,8 @@ LoadCredential=database-url:/etc/lynx/credentials/database-url
 LoadCredential=internal-token:/etc/lynx/credentials/internal-token
 LoadCredential=lynx-dashboard-pubkey:/etc/lynx/credentials/lynx-dashboard-pubkey
 LoadCredential=sync-token:/etc/lynx/credentials/sync-token
+LoadCredential=lynx-wg-psk:/etc/lynx/credentials/lynx-wg-psk
+LoadCredential=lynx-kek:/etc/lynx/credentials/lynx-kek
 
 # Minimal hardening — agent is a privileged system daemon (package management,
 # nftables, system user creation, binary self-update all require root).
@@ -1015,6 +1056,13 @@ if [[ -f "$_DASH_WG_CONF" ]]; then
     fi
 fi
 unset _DASH_WG_CONF
+
+# Persist PSK as a separate credential for systemd LoadCredential tmpfs isolation.
+# The wg.conf already contains it for tunnel setup; this credential lets the agent
+# Rust code read the PSK from /run/credentials/lynx-agent.service/lynx-wg-psk
+# without accessing the conf file directly.
+printf '%s' "$PSK" > /etc/lynx/credentials/lynx-wg-psk
+chmod 600 /etc/lynx/credentials/lynx-wg-psk
 
 AGENT_PRIV="$("$BINARY_PATH" gen-rand 32)"  # overwrite
 PSK="$("$BINARY_PATH" gen-rand 32)"

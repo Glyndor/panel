@@ -737,6 +737,13 @@ SECRETS_DIR="/etc/lynx/secrets"
 mkdir -p "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR"
 
+# pg_tde keyring directory — pg_tde manages the keyring file here.
+# Owned by UID 26 (postgres in the Percona container). Must be backed up:
+# without /etc/lynx/pg-keyring/lynx.keyring, the encrypted DB is unrecoverable.
+mkdir -p /etc/lynx/pg-keyring
+chown 26:26 /etc/lynx/pg-keyring
+chmod 700 /etc/lynx/pg-keyring
+
 _write_secret() {
     local name="$1" value="$2"
     printf '%s' "$value" > "$SECRETS_DIR/$name"
@@ -976,15 +983,17 @@ services:
 
   postgres:
     container_name: lynx-dashboard-postgres
-    image: docker.io/library/postgres@sha256:bfae840554bdbd4e9f8d097d8e23ffda8aac82866e04ea0d6bc09647234dd359
+    image: docker.io/percona/percona-distribution-postgresql@sha256:71cce6ed329d4108461eeaa40fb0c1517bee2e0f78051cee40a4b010eed448c3
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=lynx_dashboard
       - POSTGRES_PASSWORD_FILE=/run/secrets/lynx-dashboard-pg-root
+      - POSTGRES_INITDB_ARGS=-c shared_preload_libraries=pg_tde
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:/data/db
       - /etc/lynx/secrets/lynx-dashboard-pg-root:/run/secrets/lynx-dashboard-pg-root:ro
       - /etc/lynx/secrets/lynx-dashboard-pg-pass:/run/secrets/lynx-dashboard-pg-pass:ro
+      - /etc/lynx/pg-keyring:/var/pg-keyring
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lynx_dashboard"]
       interval: 5s
@@ -1071,7 +1080,7 @@ done
 # Initialize app user and privileges. Runs every install — idempotent.
 # Direct psql avoids the docker-entrypoint-initdb.d mechanism which only runs
 # on a completely empty PGDATA directory and silently skips on reinstalls.
-log_info "Initializing PostgreSQL app user..."
+log_info "Initializing PostgreSQL app user and encryption..."
 _PG_PASS=$(cat "$SECRETS_DIR/lynx-dashboard-pg-pass")
 podman exec -i lynx-dashboard-postgres psql -U postgres -d lynx_dashboard << SQL
 DO \$\$
@@ -1086,9 +1095,20 @@ GRANT CONNECT ON DATABASE lynx_dashboard TO lynx_dashboard_app;
 GRANT USAGE, CREATE ON SCHEMA public TO lynx_dashboard_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lynx_dashboard_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO lynx_dashboard_app;
+
+-- Enable transparent storage encryption via pg_tde (AES-256).
+-- The keyring file is created and managed by pg_tde at /var/pg-keyring/lynx.keyring.
+-- All future tables in lynx_dashboard will be transparently encrypted (tde_heap).
+-- BACKUP REQUIREMENT: /etc/lynx/pg-keyring/lynx.keyring must be backed up --
+-- without it, the encrypted database is unrecoverable even with a valid pg_dump.
+CREATE EXTENSION IF NOT EXISTS pg_tde;
+SELECT pg_tde_add_database_key_provider_file('lynx-keyring', '/var/pg-keyring/lynx.keyring');
+SELECT pg_tde_create_key_using_database_key_provider('lynx-dashboard-key', 'lynx-keyring');
+SELECT pg_tde_set_key_using_database_key_provider('lynx-dashboard-key', 'lynx-keyring');
+ALTER DATABASE lynx_dashboard SET default_table_access_method = tde_heap;
 SQL
 unset _PG_PASS
-log_ok "PostgreSQL app user initialized"
+log_ok "PostgreSQL app user and encryption initialized"
 
 # 2. Valkey
 log_info "Starting Valkey..."
@@ -1545,6 +1565,11 @@ echo ""
 AGENT_PSK="$("$BACKEND_FILE" gen-rand 32)"
 unset AGENT_PSK DASHBOARD_PUB DASHBOARD_SIGN_PUBKEY
 echo -e "${YELLOW}Next step:${RESET} Run the agent install script on this VPS to complete the local WireGuard tunnel."
+echo ""
+echo -e "${BOLD}${RED}=== BACKUP REQUIRED ===${RESET}"
+echo -e "  Back up these files — loss means permanent data loss:"
+echo -e "  ${BOLD}/etc/lynx/pg-keyring/lynx.keyring${RESET}  ← pg_tde encryption keyring"
+echo -e "  ${BOLD}/etc/lynx/secrets/lynx-dashboard-kek${RESET}  ← application KEK"
 echo ""
 echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Jaro-c/Lynx"
 echo ""
