@@ -615,11 +615,12 @@ LATEST_TAG=$(curl -fsSL \
     | python3 -c "
 import sys, json
 releases = json.load(sys.stdin)
-for r in releases:
-    tag = r.get('tag_name', '')
-    if tag.startswith('dashboard@') and not r.get('prerelease'):
-        print(tag)
-        break
+tags = [r['tag_name'] for r in releases
+        if r.get('tag_name','').startswith('dashboard@')
+        and not r.get('prerelease') and not r.get('draft')]
+if tags:
+    def ver(t): return tuple(int(x) for x in t.split('@')[1].split('.'))
+    print(max(tags, key=ver))
 " 2>/dev/null)
 
 if [[ -z "$LATEST_TAG" ]]; then
@@ -754,6 +755,10 @@ log_info "Generating PostgreSQL root password..."
 (
     PG_ROOT=$("$LB" gen-rand 32)
     _write_secret lynx-dashboard-pg-root "$PG_ROOT"
+    # Percona PostgreSQL image runs as UID 26 (postgres) from the start — not root.
+    # The bind-mounted secret file must be world-readable; the parent dir (700 root:root)
+    # prevents host access from unprivileged users.
+    chmod 644 "$SECRETS_DIR/lynx-dashboard-pg-root"
     PG_ROOT="$("$LB" gen-rand 32)"
 )
 
@@ -761,6 +766,7 @@ log_info "Generating PostgreSQL app password and database URL..."
 (
     PG_PASS=$("$LB" gen-rand 32)
     _write_secret lynx-dashboard-pg-pass "$PG_PASS"
+    chmod 644 "$SECRETS_DIR/lynx-dashboard-pg-pass"
     _write_secret lynx-dashboard-database-url \
         "postgresql://lynx_dashboard_app:${PG_PASS}@lynx-dashboard-postgres:5432/lynx_dashboard"
     PG_PASS="$("$LB" gen-rand 32)"
