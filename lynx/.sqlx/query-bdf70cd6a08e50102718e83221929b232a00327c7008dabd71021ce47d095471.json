@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rotation_log (id, reason, scope) VALUES ($1, 'scheduled', 'all')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bdf70cd6a08e50102718e83221929b232a00327c7008dabd71021ce47d095471"
+}

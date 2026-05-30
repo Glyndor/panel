@@ -97,11 +97,12 @@ LATEST_TAG=$(curl -fsSL \
     | python3 -c "
 import sys, json
 releases = json.load(sys.stdin)
-for r in releases:
-    tag = r.get('tag_name', '')
-    if tag.startswith('dashboard@') and not r.get('prerelease'):
-        print(tag)
-        break
+tags = [r['tag_name'] for r in releases
+        if r.get('tag_name','').startswith('dashboard@')
+        and not r.get('prerelease') and not r.get('draft')]
+if tags:
+    def ver(t): return tuple(int(x) for x in t.split('@')[1].split('.'))
+    print(max(tags, key=ver))
 " 2>/dev/null)
 
 if [[ -z "$LATEST_TAG" ]]; then
@@ -297,9 +298,36 @@ log_info "Starting frontend container..."
 if ! podman start lynx-dashboard-frontend 2>/dev/null; then
     /etc/lynx/bin/lynx-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
         log_error "Failed to start frontend container"
+        if [[ -f "${FRONTEND_BIN_FILE}.prev" ]]; then
+            log_warn "Restoring previous frontend binary..."
+            mv "${FRONTEND_BIN_FILE}.prev" "$FRONTEND_BIN_FILE"
+            podman start lynx-dashboard-frontend 2>/dev/null || true
+            log_error "Previous frontend version restored — investigate before retrying"
+        fi
         exit 1
     }
 fi
+
+log_info "Waiting for frontend to become healthy..."
+for i in $(seq 1 30); do
+    if podman inspect lynx-dashboard-frontend --format '{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+        log_ok "Frontend healthy"
+        break
+    fi
+    if [[ $i -eq 30 ]]; then
+        log_error "Frontend did not become healthy after update"
+        if [[ -f "${FRONTEND_BIN_FILE}.prev" ]]; then
+            log_warn "Restoring previous frontend binary..."
+            podman stop lynx-dashboard-frontend 2>/dev/null || true
+            mv "${FRONTEND_BIN_FILE}.prev" "$FRONTEND_BIN_FILE"
+            podman start lynx-dashboard-frontend 2>/dev/null || true
+            log_error "Previous frontend version restored — investigate before retrying"
+        fi
+        podman logs lynx-dashboard-frontend --tail 30 2>/dev/null || true
+        exit 1
+    fi
+    sleep 3
+done
 log_ok "Frontend deployed"
 
 # --- Write version file -----------------------------------------------------

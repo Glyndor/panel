@@ -95,3 +95,29 @@ pub async fn secret_read(name: &str) -> Option<Zeroizing<String>> {
         .and_then(|s| s.as_str())
         .map(|s| Zeroizing::new(s.trim().to_string()))
 }
+
+/// Stop a container via the Podman libpod API.
+/// Returns Ok on 204 (stopped) or 304 (already stopped).
+pub async fn container_stop(name: &str) -> Result<()> {
+    let path = format!("/v4.0.0/libpod/containers/{name}/stop");
+    let status = podman_http("POST", &path, &[])
+        .await
+        .context("stop container")?;
+    if status == 204 || status == 304 {
+        return Ok(());
+    }
+    anyhow::bail!("Podman container stop {name}: HTTP {status}");
+}
+
+/// Start a container via the Podman libpod API.
+/// Returns Ok on 204 (started) or 304 (already running).
+pub async fn container_start(name: &str) -> Result<()> {
+    let path = format!("/v4.0.0/libpod/containers/{name}/start");
+    let status = podman_http("POST", &path, &[])
+        .await
+        .context("start container")?;
+    if status == 204 || status == 304 {
+        return Ok(());
+    }
+    anyhow::bail!("Podman container start {name}: HTTP {status}");
+}
