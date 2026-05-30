@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT entry_hash, previous_hash,\n               id as \"id: Uuid\",\n               agent_id as \"agent_id: Uuid\",\n               organization_id as \"organization_id: Uuid\",\n               user_id as \"user_id: Uuid\",\n               command_type, result, error\n           FROM audit_log ORDER BY created_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "previous_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "id: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "agent_id: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "organization_id: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "user_id: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "command_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "result",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "error",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ff5b6781f0fd181c7a6acc923513dc98af2d4233da678195c197658a8b0b0109"
+}
