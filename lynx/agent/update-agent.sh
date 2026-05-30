@@ -96,11 +96,12 @@ LATEST_TAG=$(curl -fsSL \
     | python3 -c "
 import sys, json
 releases = json.load(sys.stdin)
-for r in releases:
-    tag = r.get('tag_name', '')
-    if tag.startswith('agent@') and not r.get('prerelease'):
-        print(tag)
-        break
+tags = [r['tag_name'] for r in releases
+        if r.get('tag_name','').startswith('agent@')
+        and not r.get('prerelease') and not r.get('draft')]
+if tags:
+    def ver(t): return tuple(int(x) for x in t.split('@')[1].split('.'))
+    print(max(tags, key=ver))
 " 2>/dev/null)
 
 if [[ -z "$LATEST_TAG" ]]; then
