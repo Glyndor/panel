@@ -125,7 +125,7 @@ pub async fn rotate_jwt_sessions(state: &AppState) -> Result<(), AppError> {
 }
 
 pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Result<(), AppError> {
-    use crate::agents::wg;
+    use crate::agents::{wg, ws_hub};
     use std::io::Write;
 
     let agents = sqlx::query!(
@@ -133,8 +133,6 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
     )
     .fetch_all(&state.db)
     .await?;
-
-    let client = crate::agents::client::build_agent_client(&state.config);
 
     for agent in &agents {
         // Generate new PSK and persist to Podman secret (replaces old one).
@@ -146,7 +144,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
             }
         };
 
-        // Update WireGuard interface on dashboard side.
+        // Update WireGuard interface on dashboard side (local agent manages the WG hub).
         let psk_update = std::process::Command::new("wg")
             .args([
                 "set",
@@ -176,7 +174,7 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
             .await
             .insert(agent.id, new_psk.clone());
 
-        // Send new PSK to agent via signed command.
+        // Send new PSK to agent via WebSocket (the only reliable channel to remote agents).
         let command = serde_json::json!({
             "type": "wg.rotate_psk",
             "new_psk": *new_psk,
@@ -184,20 +182,14 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
 
         let signed = cmd::sign_command(&state.config, agent.id, triggered_by, "write", &command)
             .map_err(AppError::Internal)?;
+        let signed_val = serde_json::to_value(&signed).unwrap_or_default();
 
-        let url = format!("https://{}:{}/cmd", agent.wg_ip, agent.api_port);
-
-        let _ = client
-            .post(&url)
-            .header(
-                "Authorization",
-                format!("Bearer {}", &*state.config.internal_token),
-            )
-            .json(&signed)
-            .send()
-            .await;
-
-        tracing::info!(agent_id = %agent.id, "WireGuard PSK rotated");
+        match ws_hub::push_command(state, agent.id, signed_val).await {
+            Some(_) => tracing::info!(agent_id = %agent.id, "WireGuard PSK rotated"),
+            None => {
+                tracing::warn!(agent_id = %agent.id, "WireGuard PSK rotation: agent WS unavailable — will retry on reconnect")
+            }
+        }
     }
 
     Ok(())

@@ -53,8 +53,8 @@ pub async fn run_verified_command(
                 organization_id: None,
                 user_id: None,
                 command_type: "unknown",
-                result: AuditResult::Rejected,
-                error: Some("rejected_rate_limit".to_string()),
+                result: AuditResult::RejectedRateLimit,
+                error: None,
             },
         )
         .await
