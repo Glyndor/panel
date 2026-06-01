@@ -82,11 +82,21 @@ pub async fn verify_command(
         anyhow::bail!("command not addressed to this agent");
     }
 
-    // 5. Timestamp freshness (±30s)
-    let now = Utc::now().timestamp();
-    let skew = (now - payload.timestamp).abs();
-    if skew > MAX_TIMESTAMP_SKEW_SECS {
-        anyhow::bail!("timestamp too old or in future (skew={skew}s)");
+    // 5. Timestamp freshness (±30s) — bypass for heartbeat_ack so clock skew on the
+    // agent side does not prevent the connection-management command from succeeding.
+    // Nonce dedup (step 6) still prevents replay even without the timestamp check.
+    let is_heartbeat_ack = payload
+        .command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|t| t == "agent.heartbeat_ack")
+        .unwrap_or(false);
+    if !is_heartbeat_ack {
+        let now = Utc::now().timestamp();
+        let skew = (now - payload.timestamp).abs();
+        if skew > MAX_TIMESTAMP_SKEW_SECS {
+            anyhow::bail!("timestamp too old or in future (skew={skew}s)");
+        }
     }
 
     // 6. Nonce dedup (replay protection)
