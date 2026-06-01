@@ -5,7 +5,7 @@
     "columns": [
       {
         "ordinal": 0,
-        "name": "exists",
+        "name": "exists!",
         "type_info": "Bool"
       }
     ],
@@ -15,7 +15,7 @@
       ]
     },
     "nullable": [
-      false
+      null
     ]
   },
   "hash": "fc5ca36b2abcaca6e8c284720db0f6b35753bff57a4c68fd82fbd3649e365f0b"

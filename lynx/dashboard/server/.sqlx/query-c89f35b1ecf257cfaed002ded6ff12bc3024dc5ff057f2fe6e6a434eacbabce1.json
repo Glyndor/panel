@@ -5,7 +5,7 @@
     "columns": [
       {
         "ordinal": 0,
-        "name": "not_in_grace",
+        "name": "not_in_grace!",
         "type_info": "Bool"
       }
     ],
@@ -15,7 +15,7 @@
       ]
     },
     "nullable": [
-      false
+      null
     ]
   },
   "hash": "c89f35b1ecf257cfaed002ded6ff12bc3024dc5ff057f2fe6e6a434eacbabce1"
