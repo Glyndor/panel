@@ -86,6 +86,25 @@ async fn sync_batch(db: &PgPool, url: &str, token: &str) -> anyhow::Result<()> {
         .send()
         .await?;
 
+    if resp.status().as_u16() == 422 {
+        // Dashboard rejected the batch due to hash chain mismatch — our sync cursor
+        // is ahead of what the dashboard has (e.g. dashboard DB was wiped or restored
+        // from a backup). Reset to epoch so the next cycle resends from genesis.
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!(
+            detail = &body[..body.len().min(200)],
+            "audit sync: hash chain mismatch — resetting sync cursor to epoch for full resend"
+        );
+        let epoch = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap_or_default();
+        sqlx::query!(
+            "UPDATE sync_state SET last_synced_at = $1 WHERE id = 1",
+            epoch
+        )
+        .execute(db)
+        .await?;
+        return Ok(());
+    }
+
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();

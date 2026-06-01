@@ -953,7 +953,7 @@ LoadCredential=database-url:/etc/lynx/credentials/database-url
 LoadCredential=internal-token:/etc/lynx/credentials/internal-token
 LoadCredential=lynx-dashboard-pubkey:/etc/lynx/credentials/lynx-dashboard-pubkey
 LoadCredential=sync-token:/etc/lynx/credentials/sync-token
-LoadCredential=lynx-wg-psk:/etc/lynx/credentials/lynx-wg-psk
+LoadCredential=lynx-wg-psk:-/etc/lynx/credentials/lynx-wg-psk
 LoadCredential=lynx-kek:/etc/lynx/credentials/lynx-kek
 
 # Minimal hardening — agent is a privileged system daemon (package management,

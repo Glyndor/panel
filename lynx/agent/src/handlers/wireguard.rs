@@ -76,6 +76,30 @@ pub fn handle_wg_rotate_psk(cmd: &VerifiedCommand) -> std::result::Result<Value,
         }
     }
 
+    // Also update the wg-quick conf so the PSK survives a full reboot.
+    // wg-quick reads PresharedKey from the conf at boot; if it diverges from the
+    // credential file the tunnel breaks after the next reboot.
+    const WG_CONF_PATH: &str = "/etc/lynx/wireguard/lynx-wg.conf";
+    match std::fs::read_to_string(WG_CONF_PATH) {
+        Ok(conf) => {
+            let updated = conf
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with("PresharedKey") {
+                        format!("PresharedKey = {}", new_psk.as_str())
+                    } else {
+                        line.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if let Err(e) = std::fs::write(WG_CONF_PATH, updated) {
+                tracing::warn!("failed to update PresharedKey in {WG_CONF_PATH}: {e}");
+            }
+        }
+        Err(e) => tracing::warn!("failed to read {WG_CONF_PATH} for PSK update: {e}"),
+    }
+
     tracing::info!("WireGuard PSK rotated and persisted");
     Ok(json!({ "ok": true }))
 }
