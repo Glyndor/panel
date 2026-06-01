@@ -82,11 +82,21 @@ pub async fn verify_command(
         anyhow::bail!("command not addressed to this agent");
     }
 
-    // 5. Timestamp freshness (±30s)
-    let now = Utc::now().timestamp();
-    let skew = (now - payload.timestamp).abs();
-    if skew > MAX_TIMESTAMP_SKEW_SECS {
-        anyhow::bail!("timestamp too old or in future (skew={skew}s)");
+    // 5. Timestamp freshness (±30s) — bypass for heartbeat_ack so clock skew on the
+    // agent side does not prevent the connection-management command from succeeding.
+    // Nonce dedup (step 6) still prevents replay even without the timestamp check.
+    let is_heartbeat_ack = payload
+        .command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|t| t == "agent.heartbeat_ack")
+        .unwrap_or(false);
+    if !is_heartbeat_ack {
+        let now = Utc::now().timestamp();
+        let skew = (now - payload.timestamp).abs();
+        if skew > MAX_TIMESTAMP_SKEW_SECS {
+            anyhow::bail!("timestamp too old or in future (skew={skew}s)");
+        }
     }
 
     // 6. Nonce dedup (replay protection)
@@ -257,6 +267,22 @@ mod tests {
         nonce: &str,
         timestamp: i64,
     ) -> SignedCommand {
+        build_signed_command_type(
+            signing_key,
+            agent_id,
+            nonce,
+            timestamp,
+            "nftables.get_status",
+        )
+    }
+
+    fn build_signed_command_type(
+        signing_key: &ed25519_dalek::SigningKey,
+        agent_id: Uuid,
+        nonce: &str,
+        timestamp: i64,
+        cmd_type: &str,
+    ) -> SignedCommand {
         let payload = json!({
             "nonce": nonce,
             "timestamp": timestamp,
@@ -264,7 +290,7 @@ mod tests {
             "user_id": Uuid::nil(),
             "organization_id": null,
             "permission": "read",
-            "command": { "type": "agent.heartbeat_ack" },
+            "command": { "type": cmd_type },
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let payload_b64 = Base64UrlUnpadded::encode_string(&payload_bytes);
@@ -357,6 +383,28 @@ mod tests {
         );
         let res = verify_command(&db, &cmd, &verify_key_bytes, agent_id).await;
         assert!(res.is_err(), "future timestamp outside window must reject");
+    }
+
+    #[tokio::test]
+    async fn heartbeat_ack_bypasses_timestamp_check() {
+        let Some(db) = db_pool().await else { return };
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[0x42u8; 32]);
+        let verify_key_bytes = signing_key.verifying_key().to_bytes();
+        let agent_id = Uuid::now_v7();
+        // Clock skew: 60s in the past — would normally fail timestamp check.
+        let old_ts = Utc::now().timestamp() - 60;
+        let cmd = build_signed_command_type(
+            &signing_key,
+            agent_id,
+            &Uuid::now_v7().to_string(),
+            old_ts,
+            "agent.heartbeat_ack",
+        );
+        let res = verify_command(&db, &cmd, &verify_key_bytes, agent_id).await;
+        assert!(
+            res.is_ok(),
+            "heartbeat_ack must bypass timestamp check: {res:?}"
+        );
     }
 
     #[tokio::test]
