@@ -267,7 +267,13 @@ mod tests {
         nonce: &str,
         timestamp: i64,
     ) -> SignedCommand {
-        build_signed_command_type(signing_key, agent_id, nonce, timestamp, "nftables.get_status")
+        build_signed_command_type(
+            signing_key,
+            agent_id,
+            nonce,
+            timestamp,
+            "nftables.get_status",
+        )
     }
 
     fn build_signed_command_type(
@@ -395,7 +401,10 @@ mod tests {
             "agent.heartbeat_ack",
         );
         let res = verify_command(&db, &cmd, &verify_key_bytes, agent_id).await;
-        assert!(res.is_ok(), "heartbeat_ack must bypass timestamp check: {res:?}");
+        assert!(
+            res.is_ok(),
+            "heartbeat_ack must bypass timestamp check: {res:?}"
+        );
     }
 
     #[tokio::test]
