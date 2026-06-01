@@ -186,7 +186,9 @@ pub async fn rotate_wireguard_psks(state: &AppState, triggered_by: Uuid) -> Resu
 
         match ws_hub::push_command(state, agent.id, signed_val).await {
             Some(_) => tracing::info!(agent_id = %agent.id, "WireGuard PSK rotated"),
-            None => tracing::warn!(agent_id = %agent.id, "WireGuard PSK rotation: agent WS unavailable — will retry on reconnect"),
+            None => {
+                tracing::warn!(agent_id = %agent.id, "WireGuard PSK rotation: agent WS unavailable — will retry on reconnect")
+            }
         }
     }
 
