@@ -111,7 +111,10 @@ pub fn spawn_startup_health_guard() {
         let prev = PathBuf::from(format!("{AGENT_BINARY}.prev"));
 
         let restore_ok = if prev.exists() {
-            std::fs::copy(&prev, &target).is_ok()
+            // Atomic rename to avoid ETXTBSY — the current binary is a running executable,
+            // so copy() with O_TRUNC fails. Write to .new first, then rename (POSIX atomic).
+            let tmp = PathBuf::from(format!("{AGENT_BINARY}.restoring"));
+            std::fs::copy(&prev, &tmp).is_ok() && std::fs::rename(&tmp, &target).is_ok()
         } else {
             false
         };
