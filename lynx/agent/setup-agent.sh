@@ -279,14 +279,30 @@ _check_remove ufw       "$_REASON_FW"
 # software that *manages* iptables rules (Docker, ufw, firewalld), not the binary.
 
 if $_incompatible_found; then
-    if command -v iptables-legacy &>/dev/null; then
-        iptables-legacy -F              2>/dev/null || true
-        iptables-legacy -X              2>/dev/null || true
-        iptables-legacy -t nat    -F    2>/dev/null || true
-        iptables-legacy -t nat    -X    2>/dev/null || true
-        iptables-legacy -t mangle -F    2>/dev/null || true
-        iptables-legacy -t mangle -X    2>/dev/null || true
-    fi
+    # Delete all nftables tables created by Docker / ufw / iptables-nft.
+    # On Ubuntu 24.04+, iptables is iptables-nft — its tables live in nftables
+    # ip/ip6 families. Delete them all so only table inet lynx-agent remains.
+    for _nft_table in \
+        "ip filter" "ip nat" "ip mangle" "ip raw" "ip security" \
+        "ip6 filter" "ip6 nat" "ip6 mangle" "ip6 raw" "ip6 security" \
+        "bridge filter" "arp filter"; do
+        nft delete table $_nft_table 2>/dev/null || true
+    done
+    # Legacy iptables kernel module cleanup — only present on older distros,
+    # not on Ubuntu 24.04+. nft cannot reach legacy xtables tables.
+    for _ipt in iptables-legacy ip6tables-legacy; do
+        if command -v "$_ipt" &>/dev/null; then
+            "$_ipt" -P INPUT   ACCEPT 2>/dev/null || true
+            "$_ipt" -P FORWARD ACCEPT 2>/dev/null || true
+            "$_ipt" -P OUTPUT  ACCEPT 2>/dev/null || true
+            "$_ipt" -F              2>/dev/null || true
+            "$_ipt" -X              2>/dev/null || true
+            "$_ipt" -t nat    -F    2>/dev/null || true
+            "$_ipt" -t nat    -X    2>/dev/null || true
+            "$_ipt" -t mangle -F    2>/dev/null || true
+            "$_ipt" -t mangle -X    2>/dev/null || true
+        fi
+    done
     log_ok "Incompatible software removed — residual firewall rules cleared"
 else
     log_ok "No incompatible software found"
