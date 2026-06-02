@@ -157,9 +157,61 @@ if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
 fi
 log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
 
+# --- Detect existing installation -------------------------------------------
+
+log_section "Checking for existing installation"
+
+existing=false
+# Check for agent-specific markers only — /etc/lynx is shared with the dashboard
+# on VPSes that host both. /etc/lynx alone does not mean the agent is installed.
+if id "$LYNX_AGENT_USER" &>/dev/null || \
+   systemctl list-unit-files lynx-agent.service 2>/dev/null | grep -q lynx-agent || \
+   [[ -f "$AGENT_CONF" ]] || podman container exists "$PG_CONTAINER" 2>/dev/null; then
+    existing=true
+fi
+
+if $existing; then
+    log_warn "Existing agent installation detected."
+    echo ""
+    echo -e "  ${BOLD}1)${RESET} Abort (default)"
+    echo -e "  ${BOLD}2)${RESET} Update → updates binary, preserves all data"
+    echo -e "  ${BOLD}3)${RESET} Reinstall clean → destroys all agent data"
+    echo ""
+    read -rp "Choice [1/2/3]: " choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+        2)
+            log_info "Redirecting to update..."
+            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-agent.sh"
+            ;;
+        3)
+            echo ""
+            log_warn "This will permanently destroy all agent data on this machine."
+            read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
+            if [[ "$confirm" != "reinstall lynx-agent" ]]; then
+                log_error "Confirmation phrase mismatch. Aborting."
+                exit 1
+            fi
+            # Preserve agent ID across reinstalls — dashboard still has the old one registered
+            _SAVED_AGENT_ID=""
+            if [[ -f "$LYNX_DIR/agent-id" ]]; then
+                _SAVED_AGENT_ID=$(cat "$LYNX_DIR/agent-id")
+                log_info "Preserving Agent ID for reinstall: $_SAVED_AGENT_ID"
+            fi
+            _cleanup_existing
+            ;;
+        *)
+            log_info "Aborting. No changes made."
+            exit 0
+            ;;
+    esac
+fi
+
 # --- Collect dashboard bootstrap data ---------------------------------------
-# Prompt FIRST — before anything that may consume stdin (systemctl, userdel,
-# package installs with debconf Teletype fallback, podman, wg-quick, etc.).
+# Prompt after existing-installation decision — before anything that may consume
+# stdin (systemctl, userdel, package installs with debconf Teletype fallback,
+# podman, wg-quick, etc.).
 # Dashboard-sign-pubkey is auto-detected here; it is preserved across agent
 # reinstall by _cleanup_existing so the local-agent default still works.
 
@@ -309,57 +361,6 @@ else
 fi
 
 unset _REASON_DOCKER _REASON_CTR _REASON_FW
-
-# --- Detect existing installation -------------------------------------------
-
-log_section "Checking for existing installation"
-
-existing=false
-# Check for agent-specific markers only — /etc/lynx is shared with the dashboard
-# on VPSes that host both. /etc/lynx alone does not mean the agent is installed.
-if id "$LYNX_AGENT_USER" &>/dev/null || \
-   systemctl list-unit-files lynx-agent.service 2>/dev/null | grep -q lynx-agent || \
-   [[ -f "$AGENT_CONF" ]] || podman container exists "$PG_CONTAINER" 2>/dev/null; then
-    existing=true
-fi
-
-if $existing; then
-    log_warn "Existing agent installation detected."
-    echo ""
-    echo -e "  ${BOLD}1)${RESET} Abort (default)"
-    echo -e "  ${BOLD}2)${RESET} Update → updates binary, preserves all data"
-    echo -e "  ${BOLD}3)${RESET} Reinstall clean → destroys all agent data"
-    echo ""
-    read -rp "Choice [1/2/3]: " choice
-    choice="${choice:-1}"
-
-    case "$choice" in
-        2)
-            log_info "Redirecting to update..."
-            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-agent.sh"
-            ;;
-        3)
-            echo ""
-            log_warn "This will permanently destroy all agent data on this machine."
-            read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
-            if [[ "$confirm" != "reinstall lynx-agent" ]]; then
-                log_error "Confirmation phrase mismatch. Aborting."
-                exit 1
-            fi
-            # Preserve agent ID across reinstalls — dashboard still has the old one registered
-            _SAVED_AGENT_ID=""
-            if [[ -f "$LYNX_DIR/agent-id" ]]; then
-                _SAVED_AGENT_ID=$(cat "$LYNX_DIR/agent-id")
-                log_info "Preserving Agent ID for reinstall: $_SAVED_AGENT_ID"
-            fi
-            _cleanup_existing
-            ;;
-        *)
-            log_info "Aborting. No changes made."
-            exit 0
-            ;;
-    esac
-fi
 
 # --- DNS preflight check ----------------------------------------------------
 
