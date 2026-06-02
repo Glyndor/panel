@@ -25,11 +25,38 @@ pub struct Ruleset {
     pub global_output_body: String,
     /// Output rules body for the lynx-local-output chain (dashboard-pushed, this agent only)
     pub local_output_body: String,
+    /// Dashboard WireGuard IP for source-IP restriction on the WG inbound rule.
+    /// Some(ip) on remote agents — restricts `udp dport {wg}` to that source only.
+    /// None on the dashboard VPS itself (accepts from all agent IPs) or when unknown.
+    pub dashboard_wg_ip: Option<String>,
 }
 
 pub struct OrgNetwork {
     pub org_id: String,
     pub subnet: String,
+}
+
+/// Extract the host from a URL like "http://10.100.0.1:8080".
+/// Returns None for empty input or unparseable URLs.
+pub fn extract_url_host(url: &str) -> Option<String> {
+    if url.is_empty() {
+        return None;
+    }
+    let after_scheme = url.split("//").nth(1).unwrap_or(url);
+    // IPv6 addresses are wrapped in brackets: [::1]:port
+    let host = if after_scheme.starts_with('[') {
+        after_scheme
+            .find(']')
+            .map(|i| &after_scheme[..=i])
+            .unwrap_or(after_scheme)
+    } else {
+        after_scheme.split(':').next().unwrap_or(after_scheme)
+    };
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 /// Apply the full lynx-agent nftables ruleset atomically.
@@ -156,6 +183,16 @@ fn render_ruleset(r: &Ruleset) -> String {
         ""
     };
 
+    // On remote agents, restrict WG inbound to dashboard IP only.
+    // On the dashboard VPS (dashboard_port.is_some()), all agent IPs must be accepted.
+    let wg_rule = match (r.dashboard_port.is_some(), &r.dashboard_wg_ip) {
+        (true, _) | (false, None) => format!("        udp dport {} accept", r.wireguard_port),
+        (false, Some(ip)) => format!(
+            "        ip saddr {ip} udp dport {} accept",
+            r.wireguard_port
+        ),
+    };
+
     let mut out = format!(
         r#"
 destroy table inet {TABLE}
@@ -178,8 +215,8 @@ table inet {TABLE} {{
         # SSH — emergency admin access (per-source-IP rate limit)
         tcp dport 22 ct state new meter ssh_throttle {{ ip saddr limit rate 10/minute burst 20 packets }} accept
 
-        # WireGuard management plane
-        udp dport {wg} accept
+        # WireGuard management plane — remote agents restrict to dashboard IP
+        {wg_rule}
 
         # Dashboard backend (management plane — WireGuard only)
 {management_plane}
@@ -210,7 +247,6 @@ table inet {TABLE} {{
 {dashboard_wg_forward}
 "#,
         TABLE = TABLE,
-        wg = r.wireguard_port,
         management_plane = management_plane_rules,
         dashboard_port = dashboard_port_rule,
         dashboard_dns = dashboard_dns_rules,
@@ -259,6 +295,7 @@ mod tests {
         Ruleset {
             wireguard_port: 51820,
             dashboard_port: None,
+            dashboard_wg_ip: None,
             org_networks: vec![],
             global_body: String::new(),
             local_body: String::new(),
@@ -282,6 +319,40 @@ mod tests {
         let r = minimal_ruleset();
         let out = render_ruleset(&r);
         assert!(out.contains("51820"), "WireGuard port missing from ruleset");
+    }
+
+    #[test]
+    fn render_wg_source_ip_restriction() {
+        // Remote agent with dashboard_wg_ip set → WG rule must restrict source IP.
+        let mut r = minimal_ruleset();
+        r.dashboard_wg_ip = Some("10.100.0.1".to_string());
+        let out = render_ruleset(&r);
+        assert!(
+            out.contains("ip saddr 10.100.0.1"),
+            "WG source IP restriction missing on remote agent"
+        );
+
+        // Dashboard VPS (dashboard_port set) → WG rule must NOT restrict source IP.
+        let mut r_dash = minimal_ruleset();
+        r_dash.dashboard_port = Some(19443);
+        r_dash.dashboard_wg_ip = Some("10.100.0.1".to_string());
+        let out_dash = render_ruleset(&r_dash);
+        // Source IP restriction must not appear on dashboard VPS WG rule
+        // (agents connect from many different IPs)
+        let wg_lines: Vec<&str> = out_dash.lines().filter(|l| l.contains("51820")).collect();
+        assert!(
+            wg_lines.iter().all(|l| !l.contains("ip saddr")),
+            "dashboard VPS must not restrict WG source IP: {:?}",
+            wg_lines
+        );
+
+        // Remote agent without dashboard_wg_ip → fall back to unrestricted
+        let r_no_ip = minimal_ruleset();
+        let out_no_ip = render_ruleset(&r_no_ip);
+        assert!(
+            out_no_ip.contains("udp dport 51820"),
+            "WG rule must be present even without dashboard_wg_ip"
+        );
     }
 
     #[test]
