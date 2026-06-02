@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use std::{process::Command, sync::atomic::Ordering, time::Duration};
+use std::{process::Command, time::Duration};
 use tokio::time::interval;
 
 const CHECK_INTERVAL_SECS: u64 = 300;
@@ -71,7 +71,7 @@ async fn check_and_remove(state: &AppState) {
                     );
                     notify_dashboard(state, software.name, &format!("removal_failed: {e}")).await;
                     record_audit(state, software.name, &format!("removal_failed: {e}")).await;
-                    state.lockdown.store(true, Ordering::SeqCst);
+                    state.set_lockdown(crate::state::LockdownReason::IncompatibleSoftware);
                     return;
                 }
             }
