@@ -48,7 +48,7 @@ remove_firewall() {
         "ip filter" "ip nat" "ip mangle" "ip raw" "ip security" \
         "ip6 filter" "ip6 nat" "ip6 mangle" "ip6 raw" "ip6 security" \
         "bridge filter" "arp filter"; do
-        nft delete table $_nft_table 2>/dev/null || true
+        nft delete table "$_nft_table" 2>/dev/null || true
     done
 
     # Legacy iptables kernel module cleanup — older distros only, not Ubuntu 24.04+.
