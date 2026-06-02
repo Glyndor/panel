@@ -362,8 +362,33 @@ async fn handle_db_rotate_password(
         tracing::warn!("failed to update Podman secret lynx-agent-pg-pass — password rotated in DB but secret not updated");
     }
 
+    // Update /etc/lynx/credentials/database-url so systemd LoadCredential
+    // serves the new password on next agent restart.
+    match update_database_url_credential(&state.config.database_url, &new_pass) {
+        Ok(()) => tracing::info!("updated /etc/lynx/credentials/database-url with new password"),
+        Err(e) => tracing::warn!("failed to update /etc/lynx/credentials/database-url: {e} — credential file still has old password"),
+    }
+
     tracing::info!("agent PostgreSQL password rotated");
     Ok(json!({ "ok": true }))
+}
+
+fn update_database_url_credential(current_url: &str, new_pass: &str) -> anyhow::Result<()> {
+    let mut parsed = url::Url::parse(current_url)
+        .map_err(|e| anyhow::anyhow!("failed to parse database_url: {e}"))?;
+    parsed
+        .set_password(Some(new_pass))
+        .map_err(|_| anyhow::anyhow!("failed to set password in database URL"))?;
+    let new_url = parsed.to_string();
+    let path = std::path::Path::new("/etc/lynx/credentials/database-url");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, new_url.as_bytes())?;
+    // 600 — readable only by lynx-agent
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
 }
 
 fn handle_vps_reboot(cmd: &VerifiedCommand) -> std::result::Result<Value, AgentError> {
