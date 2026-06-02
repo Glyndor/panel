@@ -608,10 +608,16 @@ if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import E
     }
 fi
 
-log_info "Fetching latest agent release..."
-LATEST_AGENT_TAG=$(curl -fsSL \
-    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
-    | python3 -c "
+if [[ -n "${LYNX_RELEASE_BASE:-}" ]]; then
+    # Local/test override — skip GitHub API fetch; binary served from LYNX_RELEASE_BASE.
+    RELEASE_BASE="${LYNX_RELEASE_BASE}"
+    LATEST_AGENT_TAG="local"
+    log_info "Using local release base: ${RELEASE_BASE}"
+else
+    log_info "Fetching latest agent release..."
+    LATEST_AGENT_TAG=$(curl -fsSL \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+        | python3 -c "
 import sys, json
 releases = json.load(sys.stdin)
 tags = [r['tag_name'] for r in releases
@@ -622,15 +628,13 @@ if tags:
     print(max(tags, key=ver))
 " 2>/dev/null)
 
-if [[ -z "$LATEST_AGENT_TAG" ]]; then
-    log_error "No agent release found in ${GITHUB_REPO}"
-    exit 1
+    if [[ -z "$LATEST_AGENT_TAG" ]]; then
+        log_error "No agent release found in ${GITHUB_REPO}"
+        exit 1
+    fi
+    log_ok "Latest release: ${LATEST_AGENT_TAG}"
+    RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}"
 fi
-log_ok "Latest release: ${LATEST_AGENT_TAG}"
-
-# LYNX_RELEASE_BASE lets local-host testing point binary downloads at a private
-# HTTP server. Production installs use the canonical GitHub release URL.
-RELEASE_BASE="${LYNX_RELEASE_BASE:-https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}}"
 mkdir -p "$BIN_DIR"
 chmod 755 "$BIN_DIR"
 
@@ -683,6 +687,11 @@ if [[ -n "${_SAVED_AGENT_ID:-}" ]]; then
     AGENT_ID="$_SAVED_AGENT_ID"
     log_ok "Reusing existing Agent ID: $AGENT_ID"
     unset _SAVED_AGENT_ID
+elif [[ -n "${LYNX_AGENT_ID:-}" ]]; then
+    # Test/pre-seeded agent ID (allows registering in dashboard before running script).
+    AGENT_ID="${LYNX_AGENT_ID}"
+    unset LYNX_AGENT_ID
+    log_ok "Using pre-seeded Agent ID: $AGENT_ID"
 else
     AGENT_ID=$("$BINARY_PATH" gen-uuid-v7)
 fi
@@ -991,7 +1000,14 @@ log_ok "Services installed: lynx-agent-postgres.service, lynx-agent.service"
 log_section "Configuring WireGuard tunnel (agent ↔ dashboard)"
 
 # Generate agent keypair
-AGENT_PRIV=$(wg genkey)
+# LYNX_WG_PRIVKEY allows test environments to pre-seed the WG private key so the
+# pubkey can be registered in the dashboard before the script runs.
+if [[ -n "${LYNX_WG_PRIVKEY:-}" ]]; then
+    AGENT_PRIV="${LYNX_WG_PRIVKEY}"
+    unset LYNX_WG_PRIVKEY
+else
+    AGENT_PRIV=$(wg genkey)
+fi
 AGENT_PUB=$(printf '%s' "$AGENT_PRIV" | wg pubkey)
 log_info "Agent WireGuard public key: ${AGENT_PUB}"
 log_info "    Register this VPS in the dashboard with the above public key"
