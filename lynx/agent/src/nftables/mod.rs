@@ -339,10 +339,7 @@ mod tests {
         let out_dash = render_ruleset(&r_dash);
         // Source IP restriction must not appear on dashboard VPS WG rule
         // (agents connect from many different IPs)
-        let wg_lines: Vec<&str> = out_dash
-            .lines()
-            .filter(|l| l.contains("51820"))
-            .collect();
+        let wg_lines: Vec<&str> = out_dash.lines().filter(|l| l.contains("51820")).collect();
         assert!(
             wg_lines.iter().all(|l| !l.contains("ip saddr")),
             "dashboard VPS must not restrict WG source IP: {:?}",
