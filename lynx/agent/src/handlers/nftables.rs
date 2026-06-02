@@ -68,6 +68,9 @@ fn apply_current_ruleset(state: &AppState) -> std::result::Result<Value, AgentEr
     let ruleset = nftables::Ruleset {
         wireguard_port: state.nft_wg_port(),
         dashboard_port: state.config.dashboard_port,
+        dashboard_wg_ip: crate::nftables::extract_url_host(
+            state.config.dashboard_url.as_deref().unwrap_or(""),
+        ),
         org_networks: vec![],
         global_body: state.nft_global_body(),
         local_body: state.nft_local_body(),
