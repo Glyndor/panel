@@ -157,9 +157,61 @@ if [[ -z "$FREE_DISK_MB" ]] || [[ "$FREE_DISK_MB" -lt 2048 ]]; then
 fi
 log_ok "Disk:  ${FREE_DISK_MB} MB free on / (minimum 2048 MB satisfied)"
 
+# --- Detect existing installation -------------------------------------------
+
+log_section "Checking for existing installation"
+
+existing=false
+# Check for agent-specific markers only — /etc/lynx is shared with the dashboard
+# on VPSes that host both. /etc/lynx alone does not mean the agent is installed.
+if id "$LYNX_AGENT_USER" &>/dev/null || \
+   systemctl list-unit-files lynx-agent.service 2>/dev/null | grep -q lynx-agent || \
+   [[ -f "$AGENT_CONF" ]] || podman container exists "$PG_CONTAINER" 2>/dev/null; then
+    existing=true
+fi
+
+if $existing; then
+    log_warn "Existing agent installation detected."
+    echo ""
+    echo -e "  ${BOLD}1)${RESET} Abort (default)"
+    echo -e "  ${BOLD}2)${RESET} Update → updates binary, preserves all data"
+    echo -e "  ${BOLD}3)${RESET} Reinstall clean → destroys all agent data"
+    echo ""
+    read -rp "Choice [1/2/3]: " choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+        2)
+            log_info "Redirecting to update..."
+            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-agent.sh"
+            ;;
+        3)
+            echo ""
+            log_warn "This will permanently destroy all agent data on this machine."
+            read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
+            if [[ "$confirm" != "reinstall lynx-agent" ]]; then
+                log_error "Confirmation phrase mismatch. Aborting."
+                exit 1
+            fi
+            # Preserve agent ID across reinstalls — dashboard still has the old one registered
+            _SAVED_AGENT_ID=""
+            if [[ -f "$LYNX_DIR/agent-id" ]]; then
+                _SAVED_AGENT_ID=$(cat "$LYNX_DIR/agent-id")
+                log_info "Preserving Agent ID for reinstall: $_SAVED_AGENT_ID"
+            fi
+            _cleanup_existing
+            ;;
+        *)
+            log_info "Aborting. No changes made."
+            exit 0
+            ;;
+    esac
+fi
+
 # --- Collect dashboard bootstrap data ---------------------------------------
-# Prompt FIRST — before anything that may consume stdin (systemctl, userdel,
-# package installs with debconf Teletype fallback, podman, wg-quick, etc.).
+# Prompt after existing-installation decision — before anything that may consume
+# stdin (systemctl, userdel, package installs with debconf Teletype fallback,
+# podman, wg-quick, etc.).
 # Dashboard-sign-pubkey is auto-detected here; it is preserved across agent
 # reinstall by _cleanup_existing so the local-agent default still works.
 
@@ -279,71 +331,36 @@ _check_remove ufw       "$_REASON_FW"
 # software that *manages* iptables rules (Docker, ufw, firewalld), not the binary.
 
 if $_incompatible_found; then
-    if command -v iptables-legacy &>/dev/null; then
-        iptables-legacy -F              2>/dev/null || true
-        iptables-legacy -X              2>/dev/null || true
-        iptables-legacy -t nat    -F    2>/dev/null || true
-        iptables-legacy -t nat    -X    2>/dev/null || true
-        iptables-legacy -t mangle -F    2>/dev/null || true
-        iptables-legacy -t mangle -X    2>/dev/null || true
-    fi
+    # Delete all nftables tables created by Docker / ufw / iptables-nft.
+    # On Ubuntu 24.04+, iptables is iptables-nft — its tables live in nftables
+    # ip/ip6 families. Delete them all so only table inet lynx-agent remains.
+    for _nft_table in \
+        "ip filter" "ip nat" "ip mangle" "ip raw" "ip security" \
+        "ip6 filter" "ip6 nat" "ip6 mangle" "ip6 raw" "ip6 security" \
+        "bridge filter" "arp filter"; do
+        nft delete table "$_nft_table" 2>/dev/null || true
+    done
+    # Legacy iptables kernel module cleanup — only present on older distros,
+    # not on Ubuntu 24.04+. nft cannot reach legacy xtables tables.
+    for _ipt in iptables-legacy ip6tables-legacy; do
+        if command -v "$_ipt" &>/dev/null; then
+            "$_ipt" -P INPUT   ACCEPT 2>/dev/null || true
+            "$_ipt" -P FORWARD ACCEPT 2>/dev/null || true
+            "$_ipt" -P OUTPUT  ACCEPT 2>/dev/null || true
+            "$_ipt" -F              2>/dev/null || true
+            "$_ipt" -X              2>/dev/null || true
+            "$_ipt" -t nat    -F    2>/dev/null || true
+            "$_ipt" -t nat    -X    2>/dev/null || true
+            "$_ipt" -t mangle -F    2>/dev/null || true
+            "$_ipt" -t mangle -X    2>/dev/null || true
+        fi
+    done
     log_ok "Incompatible software removed — residual firewall rules cleared"
 else
     log_ok "No incompatible software found"
 fi
 
 unset _REASON_DOCKER _REASON_CTR _REASON_FW
-
-# --- Detect existing installation -------------------------------------------
-
-log_section "Checking for existing installation"
-
-existing=false
-# Check for agent-specific markers only — /etc/lynx is shared with the dashboard
-# on VPSes that host both. /etc/lynx alone does not mean the agent is installed.
-if id "$LYNX_AGENT_USER" &>/dev/null || \
-   systemctl list-unit-files lynx-agent.service 2>/dev/null | grep -q lynx-agent || \
-   [[ -f "$AGENT_CONF" ]] || podman container exists "$PG_CONTAINER" 2>/dev/null; then
-    existing=true
-fi
-
-if $existing; then
-    log_warn "Existing agent installation detected."
-    echo ""
-    echo -e "  ${BOLD}1)${RESET} Abort (default)"
-    echo -e "  ${BOLD}2)${RESET} Update → updates binary, preserves all data"
-    echo -e "  ${BOLD}3)${RESET} Reinstall clean → destroys all agent data"
-    echo ""
-    read -rp "Choice [1/2/3]: " choice
-    choice="${choice:-1}"
-
-    case "$choice" in
-        2)
-            log_info "Redirecting to update..."
-            exec "$(dirname "${BASH_SOURCE[0]:-}")/update-agent.sh"
-            ;;
-        3)
-            echo ""
-            log_warn "This will permanently destroy all agent data on this machine."
-            read -rp "Type 'reinstall lynx-agent' to confirm: " confirm
-            if [[ "$confirm" != "reinstall lynx-agent" ]]; then
-                log_error "Confirmation phrase mismatch. Aborting."
-                exit 1
-            fi
-            # Preserve agent ID across reinstalls — dashboard still has the old one registered
-            _SAVED_AGENT_ID=""
-            if [[ -f "$LYNX_DIR/agent-id" ]]; then
-                _SAVED_AGENT_ID=$(cat "$LYNX_DIR/agent-id")
-                log_info "Preserving Agent ID for reinstall: $_SAVED_AGENT_ID"
-            fi
-            _cleanup_existing
-            ;;
-        *)
-            log_info "Aborting. No changes made."
-            exit 0
-            ;;
-    esac
-fi
 
 # --- DNS preflight check ----------------------------------------------------
 
@@ -591,10 +608,16 @@ if ! python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import E
     }
 fi
 
-log_info "Fetching latest agent release..."
-LATEST_AGENT_TAG=$(curl -fsSL \
-    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
-    | python3 -c "
+if [[ -n "${LYNX_RELEASE_BASE:-}" ]]; then
+    # Local/test override — skip GitHub API fetch; binary served from LYNX_RELEASE_BASE.
+    RELEASE_BASE="${LYNX_RELEASE_BASE}"
+    LATEST_AGENT_TAG="local"
+    log_info "Using local release base: ${RELEASE_BASE}"
+else
+    log_info "Fetching latest agent release..."
+    LATEST_AGENT_TAG=$(curl -fsSL \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+        | python3 -c "
 import sys, json
 releases = json.load(sys.stdin)
 tags = [r['tag_name'] for r in releases
@@ -605,15 +628,13 @@ if tags:
     print(max(tags, key=ver))
 " 2>/dev/null)
 
-if [[ -z "$LATEST_AGENT_TAG" ]]; then
-    log_error "No agent release found in ${GITHUB_REPO}"
-    exit 1
+    if [[ -z "$LATEST_AGENT_TAG" ]]; then
+        log_error "No agent release found in ${GITHUB_REPO}"
+        exit 1
+    fi
+    log_ok "Latest release: ${LATEST_AGENT_TAG}"
+    RELEASE_BASE="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}"
 fi
-log_ok "Latest release: ${LATEST_AGENT_TAG}"
-
-# LYNX_RELEASE_BASE lets local-host testing point binary downloads at a private
-# HTTP server. Production installs use the canonical GitHub release URL.
-RELEASE_BASE="${LYNX_RELEASE_BASE:-https://github.com/${GITHUB_REPO}/releases/download/${LATEST_AGENT_TAG}}"
 mkdir -p "$BIN_DIR"
 chmod 755 "$BIN_DIR"
 
@@ -666,6 +687,11 @@ if [[ -n "${_SAVED_AGENT_ID:-}" ]]; then
     AGENT_ID="$_SAVED_AGENT_ID"
     log_ok "Reusing existing Agent ID: $AGENT_ID"
     unset _SAVED_AGENT_ID
+elif [[ -n "${LYNX_AGENT_ID:-}" ]]; then
+    # Test/pre-seeded agent ID (allows registering in dashboard before running script).
+    AGENT_ID="${LYNX_AGENT_ID}"
+    unset LYNX_AGENT_ID
+    log_ok "Using pre-seeded Agent ID: $AGENT_ID"
 else
     AGENT_ID=$("$BINARY_PATH" gen-uuid-v7)
 fi
@@ -974,7 +1000,14 @@ log_ok "Services installed: lynx-agent-postgres.service, lynx-agent.service"
 log_section "Configuring WireGuard tunnel (agent ↔ dashboard)"
 
 # Generate agent keypair
-AGENT_PRIV=$(wg genkey)
+# LYNX_WG_PRIVKEY allows test environments to pre-seed the WG private key so the
+# pubkey can be registered in the dashboard before the script runs.
+if [[ -n "${LYNX_WG_PRIVKEY:-}" ]]; then
+    AGENT_PRIV="${LYNX_WG_PRIVKEY}"
+    unset LYNX_WG_PRIVKEY
+else
+    AGENT_PRIV=$(wg genkey)
+fi
 AGENT_PUB=$(printf '%s' "$AGENT_PRIV" | wg pubkey)
 log_info "Agent WireGuard public key: ${AGENT_PUB}"
 log_info "    Register this VPS in the dashboard with the above public key"
