@@ -41,20 +41,29 @@ remove_firewall() {
             ;;
     esac
 
-    # Flush all iptables rules from memory
-    for table in filter nat mangle raw security; do
-        iptables -t "$table" -F 2>/dev/null || true
-        iptables -t "$table" -X 2>/dev/null || true
-        iptables -t "$table" -Z 2>/dev/null || true
-        ip6tables -t "$table" -F 2>/dev/null || true
-        ip6tables -t "$table" -X 2>/dev/null || true
-        ip6tables -t "$table" -Z 2>/dev/null || true
+    # Delete all nftables tables created by ufw / iptables-nft (ip/ip6 families).
+    # On Ubuntu 24.04+, iptables is iptables-nft — its tables live in nftables.
+    # Delete entirely so only table inet lynx-agent remains after install.
+    for _nft_table in \
+        "ip filter" "ip nat" "ip mangle" "ip raw" "ip security" \
+        "ip6 filter" "ip6 nat" "ip6 mangle" "ip6 raw" "ip6 security" \
+        "bridge filter" "arp filter"; do
+        nft delete table $_nft_table 2>/dev/null || true
     done
 
-    # Reset default policies to ACCEPT
-    for chain in INPUT FORWARD OUTPUT; do
-        iptables -P "$chain" ACCEPT 2>/dev/null || true
-        ip6tables -P "$chain" ACCEPT 2>/dev/null || true
+    # Legacy iptables kernel module cleanup — older distros only, not Ubuntu 24.04+.
+    for _ipt in iptables-legacy ip6tables-legacy; do
+        if command -v "$_ipt" &>/dev/null; then
+            "$_ipt" -P INPUT   ACCEPT 2>/dev/null || true
+            "$_ipt" -P FORWARD ACCEPT 2>/dev/null || true
+            "$_ipt" -P OUTPUT  ACCEPT 2>/dev/null || true
+            "$_ipt" -F              2>/dev/null || true
+            "$_ipt" -X              2>/dev/null || true
+            "$_ipt" -t nat    -F    2>/dev/null || true
+            "$_ipt" -t nat    -X    2>/dev/null || true
+            "$_ipt" -t mangle -F    2>/dev/null || true
+            "$_ipt" -t mangle -X    2>/dev/null || true
+        fi
     done
 
     # Remove all config files

@@ -269,15 +269,22 @@ _check_remove ufw       "$_REASON_FW"
 # software that *manages* iptables rules (Docker, ufw, firewalld), not the binary.
 
 if $_incompatible_found; then
-    # Flush residual kernel rules left behind by Docker / ufw / iptables.
-    # On Ubuntu 24.04+, 'iptables' is iptables-nft and flushes nftables ip/ip6
-    # filter tables (the ones ufw and Docker create). Also flush iptables-legacy
-    # if present (older distros or explicitly installed).
-    for _ipt in iptables ip6tables iptables-legacy ip6tables-legacy; do
+    # Delete all nftables tables created by Docker / ufw / iptables-nft.
+    # On Ubuntu 24.04+, iptables is iptables-nft — its tables live in nftables
+    # ip/ip6 families. Delete them all so only table inet lynx-agent remains.
+    for _nft_table in \
+        "ip filter" "ip nat" "ip mangle" "ip raw" "ip security" \
+        "ip6 filter" "ip6 nat" "ip6 mangle" "ip6 raw" "ip6 security" \
+        "bridge filter" "arp filter"; do
+        nft delete table $_nft_table 2>/dev/null || true
+    done
+    # Legacy iptables kernel module cleanup — only present on older distros,
+    # not on Ubuntu 24.04+. nft cannot reach legacy xtables tables.
+    for _ipt in iptables-legacy ip6tables-legacy; do
         if command -v "$_ipt" &>/dev/null; then
-            "$_ipt" -P INPUT  ACCEPT 2>/dev/null || true
+            "$_ipt" -P INPUT   ACCEPT 2>/dev/null || true
             "$_ipt" -P FORWARD ACCEPT 2>/dev/null || true
-            "$_ipt" -P OUTPUT ACCEPT 2>/dev/null || true
+            "$_ipt" -P OUTPUT  ACCEPT 2>/dev/null || true
             "$_ipt" -F              2>/dev/null || true
             "$_ipt" -X              2>/dev/null || true
             "$_ipt" -t nat    -F    2>/dev/null || true
@@ -286,10 +293,6 @@ if $_incompatible_found; then
             "$_ipt" -t mangle -X    2>/dev/null || true
         fi
     done
-    # Also nuke any lingering nftables filter tables (ufw/Docker on systems where
-    # iptables-nft maps to nft tables named 'filter').
-    nft delete table ip  filter 2>/dev/null || true
-    nft delete table ip6 filter 2>/dev/null || true
     log_ok "Incompatible software removed — residual firewall rules cleared"
 else
     log_ok "No incompatible software found"
