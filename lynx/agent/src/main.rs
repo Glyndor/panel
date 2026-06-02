@@ -345,8 +345,7 @@ async fn main() -> anyhow::Result<()> {
                     && !state_db.is_locked_down()
                 {
                     tracing::error!("PostgreSQL unreachable — entering lockdown");
-                    state_db
-                        .set_lockdown(crate::state::LockdownReason::PgUnreachable);
+                    state_db.set_lockdown(crate::state::LockdownReason::PgUnreachable);
                 }
             }
         });
@@ -387,8 +386,7 @@ async fn main() -> anyhow::Result<()> {
                 .as_secs();
             if elapsed > HEARTBEAT_TIMEOUT_SECS && !heartbeat_state.is_locked_down() {
                 tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
-                heartbeat_state
-                    .set_lockdown(crate::state::LockdownReason::Heartbeat);
+                heartbeat_state.set_lockdown(crate::state::LockdownReason::Heartbeat);
             }
         }
     });
