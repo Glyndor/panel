@@ -2,9 +2,12 @@ pub mod fallback;
 
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// Download new binary, verify Ed25519 signature, atomic swap, then exec into new process.
+const AGENT_BINARY: &str = "/etc/lynx/bin/lynx-agent";
+const CRITICAL_FILE: &str = "/etc/lynx/CRITICAL";
+
+/// Download new binary, verify Ed25519 signature, backup to .prev, atomic swap, restart via systemd.
 ///
 /// The release verify key (`RELEASE_VERIFY_KEY_B64`) is compiled into the binary and is distinct
 /// from the dashboard command-signing key. The corresponding private key lives only in GitHub
@@ -41,30 +44,93 @@ pub async fn perform_update(version: &str, download_url: &str, sig_url: &str) ->
 
     tracing::info!(version, bytes = binary_bytes.len(), "signature verified");
 
-    // Write new binary to a temp path beside the current executable
-    let current_exe = std::env::current_exe().context("resolve current exe")?;
-    let tmp_path = tmp_path(&current_exe);
+    let target = PathBuf::from(AGENT_BINARY);
+    let prev = PathBuf::from(format!("{AGENT_BINARY}.prev"));
+    let tmp = PathBuf::from(format!("{AGENT_BINARY}.new"));
 
-    std::fs::write(&tmp_path, &binary_bytes).with_context(|| format!("write to {tmp_path:?}"))?;
+    std::fs::write(&tmp, &binary_bytes).with_context(|| format!("write to {tmp:?}"))?;
 
     // Make it executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&tmp_path)?.permissions();
+        let mut perms = std::fs::metadata(&tmp)?.permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&tmp_path, perms)?;
+        std::fs::set_permissions(&tmp, perms)?;
     }
 
-    // Atomic rename: tmp → current exe path (POSIX atomic on same filesystem)
-    std::fs::rename(&tmp_path, &current_exe)
-        .with_context(|| format!("rename {tmp_path:?} → {current_exe:?}"))?;
+    // Back up current binary to .prev before swap
+    if target.exists() {
+        std::fs::copy(&target, &prev).context("backup agent binary to .prev")?;
+    }
+
+    // Atomic rename: tmp → canonical path (POSIX atomic on same filesystem)
+    std::fs::rename(&tmp, &target).with_context(|| format!("rename {tmp:?} → {target:?}"))?;
 
     tracing::info!(version, "binary swapped — restarting via systemd");
 
     // Systemd will restart the unit (Restart=always in the service unit).
     // Exit 0 so systemd records a clean restart, not a failure.
     std::process::exit(0);
+}
+
+/// Spawn a background task that monitors agent startup health.
+///
+/// Polls `http://127.0.0.1:9090/health` every 2s for 30s.
+/// If still unhealthy → attempt `.prev` restore and exit 1 (systemd restarts with old binary).
+/// If `.prev` unavailable or restore fails → write `/etc/lynx/CRITICAL` and exit 1.
+/// On healthy startup → delete `/etc/lynx/CRITICAL` if present (recovery from prior critical state).
+pub fn spawn_startup_health_guard() {
+    tokio::spawn(async move {
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        for _ in 0..15 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if client
+                .get("http://127.0.0.1:9090/health") // audit-urls: ok — self health check, not a download
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
+                // Healthy — clear any leftover CRITICAL file from a previous failed startup.
+                let _ = std::fs::remove_file(CRITICAL_FILE);
+                return;
+            }
+        }
+
+        // Still unhealthy after 30s — attempt .prev restore.
+        tracing::error!("startup health check failed — restoring .prev binary");
+        let target = PathBuf::from(AGENT_BINARY);
+        let prev = PathBuf::from(format!("{AGENT_BINARY}.prev"));
+
+        let restore_ok = if prev.exists() {
+            std::fs::copy(&prev, &target).is_ok()
+        } else {
+            false
+        };
+
+        let reason = if restore_ok {
+            "new binary failed health check; restored .prev"
+        } else {
+            "new binary failed health check; .prev unavailable — MANUAL RECOVERY REQUIRED"
+        };
+
+        let ts = chrono::Utc::now().to_rfc3339();
+        let _ = std::fs::write(
+            CRITICAL_FILE,
+            format!("timestamp={ts}\ncomponent=lynx-agent\nreason={reason}\n"),
+        );
+
+        tracing::error!(reason, "critical state — exiting for systemd restart");
+        std::process::exit(1);
+    });
 }
 
 async fn download_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
@@ -114,16 +180,6 @@ fn load_verify_key() -> Result<[u8; 32]> {
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("release verify key must be 32 bytes"))
-}
-
-fn tmp_path(exe: &Path) -> PathBuf {
-    let mut p = exe.to_path_buf();
-    let name = exe
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("lynx-agent");
-    p.set_file_name(format!("{name}.new"));
-    p
 }
 
 fn validate_github_url(url: &str) -> Result<()> {
