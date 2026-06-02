@@ -276,7 +276,7 @@ if $_incompatible_found; then
         "ip filter" "ip nat" "ip mangle" "ip raw" "ip security" \
         "ip6 filter" "ip6 nat" "ip6 mangle" "ip6 raw" "ip6 security" \
         "bridge filter" "arp filter"; do
-        nft delete table $_nft_table 2>/dev/null || true
+        nft delete table "$_nft_table" 2>/dev/null || true
     done
     # Legacy iptables kernel module cleanup — only present on older distros,
     # not on Ubuntu 24.04+. nft cannot reach legacy xtables tables.
