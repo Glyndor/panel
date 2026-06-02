@@ -352,6 +352,9 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Startup health guard: poll /health for 30s; restore .prev and write CRITICAL if unhealthy.
+    update::spawn_startup_health_guard();
+
     // WebSocket client — persistent connection to dashboard
     tokio::spawn(ws_client::run_ws_client(state.clone()));
 
