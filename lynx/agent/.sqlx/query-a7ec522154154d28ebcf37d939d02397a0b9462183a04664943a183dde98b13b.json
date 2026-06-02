@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT previous_hash, entry_hash FROM audit_log WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "previous_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "entry_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a7ec522154154d28ebcf37d939d02397a0b9462183a04664943a183dde98b13b"
+}
