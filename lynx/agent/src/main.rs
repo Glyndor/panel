@@ -196,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         config: Arc::new(config),
         lockdown: lockdown.clone(),
+        lockdown_reason: Arc::new(std::sync::Mutex::new(None)),
         nft_checksum: Arc::new(std::sync::Mutex::new(None)),
         nft_chain_checksums: Arc::new(std::sync::Mutex::new([None, None, None])),
         nft_last_ruleset: Arc::new(std::sync::Mutex::new(None)),
@@ -345,8 +346,7 @@ async fn main() -> anyhow::Result<()> {
                 {
                     tracing::error!("PostgreSQL unreachable — entering lockdown");
                     state_db
-                        .lockdown
-                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                        .set_lockdown(crate::state::LockdownReason::PgUnreachable);
                 }
             }
         });
@@ -375,7 +375,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Heartbeat watchdog task
     let heartbeat_state = state.clone();
-    let lockdown_clone = lockdown.clone();
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(30));
         loop {
@@ -386,9 +385,10 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap()
                 .elapsed()
                 .as_secs();
-            if elapsed > HEARTBEAT_TIMEOUT_SECS && !lockdown_clone.load(Ordering::SeqCst) {
+            if elapsed > HEARTBEAT_TIMEOUT_SECS && !heartbeat_state.is_locked_down() {
                 tracing::warn!(elapsed_secs = elapsed, "heartbeat lost — entering lockdown");
-                lockdown_clone.store(true, Ordering::SeqCst);
+                heartbeat_state
+                    .set_lockdown(crate::state::LockdownReason::Heartbeat);
             }
         }
     });
@@ -453,7 +453,7 @@ async fn heartbeat_handler(
 
     *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
     let is_lockdown = state.lockdown.load(Ordering::SeqCst);
-    state.lockdown.store(false, Ordering::SeqCst);
+    state.clear_lockdown_if_heartbeat();
 
     let body = serde_json::json!({
         "agent_id":  state.config.agent_id,

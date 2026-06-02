@@ -58,9 +58,7 @@ async fn check_once(state: &AppState) {
         if let Err(e2) = super::apply_emergency() {
             error!(error = %e2, "emergency ruleset also failed — lockdown");
         }
-        state
-            .lockdown
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        state.set_lockdown(crate::state::LockdownReason::NftablesFailure);
     } else {
         info!("nftables auto-restored successfully");
     }

@@ -203,9 +203,7 @@ async fn command_dispatch(
         // Handled here so WS path can also process it via run_verified_command.
         "agent.heartbeat_ack" => {
             *state.last_heartbeat.lock().unwrap() = std::time::Instant::now();
-            state
-                .lockdown
-                .store(false, std::sync::atomic::Ordering::SeqCst);
+            state.clear_lockdown_if_heartbeat();
             Ok(json!({ "ok": true }))
         }
         other => {

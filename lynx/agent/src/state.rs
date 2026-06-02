@@ -6,12 +6,25 @@ use std::sync::{
 };
 use std::time::Instant;
 
+/// Tracks why the agent entered lockdown.
+/// Only `Heartbeat` (and `None`) can be cleared by a `heartbeat_ack`.
+/// All other reasons require a manual service restart to clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockdownReason {
+    Heartbeat,
+    PgUnreachable,
+    IncompatibleSoftware,
+    NftablesFailure,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
     pub config: Arc<Config>,
-    /// Set to true when heartbeat is lost — agent enters lockdown
+    /// Set to true when the agent enters lockdown.
     pub lockdown: Arc<AtomicBool>,
+    /// The reason the agent entered lockdown, if any.
+    pub lockdown_reason: Arc<Mutex<Option<LockdownReason>>>,
     /// Last known-good nftables checksum after apply(). None = no ruleset applied yet.
     pub nft_checksum: Arc<Mutex<Option<String>>>,
     /// Per-chain checksums captured after each successful apply() — used for divergence attribution.
@@ -46,6 +59,26 @@ pub struct AppState {
 impl AppState {
     pub fn is_locked_down(&self) -> bool {
         self.lockdown.load(Ordering::SeqCst)
+    }
+
+    /// Enter lockdown with an explicit reason.
+    pub fn set_lockdown(&self, reason: LockdownReason) {
+        self.lockdown.store(true, Ordering::SeqCst);
+        *self.lockdown_reason.lock().unwrap() = Some(reason);
+    }
+
+    /// Clear lockdown only when the reason is `Heartbeat` or `None`.
+    /// Reasons such as `PgUnreachable`, `IncompatibleSoftware`, and
+    /// `NftablesFailure` require a manual service restart to clear.
+    pub fn clear_lockdown_if_heartbeat(&self) {
+        let mut guard = self.lockdown_reason.lock().unwrap();
+        match *guard {
+            None | Some(LockdownReason::Heartbeat) => {
+                self.lockdown.store(false, Ordering::SeqCst);
+                *guard = None;
+            }
+            _ => {}
+        }
     }
 
     /// Returns true if the command is within the 100/min limit, false if it should be rejected.
