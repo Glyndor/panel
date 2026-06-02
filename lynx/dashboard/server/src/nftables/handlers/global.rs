@@ -211,7 +211,7 @@ async fn push_both_chains(
         state.config.as_ref(),
         agent_id,
         user_id,
-        "admin",
+        "write",
         &input_cmd,
     ) else {
         return false;
@@ -220,7 +220,7 @@ async fn push_both_chains(
         state.config.as_ref(),
         agent_id,
         user_id,
-        "admin",
+        "write",
         &output_cmd,
     ) else {
         return false;

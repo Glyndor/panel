@@ -161,8 +161,8 @@ pub async fn push_local_rules(
         "rules": output_body,
     });
 
-    let signed_in = sign_command(&state.config, agent.id, user.user_id, "admin", &input_cmd)?;
-    let signed_out = sign_command(&state.config, agent.id, user.user_id, "admin", &output_cmd)?;
+    let signed_in = sign_command(&state.config, agent.id, user.user_id, "write", &input_cmd)?;
+    let signed_out = sign_command(&state.config, agent.id, user.user_id, "write", &output_cmd)?;
 
     let ok_in = {
         let v = serde_json::to_value(&signed_in).unwrap_or_default();
