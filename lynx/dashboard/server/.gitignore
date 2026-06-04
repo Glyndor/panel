@@ -1,6 +1,3 @@
-# Claude / AI agent files
-GAP_ANALYSIS.md
-
 # Coverage & profiling
 *.profraw
 *.profdata

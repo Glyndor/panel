@@ -10,10 +10,6 @@ target/
 .DS_Store
 **/.DS_Store
 
-# AI tools — nothing AI-related goes to the repo
-CLAUDE.md
-.claude/
-**/.claude/
 **/.agents/
 **/skills-lock.json
 .cursor/
