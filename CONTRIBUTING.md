@@ -1,8 +1,16 @@
-# Contributing to Lynx
+# Contributing to Lynx (panel)
 
-Lynx is a self-hosted VPS & container manager built in Rust and Next.js. Contributions are welcome — bug fixes, features, tests, and documentation.
+Lynx is a self-hosted VPS & container manager built in Rust and Next.js.
 
-Contributions are voluntary and unpaid. If you find Lynx useful and want to support its development, [GitHub Sponsors](https://github.com/sponsors/Jaro-c) is appreciated.
+Start with the [organization-wide contributing guide](https://github.com/Glyndor/.github/blob/main/CONTRIBUTING.md) —
+it covers the contribution model (invitation-only write access), the branch
+flow (`topic → develop → main`, **all** merges via PR, no direct pushes), commit
+conventions and the English-only policy. This file adds what is specific to
+this repository.
+
+The agent and the compose translator live in their own repositories:
+[panel-agent](https://github.com/Glyndor/panel-agent) and
+[podman-compose](https://github.com/Glyndor/podman-compose).
 
 ---
 
@@ -10,36 +18,24 @@ Contributions are voluntary and unpaid. If you find Lynx useful and want to supp
 
 - Search existing issues and PRs before opening new ones
 - For large changes, open an issue first to discuss the approach
-- All contributions must be in English — code, comments, commits, PR descriptions
-
----
-
-## Branches
-
-| Branch | Purpose |
-|--------|---------|
-| `main` | Production. Never push directly. Merge via PR from `develop` only. |
-| `develop` | Working branch. Direct push allowed for maintainers. PRs target this branch. |
 
 ---
 
 ## Development Setup
 
-**Agent (Rust):**
+**Dashboard backend (Rust):**
+
 ```bash
 cd lynx
-cargo build -p lynx-agent
-cargo test -p lynx-agent
+SQLX_OFFLINE=true cargo build -p lynx-dashboard-server
+SQLX_OFFLINE=true cargo test -p lynx-dashboard-server
 ```
 
-**Dashboard backend (Rust):**
-```bash
-cd lynx
-cargo build -p lynx-dashboard-server
-cargo test -p lynx-dashboard-server
-```
+`sqlx` compile-time checks use the committed `.sqlx` cache. To run against a
+real database, see `lynx/dashboard/server/.env` and start PostgreSQL locally.
 
 **Dashboard frontend (Next.js):**
+
 ```bash
 cd lynx/dashboard/ui
 bun install
@@ -47,6 +43,7 @@ bun dev
 ```
 
 **Lint:**
+
 ```bash
 bash scripts/lint.sh   # shellcheck on all .sh files
 ```
@@ -55,10 +52,11 @@ bash scripts/lint.sh   # shellcheck on all .sh files
 
 ## Pull Requests
 
-- Squash merge only — one commit per PR on `main`
+- Target `develop`. Squash merge only — one commit per PR
 - Commits must be **GPG or SSH signed** — unsigned commits are rejected
 - Keep PRs focused: one concern per PR
-- Fill out the PR template completely
+- Fill out the PR template completely — changes touching the installer or
+  firewall must be tested on a real VM/VPS
 
 ---
 
@@ -67,7 +65,7 @@ bash scripts/lint.sh   # shellcheck on all .sh files
 Conventional Commits format:
 
 ```
-feat(agent): add PSK rotation without tunnel restart
+feat(dashboard): add PSK rotation without tunnel restart
 fix(dashboard): correct nonce cleanup interval
 chore(ci): update ubuntu runner to 24.04
 ```
@@ -78,18 +76,15 @@ Subject ≤ 50 characters. Body only when the "why" isn't obvious from the code.
 
 ## Versioning
 
-Two independent release tracks:
-
-- `dashboard@x.y.z` — dashboard backend + frontend
-- `agent@x.y.z` — agent binary
-
-A release on one track does not require a release on the other. Tags trigger the corresponding release workflow.
+This repository releases as `dashboard@x.y.z` (backend + frontend). Tags
+trigger the release workflow. The agent has its own track in
+[panel-agent](https://github.com/Glyndor/panel-agent).
 
 ---
 
 ## Code Style
 
-**Rust (agent + dashboard backend):**
+**Rust (dashboard backend):**
 - `cargo fmt` before committing
 - `cargo clippy -- -D warnings` must pass
 - No `unwrap()` in production paths — use proper error handling
@@ -123,7 +118,8 @@ A release on one track does not require a release on the other. Tags trigger the
 
 **VM tests — required for certain changes:**
 
-Some features cannot be tested in CI (nftables, WireGuard, Podman, systemd). These require local VMs:
+Some features cannot be tested in CI (nftables, WireGuard, Podman, systemd).
+These require local VMs:
 
 | Area | Environment |
 |------|-------------|
@@ -132,7 +128,7 @@ Some features cannot be tested in CI (nftables, WireGuard, Podman, systemd). The
 | Podman containers, org isolation | VM local |
 | Auto-update binary swap | VM local |
 | Installation + incompatible software | VM local |
-| Agent ↔ dashboard connectivity | 2 VMs |
+| Dashboard ↔ agent connectivity | 2 VMs |
 | Migration (dashboard or agent) | 2–3 VMs |
 
 If your change affects these areas, note in your PR which VM scenarios you ran.

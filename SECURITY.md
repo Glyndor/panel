@@ -7,10 +7,10 @@
 **Do not open a public GitHub issue for security vulnerabilities.**
 
 Report via GitHub's private vulnerability disclosure:  
-[**Report a vulnerability →**](https://github.com/Jaro-c/Lynx/security/advisories/new)
+[**Report a vulnerability →**](https://github.com/Glyndor/panel/security/advisories/new)
 
 Include:
-- Component affected (`dashboard` / `agent` / installer)
+- Component affected (`dashboard` / installer — for the agent use [Glyndor/panel-agent](https://github.com/Glyndor/panel-agent/security/advisories/new))
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact

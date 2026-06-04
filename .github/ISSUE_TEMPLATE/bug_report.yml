@@ -1,6 +1,6 @@
 name: Bug report
 description: Report a bug or unexpected behavior in Lynx.
-labels: ["bug"]
+labels: ["type:bug", "status:triage"]
 body:
   - type: markdown
     attributes:
@@ -13,7 +13,7 @@ body:
       label: Component
       options:
         - Dashboard
-        - Agent
+        - Agent (file it in Glyndor/panel-agent instead)
         - Installer
         - Other
     validations:
