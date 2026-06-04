@@ -10,16 +10,6 @@ target/
 .DS_Store
 **/.DS_Store
 
-**/.agents/
-**/skills-lock.json
-.cursor/
-**/.cursor/
-.windsurf/
-**/.windsurf/
-.aider*
-.continue/
-**/.continue/
-
 # Env files (real ones — .env.example is tracked)
 .env
 .env.local
@@ -28,8 +18,6 @@ target/
 # Playwright
 **/playwright-report/
 **/test-results/
-.playwright-mcp/
-**/.playwright-mcp/
 
 # FUSE filesystem temp files (Linux file manager / gvfs)
 .fuse_hidden*
@@ -37,4 +25,3 @@ target/
 # Editor
 *.swp
 *.swo
-PROGRESS.md
