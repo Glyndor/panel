@@ -1,6 +1,6 @@
 name: Feature request
 description: Propose a new feature or improvement for Lynx.
-labels: ["enhancement"]
+labels: ["type:feature", "status:triage"]
 body:
   - type: dropdown
     id: component
