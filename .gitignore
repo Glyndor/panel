@@ -14,8 +14,6 @@ target/
 **/skills-lock.json
 .cursor/
 **/.cursor/
-.copilot/
-**/.copilot/
 .windsurf/
 **/.windsurf/
 .aider*
