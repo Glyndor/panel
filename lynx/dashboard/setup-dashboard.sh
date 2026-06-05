@@ -599,7 +599,7 @@ done
 log_section "Downloading core binaries"
 
 GITHUB_REPO="Glyndor/panel"
-RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+RELEASE_VERIFY_KEY_B64="APh+kh61dJeT0HzG+KQXELzDjK4ccvqY9K+FptOZ3+Y="
 
 _ARCH=$(uname -m)
 case "$_ARCH" in
