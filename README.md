@@ -10,7 +10,6 @@
 
   [![CI — Agent](https://github.com/Jaro-c/Lynx/actions/workflows/agent.yml/badge.svg)](https://github.com/Jaro-c/Lynx/actions/workflows/agent.yml)
   [![CI — Dashboard](https://github.com/Jaro-c/Lynx/actions/workflows/dashboard-server.yml/badge.svg)](https://github.com/Jaro-c/Lynx/actions/workflows/dashboard-server.yml)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   ![Rust](https://img.shields.io/badge/Agent-Rust-orange?logo=rust)
   ![Next.js](https://img.shields.io/badge/Dashboard-Next.js-black?logo=next.js)
 
@@ -242,7 +241,7 @@ Changes in these areas require local VMs — note in your PR which scenarios you
 
 ## 📄 License
 
-[MIT](LICENSE) — © 2026 [Jaro-c](https://github.com/Jaro-c)
+[Apache-2.0](LICENSE) — © 2026 [Jaro-c](https://github.com/Jaro-c)
 
 <div align="center">
   <br />
