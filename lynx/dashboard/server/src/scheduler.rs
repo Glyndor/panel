@@ -3,8 +3,10 @@ use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
 
-const GITHUB_REPO: &str = "Jaro-c/Lynx";
-const GITHUB_API_RELEASES: &str = "https://api.github.com/repos/Jaro-c/Lynx/releases";
+const DASHBOARD_REPO: &str = "Glyndor/panel";
+const DASHBOARD_API_RELEASES: &str = "https://api.github.com/repos/Glyndor/panel/releases";
+const AGENT_REPO: &str = "Glyndor/panel-agent";
+const AGENT_API_RELEASES: &str = "https://api.github.com/repos/Glyndor/panel-agent/releases";
 
 const CHECK_INTERVAL_SECS: u64 = 3600;
 const ROTATION_INTERVAL_DAYS: i64 = 90;
@@ -42,47 +44,15 @@ async fn check_releases(state: &AppState) {
         }
     };
 
-    let releases: Vec<serde_json::Value> = match client
-        .get(GITHUB_API_RELEASES)
-        .send()
+    // Agent and dashboard ship from separate repositories since the
+    // extraction — each one gets its own release listing.
+    let latest_agent = fetch_releases(&client, AGENT_API_RELEASES)
         .await
-        .and_then(|r| r.error_for_status())
-        .map(|r| r.json())
-    {
-        Ok(f) => match f.await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!("scheduler: failed to parse GitHub releases: {e}");
-                return;
-            }
-        },
-        Err(e) => {
-            tracing::warn!("scheduler: GitHub API request failed: {e}");
-            return;
-        }
-    };
+        .and_then(|releases| latest_release_version(&releases, "v"));
 
-    let latest_agent = releases
-        .iter()
-        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
-        .filter(|r| r.get("draft").and_then(|v| v.as_bool()) != Some(true))
-        .filter_map(|r| r["tag_name"].as_str())
-        .filter(|t| t.starts_with("agent@"))
-        .map(|t| t.trim_start_matches("agent@"))
-        .filter_map(|s| parse_semver(s).map(|v| (s, v)))
-        .max_by_key(|(_, v)| *v)
-        .map(|(s, _)| s.to_string());
-
-    let latest_dashboard = releases
-        .iter()
-        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
-        .filter(|r| r.get("draft").and_then(|v| v.as_bool()) != Some(true))
-        .filter_map(|r| r["tag_name"].as_str())
-        .filter(|t| t.starts_with("dashboard@"))
-        .map(|t| t.trim_start_matches("dashboard@"))
-        .filter_map(|s| parse_semver(s).map(|v| (s, v)))
-        .max_by_key(|(_, v)| *v)
-        .map(|(s, _)| s.to_string());
+    let latest_dashboard = fetch_releases(&client, DASHBOARD_API_RELEASES)
+        .await
+        .and_then(|releases| latest_release_version(&releases, "dashboard@"));
 
     if let Some(ref ver) = latest_agent {
         tracing::info!(version = %ver, "scheduler: latest agent release detected");
@@ -99,6 +69,43 @@ async fn check_releases(state: &AppState) {
             trigger_dashboard_update(state, ver).await;
         }
     }
+}
+
+/// Fetch the release list of a repository from the GitHub API.
+async fn fetch_releases(client: &reqwest::Client, url: &str) -> Option<Vec<serde_json::Value>> {
+    match client
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map(|r| r.json())
+    {
+        Ok(f) => match f.await {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!(url, "scheduler: failed to parse GitHub releases: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(url, "scheduler: GitHub API request failed: {e}");
+            None
+        }
+    }
+}
+
+/// Highest published (non-draft, non-prerelease) version among tags with the
+/// given prefix, returned without the prefix.
+fn latest_release_version(releases: &[serde_json::Value], tag_prefix: &str) -> Option<String> {
+    releases
+        .iter()
+        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
+        .filter(|r| r.get("draft").and_then(|v| v.as_bool()) != Some(true))
+        .filter_map(|r| r["tag_name"].as_str())
+        .filter_map(|t| t.strip_prefix(tag_prefix))
+        .filter_map(|s| parse_semver(s).map(|v| (s, v)))
+        .max_by_key(|(_, v)| *v)
+        .map(|(s, _)| s.to_string())
 }
 
 /// Parse a semver string into a (major, minor, patch) tuple for ordering.
@@ -168,10 +175,10 @@ async fn dispatch_updates_if_needed(state: &AppState, latest: &str) {
     for agent in &outdated {
         let arch = agent.arch.as_deref().unwrap_or("x86_64");
         let download_url = format!(
-            "https://github.com/{GITHUB_REPO}/releases/download/agent@{latest}/lynx-agent-linux-{arch}"
+            "https://github.com/{AGENT_REPO}/releases/download/v{latest}/lynx-agent-linux-{arch}"
         );
         let sig_url = format!(
-            "https://github.com/{GITHUB_REPO}/releases/download/agent@{latest}/lynx-agent-linux-{arch}.sig"
+            "https://github.com/{AGENT_REPO}/releases/download/v{latest}/lynx-agent-linux-{arch}.sig"
         );
         let command = serde_json::json!({
             "type": "update.self",
@@ -228,17 +235,16 @@ async fn trigger_dashboard_update(state: &AppState, version: &str) {
         "aarch64" => "arm64",
         a => a,
     };
-    let github_repo = "Jaro-c/Lynx";
     let backend_url = format!(
-        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-backend-linux-{arch}"
+        "https://github.com/{DASHBOARD_REPO}/releases/download/dashboard@{version}/lynx-dashboard-backend-linux-{arch}"
     );
     let backend_sig = format!("{backend_url}.sig");
     let frontend_url = format!(
-        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-frontend-linux-{arch}"
+        "https://github.com/{DASHBOARD_REPO}/releases/download/dashboard@{version}/lynx-dashboard-frontend-linux-{arch}"
     );
     let frontend_sig = format!("{frontend_url}.sig");
     let frontend_assets_url = format!(
-        "https://github.com/{github_repo}/releases/download/dashboard@{version}/lynx-dashboard-frontend-assets-linux-{arch}.tar.gz"
+        "https://github.com/{DASHBOARD_REPO}/releases/download/dashboard@{version}/lynx-dashboard-frontend-assets-linux-{arch}.tar.gz"
     );
     let frontend_assets_sig = format!("{frontend_assets_url}.sig");
 

@@ -220,12 +220,12 @@ async fn dispatch_update_ws(state: &AppState, agent_id: Uuid, version: &str) {
     .flatten()
     .flatten()
     .unwrap_or_else(|| "x86_64".to_string());
-    let github_repo = "Jaro-c/Lynx";
+    let agent_repo = "Glyndor/panel-agent";
     let download_url = format!(
-        "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-{arch}"
+        "https://github.com/{agent_repo}/releases/download/v{version}/lynx-agent-linux-{arch}"
     );
     let sig_url = format!(
-        "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-{arch}.sig"
+        "https://github.com/{agent_repo}/releases/download/v{version}/lynx-agent-linux-{arch}.sig"
     );
     let command = serde_json::json!({
         "type": "update.self",
@@ -269,12 +269,12 @@ async fn dispatch_update(
     version: &str,
     arch: &str,
 ) {
-    let github_repo = "Jaro-c/Lynx";
+    let agent_repo = "Glyndor/panel-agent";
     let download_url = format!(
-        "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-{arch}"
+        "https://github.com/{agent_repo}/releases/download/v{version}/lynx-agent-linux-{arch}"
     );
     let sig_url = format!(
-        "https://github.com/{github_repo}/releases/download/agent@{version}/lynx-agent-linux-{arch}.sig"
+        "https://github.com/{agent_repo}/releases/download/v{version}/lynx-agent-linux-{arch}.sig"
     );
     let command = serde_json::json!({
         "type": "update.self",
