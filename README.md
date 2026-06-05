@@ -8,8 +8,7 @@
 
   <br />
 
-  [![CI — Agent](https://github.com/Jaro-c/Lynx/actions/workflows/agent.yml/badge.svg)](https://github.com/Jaro-c/Lynx/actions/workflows/agent.yml)
-  [![CI — Dashboard](https://github.com/Jaro-c/Lynx/actions/workflows/dashboard-server.yml/badge.svg)](https://github.com/Jaro-c/Lynx/actions/workflows/dashboard-server.yml)
+  [![CI — Dashboard](https://github.com/Glyndor/panel/actions/workflows/dashboard-server.yml/badge.svg)](https://github.com/Glyndor/panel/actions/workflows/dashboard-server.yml)
   ![Rust](https://img.shields.io/badge/Agent-Rust-orange?logo=rust)
   ![Next.js](https://img.shields.io/badge/Dashboard-Next.js-black?logo=next.js)
 
@@ -204,7 +203,7 @@ bun dev
 
 The agent and the compose translator live in
 [panel-agent](https://github.com/Glyndor/panel-agent) and
-[podman-compose](https://github.com/Glyndor/podman-compose).
+[podup](https://github.com/Glyndor/podup).
 
 <details>
 <summary><strong>VM test matrix</strong></summary>

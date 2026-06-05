@@ -36,7 +36,7 @@ export default async function RegisterPage({ params }: { params: Promise<{ local
 				{" · "}
 				<a
 					className="font-medium text-foreground hover:underline"
-					href="https://github.com/Jaro-c/Lynx"
+					href="https://github.com/Glyndor/panel"
 					rel="noopener noreferrer"
 					target="_blank"
 				>
