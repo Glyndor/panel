@@ -142,7 +142,7 @@ _verify_release_sig() {
 import sys, base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+pub_b64 = "APh+kh61dJeT0HzG+KQXELzDjK4ccvqY9K+FptOZ3+Y="
 pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
 
 with open(sys.argv[1], "rb") as f:
