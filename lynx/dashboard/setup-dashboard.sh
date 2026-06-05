@@ -428,7 +428,7 @@ _require_cmd() {
 }
 
 _apt_ensure podman         podman
-# podman-compose replaced by `lynx-compose` (Rust binary shipped with the release),
+# podman-compose replaced by `podup` (Rust binary shipped with the release),
 # which removes the python3 / pip3 runtime dependency entirely.
 # openssl replaced by `lynx-dashboard-backend` subcommands for random/keypair/cert ops.
 _apt_ensure nft            nftables
@@ -598,8 +598,8 @@ done
 
 log_section "Downloading core binaries"
 
-GITHUB_REPO="Jaro-c/Lynx"
-RELEASE_VERIFY_KEY_B64="OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+GITHUB_REPO="Glyndor/panel"
+RELEASE_VERIFY_KEY_B64="APh+kh61dJeT0HzG+KQXELzDjK4ccvqY9K+FptOZ3+Y="
 
 _ARCH=$(uname -m)
 case "$_ARCH" in
@@ -700,27 +700,55 @@ chmod 755 "$BACKEND_TMP"
 mv "$BACKEND_TMP" "$BACKEND_FILE"
 log_ok "Backend installed: ${BACKEND_FILE}"
 
-log_info "Downloading lynx-compose binary..."
-COMPOSE_FILE_BIN="${BIN_DIR}/lynx-compose"
-COMPOSE_TMP="${BIN_DIR}/lynx-compose.new"
+# podup ships from its own repository since the extraction — resolve its
+# latest release independently of the dashboard release.
+COMPOSE_REPO="Glyndor/podup"
+if [[ -n "${LYNX_RELEASE_BASE:-}" ]]; then
+    COMPOSE_RELEASE_BASE="${LYNX_RELEASE_BASE}"
+else
+    log_info "Fetching latest podup release..."
+    COMPOSE_TAG=$(curl -fsSL \
+        "https://api.github.com/repos/${COMPOSE_REPO}/releases" \
+        | python3 -c "
+import sys, json
+releases = json.load(sys.stdin)
+tags = [r['tag_name'] for r in releases
+        if r.get('tag_name','').startswith('v')
+        and not r.get('prerelease') and not r.get('draft')]
+if tags:
+    def ver(t): return tuple(int(x) for x in t.lstrip('v').split('.'))
+    print(max(tags, key=ver))
+" 2>/dev/null)
+
+    if [[ -z "$COMPOSE_TAG" ]]; then
+        log_error "No podup release found in ${COMPOSE_REPO}"
+        exit 1
+    fi
+    log_ok "Latest podup release: ${COMPOSE_TAG}"
+    COMPOSE_RELEASE_BASE="https://github.com/${COMPOSE_REPO}/releases/download/${COMPOSE_TAG}"
+fi
+
+log_info "Downloading podup binary..."
+COMPOSE_FILE_BIN="${BIN_DIR}/podup"
+COMPOSE_TMP="${BIN_DIR}/podup.new"
 
 curl -fsSL --max-time 300 \
-    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}" \
+    "${COMPOSE_RELEASE_BASE}/podup-linux-${ARCH}" \
     -o "$COMPOSE_TMP"
 curl -fsSL --max-time 30 \
-    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}.sig" \
+    "${COMPOSE_RELEASE_BASE}/podup-linux-${ARCH}.sig" \
     -o "${COMPOSE_TMP}.sig"
 
-log_info "Verifying lynx-compose signature..."
+log_info "Verifying podup signature..."
 if ! _verify_release_sig "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"; then
-    log_error "lynx-compose signature verification FAILED — aborting"
+    log_error "podup signature verification FAILED — aborting"
     rm -f "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"
     exit 1
 fi
 rm -f "${COMPOSE_TMP}.sig"
 chmod 755 "$COMPOSE_TMP"
 mv "$COMPOSE_TMP" "$COMPOSE_FILE_BIN"
-log_ok "lynx-compose installed: ${COMPOSE_FILE_BIN}"
+log_ok "podup installed: ${COMPOSE_FILE_BIN}"
 
 # --- Generate secrets -------------------------------------------------------
 #
@@ -1059,7 +1087,7 @@ log_ok "Version: ${LATEST_TAG#dashboard@}"
 log_section "Starting services"
 
 # Remove any stale postgres_data volume from a partial previous install.
-# lynx-compose does not prefix named volumes with the project name so the
+# podup does not prefix named volumes with the project name so the
 # volume is always called 'postgres_data'. Stale data causes postgres to skip
 # init on the next clean install, leaving lynx_dashboard_app with no password.
 # Use --force and a direct directory removal as belt-and-suspenders: Podman
@@ -1071,7 +1099,7 @@ rm -rf /var/lib/containers/storage/volumes/postgres_data 2>/dev/null || true
 
 # 1. PostgreSQL
 log_info "Starting PostgreSQL..."
-"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
+"$BIN_DIR/podup" -p lynx-dashboard -f "$COMPOSE_FILE" up -d postgres
 
 log_info "Waiting for PostgreSQL to be healthy..."
 for i in $(seq 1 30); do
@@ -1122,7 +1150,7 @@ log_ok "PostgreSQL app user and encryption initialized"
 
 # 2. Valkey
 log_info "Starting Valkey..."
-"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d valkey
+"$BIN_DIR/podup" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d valkey
 
 log_info "Waiting for Valkey to be healthy..."
 for i in $(seq 1 30); do
@@ -1200,7 +1228,7 @@ _nft_ensure_container_dns
 
 # 3. Backend
 log_info "Starting backend..."
-"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d backend
+"$BIN_DIR/podup" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d backend
 
 log_info "Waiting for backend to be healthy..."
 for i in $(seq 1 40); do
@@ -1219,7 +1247,7 @@ done
 
 # 4. Frontend
 log_info "Starting frontend..."
-"$BIN_DIR/lynx-compose" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d frontend
+"$BIN_DIR/podup" -p lynx-dashboard -f "$COMPOSE_FILE" up --no-recreate -d frontend
 
 log_info "Waiting for frontend to be healthy..."
 for i in $(seq 1 40); do
@@ -1581,5 +1609,5 @@ echo -e "  Back up these files — loss means permanent data loss:"
 echo -e "  ${BOLD}/etc/lynx/pg-keyring/lynx.keyring${RESET}  ← pg_tde encryption keyring"
 echo -e "  ${BOLD}/etc/lynx/secrets/lynx-dashboard-kek${RESET}  ← application KEK"
 echo ""
-echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Jaro-c/Lynx"
+echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Glyndor/panel"
 echo ""

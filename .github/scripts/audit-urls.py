@@ -33,8 +33,6 @@ SUPPRESS_RE = re.compile(r"//\s*audit-urls:\s*ok")
 # Only files that perform outbound binary downloads.
 # Adding a new download path outside these files requires a conscious update here.
 SCAN_FILES = [
-    "lynx/agent/src/update/mod.rs",
-    "lynx/agent/src/update/fallback.rs",
     "lynx/dashboard/server/src/update.rs",
     "lynx/dashboard/server/src/scheduler.rs",
 ]

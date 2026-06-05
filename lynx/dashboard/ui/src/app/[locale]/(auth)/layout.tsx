@@ -39,7 +39,7 @@ export default async function AuthLayout({
 					{" · "}
 					<a
 						className="text-slate-500 transition-colors hover:text-slate-300"
-						href="https://github.com/Jaro-c/Lynx"
+						href="https://github.com/Glyndor/panel"
 						rel="noopener noreferrer"
 						target="_blank"
 					>

@@ -41,7 +41,7 @@ log_section() { echo -e "\n${BOLD}${CYAN}=== $* ===${RESET}"; }
 
 BIN_DIR="/etc/lynx/bin"
 FRONTEND_DIR="/etc/lynx/frontend"
-GITHUB_REPO="Jaro-c/Lynx"
+GITHUB_REPO="Glyndor/panel"
 VERSION_FILE="$BIN_DIR/lynx-dashboard-version"
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-compose.yml"
 FORCE=false
@@ -142,7 +142,7 @@ _verify_release_sig() {
 import sys, base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-pub_b64 = "OsBV4t+vQSn10FAI8UzAJEBS0IUqp8D2bZtlQYD8j+Q="
+pub_b64 = "APh+kh61dJeT0HzG+KQXELzDjK4ccvqY9K+FptOZ3+Y="
 pub_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64 + "=="))
 
 with open(sys.argv[1], "rb") as f:
@@ -183,29 +183,52 @@ rm -f "${BACKEND_TMP}.sig"
 chmod 755 "$BACKEND_TMP"
 log_ok "Backend verified"
 
-# --- Download lynx-compose --------------------------------------------------
+# --- Download podup --------------------------------------------------
 
-log_section "Downloading lynx-compose binary"
+log_section "Downloading podup binary"
 
-COMPOSE_FILE_BIN="$BIN_DIR/lynx-compose"
-COMPOSE_TMP="$BIN_DIR/lynx-compose.new"
+# podup ships from its own repository since the extraction — resolve its
+# latest release independently of the dashboard release.
+COMPOSE_REPO="Glyndor/podup"
+COMPOSE_TAG=$(curl -fsSL \
+    "https://api.github.com/repos/${COMPOSE_REPO}/releases" \
+    | python3 -c "
+import sys, json
+releases = json.load(sys.stdin)
+tags = [r['tag_name'] for r in releases
+        if r.get('tag_name','').startswith('v')
+        and not r.get('prerelease') and not r.get('draft')]
+if tags:
+    def ver(t): return tuple(int(x) for x in t.lstrip('v').split('.'))
+    print(max(tags, key=ver))
+" 2>/dev/null)
+
+if [[ -z "$COMPOSE_TAG" ]]; then
+    log_error "No podup release found in ${COMPOSE_REPO}"
+    exit 1
+fi
+log_ok "Latest podup release: ${COMPOSE_TAG}"
+COMPOSE_RELEASE_BASE="https://github.com/${COMPOSE_REPO}/releases/download/${COMPOSE_TAG}"
+
+COMPOSE_FILE_BIN="$BIN_DIR/podup"
+COMPOSE_TMP="$BIN_DIR/podup.new"
 
 curl -fsSL --max-time 300 \
-    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}" \
+    "${COMPOSE_RELEASE_BASE}/podup-linux-${ARCH}" \
     -o "$COMPOSE_TMP"
 curl -fsSL --max-time 30 \
-    "${RELEASE_BASE}/lynx-compose-linux-${ARCH}.sig" \
+    "${COMPOSE_RELEASE_BASE}/podup-linux-${ARCH}.sig" \
     -o "${COMPOSE_TMP}.sig"
 
-log_info "Verifying lynx-compose signature..."
+log_info "Verifying podup signature..."
 if ! _verify_release_sig "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"; then
-    log_error "lynx-compose signature verification FAILED — aborting, current version intact"
+    log_error "podup signature verification FAILED — aborting, current version intact"
     rm -f "$BACKEND_TMP" "$COMPOSE_TMP" "${COMPOSE_TMP}.sig"
     exit 1
 fi
 rm -f "${COMPOSE_TMP}.sig"
 chmod 755 "$COMPOSE_TMP"
-log_ok "lynx-compose verified"
+log_ok "podup verified"
 
 # --- Download frontend ------------------------------------------------------
 
@@ -296,7 +319,7 @@ rm -f "$FRONTEND_ASSETS_TMP"
 
 log_info "Starting frontend container..."
 if ! podman start lynx-dashboard-frontend 2>/dev/null; then
-    /etc/lynx/bin/lynx-compose -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
+    /etc/lynx/bin/podup -p lynx-dashboard -f "$COMPOSE_FILE" up -d frontend 2>/dev/null || {
         log_error "Failed to start frontend container"
         if [[ -f "${FRONTEND_BIN_FILE}.prev" ]]; then
             log_warn "Restoring previous frontend binary..."
@@ -356,5 +379,5 @@ echo ""
 echo -e "  If something fails:"
 echo -e "    ${BOLD}lynx-dashboard-backend logs --errors${RESET}"
 echo ""
-echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Jaro-c/Lynx"
+echo -e "  ${BOLD}Made with love by Jaroc${RESET} — https://github.com/Glyndor/panel"
 echo ""

@@ -6,7 +6,7 @@
 #              Supports Dashboard and Agent installation.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Jaro-c/Lynx/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Glyndor/panel/main/install.sh | sudo bash
 #   sudo bash install.sh
 #
 # Requirements:
@@ -34,7 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # -----------------------------------------------------------------------------
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Error: this script must be run as root.${RESET}" >&2
-    echo -e "${YELLOW}Use: curl -fsSL https://raw.githubusercontent.com/Jaro-c/Lynx/main/install.sh | sudo bash${RESET}" >&2
+    echo -e "${YELLOW}Use: curl -fsSL https://raw.githubusercontent.com/Glyndor/panel/main/install.sh | sudo bash${RESET}" >&2
     exit 1
 fi
 
@@ -101,7 +101,18 @@ case "$OPTION" in
         if [[ "$OPTION" == "1" ]]; then
             exec "$SCRIPT_DIR/lynx/dashboard/setup-dashboard.sh"
         else
-            exec "$SCRIPT_DIR/lynx/agent/setup-agent.sh"
+            # The agent lives in its own repository since the extraction —
+            # fetch its installer and hand over to it.
+            AGENT_SETUP_URL="https://raw.githubusercontent.com/Glyndor/panel-agent/main/setup-agent.sh"
+            AGENT_SETUP_TMP="$(mktemp /tmp/setup-agent.XXXXXX.sh)"
+            echo -e "${CYAN}Fetching agent installer from Glyndor/panel-agent...${RESET}"
+            if ! curl -fsSL --max-time 60 "$AGENT_SETUP_URL" -o "$AGENT_SETUP_TMP"; then
+                echo -e "${RED}Failed to download the agent installer from ${AGENT_SETUP_URL}${RESET}" >&2
+                rm -f "$AGENT_SETUP_TMP"
+                exit 1
+            fi
+            chmod 700 "$AGENT_SETUP_TMP"
+            exec bash "$AGENT_SETUP_TMP"
         fi
         ;;
     *)

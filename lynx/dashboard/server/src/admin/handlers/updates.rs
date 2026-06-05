@@ -7,7 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const GITHUB_REPO: &str = "Jaro-c/Lynx";
+const DASHBOARD_REPO: &str = "Glyndor/panel";
+const AGENT_REPO: &str = "Glyndor/panel-agent";
 
 #[derive(Debug, Serialize)]
 pub struct UpdateCheckResponse {
@@ -41,7 +42,7 @@ pub async fn update_check(
         .build()
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
-    let api_url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
+    let api_url = format!("https://api.github.com/repos/{DASHBOARD_REPO}/releases/latest");
     let res = client
         .get(&api_url)
         .send()
@@ -60,6 +61,7 @@ pub async fn update_check(
     let latest = body["tag_name"]
         .as_str()
         .unwrap_or(&current)
+        .trim_start_matches("dashboard@")
         .trim_start_matches('v')
         .to_string();
 
@@ -125,14 +127,15 @@ pub async fn trigger_update(
         .build()
         .map_err(|e| AppError::Internal(anyhow::Error::from(e)))?;
 
+    // Agent releases live in their own repository with plain v* tags.
+    let agent_version = req.version.trim_start_matches('v');
+
     for agent in &agents {
         let download_url = format!(
-            "https://github.com/{GITHUB_REPO}/releases/download/{version}/lynx-agent-linux-x86_64",
-            version = req.version
+            "https://github.com/{AGENT_REPO}/releases/download/v{agent_version}/lynx-agent-linux-x86_64"
         );
         let sig_url = format!(
-            "https://github.com/{GITHUB_REPO}/releases/download/{version}/lynx-agent-linux-x86_64.sig",
-            version = req.version
+            "https://github.com/{AGENT_REPO}/releases/download/v{agent_version}/lynx-agent-linux-x86_64.sig"
         );
 
         let command = serde_json::json!({
