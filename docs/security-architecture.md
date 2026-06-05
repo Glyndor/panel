@@ -41,5 +41,5 @@ release is published and deployed automatically.
 | Component | Support |
 |-----------|---------|
 | `dashboard@latest` | ✅ Supported |
-| `agent@latest` ([panel-agent](https://github.com/Glyndor/panel-agent)) | ✅ Supported |
+| `panel-agent` latest ([releases](https://github.com/Glyndor/panel-agent/releases)) | ✅ Supported |
 | Older versions | ❌ No patches — update via auto-update |
