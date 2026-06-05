@@ -1,7 +1,5 @@
 [workspace]
 members = [
-    "agent",
-    "translators/compose",
     "dashboard/server",
 ]
 resolver = "2"
