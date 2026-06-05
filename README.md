@@ -241,7 +241,7 @@ Changes in these areas require local VMs — note in your PR which scenarios you
 
 ## 📄 License
 
-[Apache-2.0](LICENSE) — © 2026 [Jaro-c](https://github.com/Jaro-c)
+[Apache-2.0](LICENSE) — © 2026 [Glyndor](https://github.com/Glyndor)
 
 <div align="center">
   <br />
