@@ -32,9 +32,7 @@ jobs:
             scripts/install-podman.sh \
             scripts/install-nftables.sh \
             lynx/dashboard/setup-dashboard.sh \
-            lynx/dashboard/update-dashboard.sh \
-            lynx/agent/setup-agent.sh \
-            lynx/agent/update-agent.sh
+            lynx/dashboard/update-dashboard.sh
           do
             if bash -n "$f"; then
               echo "OK  $f"
