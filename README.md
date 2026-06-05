@@ -96,7 +96,7 @@ Agent-2 never exposes public ports for the project. All traffic enters through A
 ### Dashboard
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jaro-c/Lynx/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Glyndor/panel/main/install.sh | sudo bash
 ```
 
 The installer handles everything:
@@ -169,7 +169,72 @@ All executed and rejected commands are stored in a **hash-chained append-only au
 <summary><strong>Reporting a vulnerability</strong></summary>
 <br />
 
-See [SECURITY.md](SECURITY.md).
+See the [security policy](https://github.com/Glyndor/panel/security/policy) and
+the [security architecture](docs/security-architecture.md) for threat modeling.
+
+</details>
+
+---
+
+## 🛠 Development
+
+Contribution model, branch flow and code style live in the
+[organization contributing guide](https://github.com/Glyndor/.github/blob/main/CONTRIBUTING.md).
+Repo-specific setup:
+
+**Dashboard backend (Rust):**
+
+```bash
+cd lynx
+SQLX_OFFLINE=true cargo build -p lynx-dashboard-server
+SQLX_OFFLINE=true cargo test -p lynx-dashboard-server
+```
+
+`sqlx` compile-time checks use the committed `.sqlx` cache. To run against a
+real database, see `lynx/dashboard/server/.env` and start PostgreSQL locally.
+
+**Dashboard frontend (Next.js):**
+
+```bash
+cd lynx/dashboard/ui
+bun install
+bun dev
+```
+
+**Shell lint:** `bash scripts/lint.sh` (shellcheck on all `.sh` files).
+
+The agent and the compose translator live in
+[panel-agent](https://github.com/Glyndor/panel-agent) and
+[podman-compose](https://github.com/Glyndor/podman-compose).
+
+<details>
+<summary><strong>VM test matrix</strong></summary>
+<br />
+
+Some features cannot be tested in CI (nftables, WireGuard, Podman, systemd).
+Changes in these areas require local VMs — note in your PR which scenarios you ran:
+
+| Area | Environment |
+|------|-------------|
+| nftables rules, divergence detection | VM local |
+| WireGuard tunnel setup, PSK rotation | VM local (CAP_NET_ADMIN) |
+| Podman containers, org isolation | VM local |
+| Auto-update binary swap | VM local |
+| Installation + incompatible software | VM local |
+| Dashboard ↔ agent connectivity | 2 VMs |
+| Migration (dashboard or agent) | 2–3 VMs |
+
+</details>
+
+<details>
+<summary><strong>Out of scope — do not contribute</strong></summary>
+<br />
+
+- Docker support — incompatible by design (nftables/network isolation conflict)
+- Rollback / downgrade mechanisms — hotfix + auto-update is the model
+- Metrics persistence — metrics are real-time WebSocket only
+- SMTP integration — not planned
+- Changes that break backwards compatibility of migrations (additive-only)
 
 </details>
 
